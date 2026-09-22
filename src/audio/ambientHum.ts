@@ -8,16 +8,12 @@ const BUFFER_DURATION_SECONDS = 2;
  * pour l'instant, en attendant le pipeline d'assets audio de la fiche projet).
  */
 export class AmbientHum {
-  private readonly listener: THREE.AudioListener;
   private readonly sound: THREE.Audio;
   private started = false;
 
-  constructor(camera: THREE.Camera) {
-    this.listener = new THREE.AudioListener();
-    camera.add(this.listener);
-
-    this.sound = new THREE.Audio(this.listener);
-    this.sound.setBuffer(createHumBuffer(this.listener.context));
+  constructor(private readonly listener: THREE.AudioListener) {
+    this.sound = new THREE.Audio(listener);
+    this.sound.setBuffer(createHumBuffer(listener.context));
     this.sound.setLoop(true);
     this.sound.setVolume(HUM_VOLUME);
   }

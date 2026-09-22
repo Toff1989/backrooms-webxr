@@ -1,5 +1,6 @@
 import type { NoiseFunction2D } from "simplex-noise";
-import { CELL_SIZE, CHUNK_CELLS, PILLAR_SIZE, SPAWN_CLEARANCE_CELLS, WALL_THICKNESS } from "./constants";
+import { CELL_SIZE, CHUNK_CELLS, EXIT_CLEARANCE_CELLS, PILLAR_SIZE, SPAWN_CLEARANCE_CELLS, WALL_THICKNESS } from "./constants";
+import { getExitLocation, type ExitLocation } from "./exit";
 import type { LevelProfile } from "./levelProfile";
 import { coordinateHash01, stringSeedToInt } from "./rng";
 
@@ -28,7 +29,8 @@ export interface ChunkLayout {
  * Génère la disposition d'un chunk (murs + piliers) à partir de la seed du profil.
  * Fonction pure : chaque bord de cellule est identifié uniquement par ses coordonnées
  * globales, donc deux chunks voisins générés indépendamment restent cohérents entre
- * eux (pas de couture visible ni de trou de collision à la frontière).
+ * eux (pas de couture visible ni de trou de collision à la frontière). Un couloir est
+ * garanti dégagé entre le spawn et la sortie du level (voir `computeGuaranteedPathEdges`).
  */
 export function generateChunkLayout(
   profile: LevelProfile,
@@ -37,6 +39,9 @@ export function generateChunkLayout(
   chunkZ: number,
 ): ChunkLayout {
   const seedInt = stringSeedToInt(profile.seed);
+  const exitLocation = getExitLocation(profile);
+  const guaranteedPathEdges = computeGuaranteedPathEdges(exitLocation);
+
   const wallSegments: WallSegment[] = [];
   const pillarPositions: Array<{ x: number; z: number }> = [];
   const pillarObstacles: WallSegment[] = [];
@@ -51,7 +56,7 @@ export function generateChunkLayout(
       const originX = cellX * CELL_SIZE;
       const originZ = cellZ * CELL_SIZE;
 
-      if (hasWallEdge(profile, noise2D, seedInt, cellX, cellZ, "north")) {
+      if (hasWallEdge(profile, noise2D, seedInt, exitLocation, guaranteedPathEdges, cellX, cellZ, "north")) {
         wallSegments.push({
           minX: originX - halfThickness,
           maxX: originX + CELL_SIZE + halfThickness,
@@ -60,7 +65,7 @@ export function generateChunkLayout(
         });
       }
 
-      if (hasWallEdge(profile, noise2D, seedInt, cellX, cellZ, "west")) {
+      if (hasWallEdge(profile, noise2D, seedInt, exitLocation, guaranteedPathEdges, cellX, cellZ, "west")) {
         wallSegments.push({
           minX: originX - halfThickness,
           maxX: originX + halfThickness,
@@ -69,7 +74,8 @@ export function generateChunkLayout(
         });
       }
 
-      if (!isInsideSpawnClearance(cellX, cellZ) && coordinateHash01(seedInt, cellX, cellZ, 47) < profile.pillarProbability) {
+      const inClearance = isInsideSpawnClearance(cellX, cellZ) || isInsideExitClearance(cellX, cellZ, exitLocation);
+      if (!inClearance && coordinateHash01(seedInt, cellX, cellZ, 47) < profile.pillarProbability) {
         const pillarCenterX = originX + CELL_SIZE / 2;
         const pillarCenterZ = originZ + CELL_SIZE / 2;
         pillarPositions.push({ x: pillarCenterX, z: pillarCenterZ });
@@ -90,10 +96,19 @@ function isInsideSpawnClearance(cellX: number, cellZ: number): boolean {
   return Math.abs(cellX) <= SPAWN_CLEARANCE_CELLS && Math.abs(cellZ) <= SPAWN_CLEARANCE_CELLS;
 }
 
-function edgeTouchesSpawnClearance(cellX: number, cellZ: number, edge: WallEdge): boolean {
+function isInsideExitClearance(cellX: number, cellZ: number, exit: ExitLocation): boolean {
+  return Math.abs(cellX - exit.cellX) <= EXIT_CLEARANCE_CELLS && Math.abs(cellZ - exit.cellZ) <= EXIT_CLEARANCE_CELLS;
+}
+
+function edgeTouchesClearance(cellX: number, cellZ: number, edge: WallEdge, exit: ExitLocation): boolean {
   const neighborX = edge === "west" ? cellX - 1 : cellX;
   const neighborZ = edge === "north" ? cellZ - 1 : cellZ;
-  return isInsideSpawnClearance(cellX, cellZ) || isInsideSpawnClearance(neighborX, neighborZ);
+  return (
+    isInsideSpawnClearance(cellX, cellZ) ||
+    isInsideSpawnClearance(neighborX, neighborZ) ||
+    isInsideExitClearance(cellX, cellZ, exit) ||
+    isInsideExitClearance(neighborX, neighborZ, exit)
+  );
 }
 
 function wallDensityAt(profile: LevelProfile, noise2D: NoiseFunction2D, cellX: number, cellZ: number): number {
@@ -102,15 +117,63 @@ function wallDensityAt(profile: LevelProfile, noise2D: NoiseFunction2D, cellX: n
   return Math.min(0.9, Math.max(0, density));
 }
 
+function edgeKey(cellX: number, cellZ: number, edge: WallEdge): string {
+  return `${cellX},${cellZ},${edge}`;
+}
+
+/**
+ * Bord partagé entre deux cellules adjacentes (orthogonalement), sous la convention
+ * "chaque bord appartient à sa cellule nord/ouest" utilisée par `hasWallEdge`.
+ */
+function sharedEdgeKey(ax: number, az: number, bx: number, bz: number): string {
+  if (bx === ax + 1 && bz === az) return edgeKey(bx, bz, "west");
+  if (bx === ax - 1 && bz === az) return edgeKey(ax, az, "west");
+  if (bz === az + 1 && bx === ax) return edgeKey(bx, bz, "north");
+  if (bz === az - 1 && bx === ax) return edgeKey(ax, az, "north");
+  throw new Error(`cellules non adjacentes: (${ax},${az}) / (${bx},${bz})`);
+}
+
+/**
+ * Couloir garanti dégagé entre le spawn (0,0) et la sortie : un chemin en équerre
+ * (axe X puis axe Z), dont chaque bord traversé est forcé sans mur. Garantit que la
+ * sortie est toujours atteignable, indépendamment de la densité de murs du profil.
+ */
+function computeGuaranteedPathEdges(exit: ExitLocation): Set<string> {
+  const cells: Array<{ x: number; z: number }> = [{ x: 0, z: 0 }];
+  let x = 0;
+  let z = 0;
+  const stepX = Math.sign(exit.cellX);
+  while (x !== exit.cellX) {
+    x += stepX;
+    cells.push({ x, z });
+  }
+  const stepZ = Math.sign(exit.cellZ);
+  while (z !== exit.cellZ) {
+    z += stepZ;
+    cells.push({ x, z });
+  }
+
+  const edges = new Set<string>();
+  for (let i = 0; i < cells.length - 1; i++) {
+    const a = cells[i]!;
+    const b = cells[i + 1]!;
+    edges.add(sharedEdgeKey(a.x, a.z, b.x, b.z));
+  }
+  return edges;
+}
+
 function hasWallEdge(
   profile: LevelProfile,
   noise2D: NoiseFunction2D,
   seedInt: number,
+  exit: ExitLocation,
+  guaranteedPathEdges: Set<string>,
   cellX: number,
   cellZ: number,
   edge: WallEdge,
 ): boolean {
-  if (edgeTouchesSpawnClearance(cellX, cellZ, edge)) return false;
+  if (edgeTouchesClearance(cellX, cellZ, edge, exit)) return false;
+  if (guaranteedPathEdges.has(edgeKey(cellX, cellZ, edge))) return false;
 
   const density = wallDensityAt(profile, noise2D, cellX, cellZ);
   const salt = edge === "north" ? 11 : 23;

@@ -15,3 +15,6 @@ export const STREAM_RADIUS_CHUNKS = 2;
 
 /** Rayon (en cellules) autour de l'origine du monde toujours dégagé, pour le spawn. */
 export const SPAWN_CLEARANCE_CELLS = 2;
+
+/** Rayon (en cellules) autour de la sortie toujours dégagé. */
+export const EXIT_CLEARANCE_CELLS = 1;

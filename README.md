@@ -2,9 +2,10 @@
 
 Jeu d'exploration horrifique en VR, dans le navigateur (WebXR). Voir la fiche projet pour le concept complet.
 
-**État actuel : étape 3 de la roadmap (direction artistique VHS)** — scène WebXR, locomotion
-fluide + snap-turn, chunks infinis générés depuis une seed avec streaming et collisions, look VHS
-(shader matériaux, scanlines, overlay caméscope), néons, brouillard, ambiance sonore.
+**État actuel : étape 4 de la roadmap (levels)** — scène WebXR, locomotion fluide + snap-turn,
+génération par chunks streamés avec collisions, look VHS (shader matériaux, scanlines, overlay
+caméscope), néons, ambiance sonore, et maintenant des levels avec sortie signalée (son + lumière),
+difficulté progressive et compteur de profondeur.
 
 ## Stack
 
@@ -51,15 +52,18 @@ src/
     vhsOverlay.ts            Scanlines + bruit (quad shader fixé à la caméra, effet constant)
     camcorderHud.ts          Panneau caméscope (REC, horodatage, batterie, profondeur)
   world/
+    levelManager.ts          Orchestre la progression : profil par profondeur, sortie, transition
     chunkStreamer.ts        Charge/décharge les chunks autour du joueur (rayon 2 chunks)
     chunkMesh.ts             Construit les meshes THREE d'un chunk (murs fusionnés, piliers/néons instanciés)
+    exitBeacon.ts             Marqueur de sortie : anneau émissif pulsé + balise sonore positionnelle
     collision.ts             Résolution de collision cercle/AABB (plan XZ)
     materials.ts             Textures procédurales de substitution (en attendant Poliigon)
     vhsMaterial.ts            Effet VHS injecté dans les matériaux (onBeforeCompile) : grain,
                                aberration chromatique, quantification des couleurs, teinte jaunâtre
   shared/                    Logique pure, sans dépendance three.js — réutilisable côté serveur
     constants.ts             Constantes de la grille (taille cellule/chunk, rayon de streaming...)
-    levelProfile.ts          Profil de génération (seed, densité de murs, piliers)
+    levelProfile.ts          Profil de génération par profondeur (seed dérivée, difficulté progressive)
+    exit.ts                   Position de la sortie du level (fonction pure de la seed)
     rng.ts                   Hash déterministe par coordonnées + PRNG seedé (seedrandom)
     noise.ts                 Bruit simplex 2D seedé (simplex-noise)
     chunkLayout.ts           Génère la disposition (murs/piliers) d'un chunk depuis sa seed
@@ -81,13 +85,21 @@ src/
   `uCorruption` est déjà câblée pour l'intensité de glitch cumulable de l'étape 5, à 0 pour l'instant.
 - L'ambiance sonore est un bourdonnement procédural (Web Audio), sans fichier audio externe ; la
   lecture démarre au `sessionstart` XR pour respecter les politiques d'autoplay des navigateurs.
-- Pas de niveaux/sortie ni de profondeur pour l'instant : un unique profil génère un monde infini
-  dans toutes les directions (étape 4 de la roadmap pour la progression par niveaux). Le panneau
-  caméscope affiche déjà un emplacement "PROFONDEUR" prêt à être branché.
+- Chaque level a sa propre seed dérivée (`<runSeed>:<profondeur>`, `levelProfile.ts`) et sa propre
+  difficulté : densité de murs, probabilité de pilier et distance de la sortie augmentent avec la
+  profondeur (bornées par des plafonds). La seed de run est fixe côté client pour l'instant ; la
+  vraie seed aléatoire signée par le serveur (`POST /run/start`) arrive à l'étape 7.
+- La position de la sortie est dérivée de la seed (`exit.ts`) et un couloir en équerre entre le
+  spawn et la sortie est systématiquement forcé sans mur (`chunkLayout.ts`) : la sortie est donc
+  toujours atteignable, quelle que soit la densité de murs du profil.
+- Chaque level repart d'un monde régénéré autour de l'origine locale (`ChunkStreamer.setProfile`) :
+  pas de world persistant entre les levels, juste une seed différente à chaque descente.
+- Le passage au level suivant déclenche un bref pic de corruption VHS (`uCorruption`, déjà câblé à
+  l'étape 3) pour masquer la téléportation, en attendant le vrai système de glitchs de l'étape 5.
+- Le panneau caméscope affiche la profondeur réelle, mise à jour à chaque changement de level.
 
 ## Prochaines étapes (roadmap)
 
-4. Levels, sortie, profils de difficulté, compteur de profondeur
 5. Glitchs (pièges), labyrinthe dynamique
 6. Collection d'objets FR/EN, menu poignet, persistance IndexedDB
 7. Classement en ligne (API Node + SQLite, validation serveur)

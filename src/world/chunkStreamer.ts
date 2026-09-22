@@ -18,15 +18,26 @@ interface LoadedChunk {
  */
 export class ChunkStreamer {
   private readonly loaded = new Map<string, LoadedChunk>();
-  private readonly noise2D: NoiseFunction2D;
+  private noise2D: NoiseFunction2D;
+  private profile: LevelProfile;
   private currentChunkX = Number.NaN;
   private currentChunkZ = Number.NaN;
 
   constructor(
     private readonly scene: THREE.Scene,
-    private readonly profile: LevelProfile,
+    profile: LevelProfile,
   ) {
+    this.profile = profile;
     this.noise2D = createSeededNoise2D(profile.seed);
+  }
+
+  /** Change de level : décharge tout le monde courant, repart à vide sur le nouveau profil/seed. */
+  setProfile(profile: LevelProfile): void {
+    for (const key of [...this.loaded.keys()]) this.unloadChunk(key);
+    this.profile = profile;
+    this.noise2D = createSeededNoise2D(profile.seed);
+    this.currentChunkX = Number.NaN;
+    this.currentChunkZ = Number.NaN;
   }
 
   update(playerPosition: THREE.Vector3): void {
