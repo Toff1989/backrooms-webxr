@@ -6,6 +6,7 @@
   "description": "Backrooms VR — exploration horrifique infinie en WebXR (Meta Quest, navigateur).",
   "scripts": {
     "dev": "vite",
+    "dev:open": "vite --open",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "typecheck": "tsc -b --noEmit"

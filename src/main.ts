@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { VRButton } from "three/addons/webxr/VRButton.js";
-import { AmbientHum } from "./audio/ambientHum";
+import { AmbientHum } from "./assets/audio/ambientHum";
 import { CamcorderHud } from "./player/camcorderHud";
 import { ComfortVignette } from "./player/comfortVignette";
 import { Locomotion } from "./player/locomotion";
