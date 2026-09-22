@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
-import { CELL_SIZE, PILLAR_SIZE, WALL_HEIGHT } from "../shared/constants";
+import { CELL_SIZE, PILLAR_SIZE, WALL_HEIGHT, WALL_THICKNESS } from "../shared/constants";
 import type { ChunkLayout } from "../shared/chunkLayout";
 import { getCeilingMaterial, getFloorMaterial, getNeonMaterial, getPillarMaterial, getWallMaterial } from "./materials";
 
@@ -56,7 +56,8 @@ function buildCeiling(centerX: number, centerZ: number, size: number): THREE.Mes
 function buildWalls(layout: ChunkLayout): THREE.Mesh | null {
   if (layout.wallSegments.length === 0) return null;
 
-  const basePlane = new THREE.PlaneGeometry(1, WALL_HEIGHT);
+  // Boîte (pas un plan) : le mur a une vraie épaisseur, cohérente avec la boîte de collision.
+  const baseBox = new THREE.BoxGeometry(1, WALL_HEIGHT, WALL_THICKNESS);
   const geometries: THREE.BufferGeometry[] = [];
 
   for (const segment of layout.wallSegments) {
@@ -67,13 +68,13 @@ function buildWalls(layout: ChunkLayout): THREE.Mesh | null {
     const centerX = (segment.minX + segment.maxX) / 2;
     const centerZ = (segment.minZ + segment.maxZ) / 2;
 
-    const geometry = basePlane.clone();
+    const geometry = baseBox.clone();
     geometry.scale(length, 1, 1);
     if (!alongX) geometry.rotateY(Math.PI / 2);
     geometry.translate(centerX, WALL_HEIGHT / 2, centerZ);
     geometries.push(geometry);
   }
-  basePlane.dispose();
+  baseBox.dispose();
 
   const merged = mergeGeometries(geometries, false);
   for (const geometry of geometries) geometry.dispose();
