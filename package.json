@@ -1,0 +1,23 @@
+{
+  "name": "backrooms-webxr",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Backrooms VR — exploration horrifique infinie en WebXR (Meta Quest, navigateur).",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc -b --noEmit"
+  },
+  "dependencies": {
+    "three": "^0.186.0"
+  },
+  "devDependencies": {
+    "@types/three": "^0.186.0",
+    "@types/webxr": "^0.5.24",
+    "typescript": "^5.9.0",
+    "vite": "^8.3.0",
+    "vite-plugin-mkcert": "^2.1.0"
+  }
+}
