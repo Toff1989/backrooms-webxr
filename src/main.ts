@@ -1,19 +1,26 @@
 import * as THREE from "three";
 import { VRButton } from "three/addons/webxr/VRButton.js";
+import { AmbientHum } from "./audio/ambientHum";
+import { CamcorderHud } from "./player/camcorderHud";
 import { ComfortVignette } from "./player/comfortVignette";
 import { Locomotion } from "./player/locomotion";
+import { VhsOverlay } from "./player/vhsOverlay";
 import type { WallSegment } from "./shared/chunkLayout";
 import { CELL_SIZE } from "./shared/constants";
 import { DEFAULT_PROFILE } from "./shared/levelProfile";
 import { PLAYER_RADIUS, resolveWallCollisions } from "./world/collision";
 import { ChunkStreamer } from "./world/chunkStreamer";
+import { updateVhsTime } from "./world/vhsMaterial";
 
 const appRoot = document.getElementById("app");
 if (!appRoot) throw new Error("#app introuvable dans index.html");
 
+// Teinte proche du noir, légèrement chaude (cohérente avec la teinte jaunâtre délavée du look VHS).
+const BACKGROUND_COLOR = 0x0a0805;
+
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x05050a);
-scene.fog = new THREE.FogExp2(0x05050a, 0.035);
+scene.background = new THREE.Color(BACKGROUND_COLOR);
+scene.fog = new THREE.FogExp2(BACKGROUND_COLOR, 0.035);
 
 const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.05, 60);
 
@@ -39,6 +46,11 @@ chunkStreamer.update(playerRig.position);
 
 const locomotion = new Locomotion(renderer, camera, playerRig);
 const comfortVignette = new ComfortVignette(camera);
+const vhsOverlay = new VhsOverlay(camera);
+const camcorderHud = new CamcorderHud(camera);
+const ambientHum = new AmbientHum(camera);
+
+renderer.xr.addEventListener("sessionstart", () => ambientHum.start());
 
 const vignetteToggle = document.querySelector<HTMLInputElement>("#vignette-toggle");
 vignetteToggle?.addEventListener("change", () => {
@@ -57,10 +69,14 @@ const timer = new THREE.Timer();
 renderer.setAnimationLoop((timestamp) => {
   timer.update(timestamp);
   const deltaSeconds = Math.min(timer.getDelta(), 0.1);
+  const elapsedSeconds = timer.getElapsed();
   const movementIntensity = locomotion.update(deltaSeconds);
   chunkStreamer.update(playerRig.position);
   chunkStreamer.collectNearbyWallSegments(playerRig.position, nearbyWallSegments);
   resolveWallCollisions(playerRig.position, PLAYER_RADIUS, nearbyWallSegments);
   comfortVignette.update(movementIntensity, deltaSeconds);
+  vhsOverlay.update(elapsedSeconds);
+  camcorderHud.update(deltaSeconds);
+  updateVhsTime(elapsedSeconds);
   renderer.render(scene, camera);
 });

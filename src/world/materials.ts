@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { CHUNK_CELLS } from "../shared/constants";
+import { applyVhsEffect } from "./vhsMaterial";
 
 /**
  * Textures procédurales de substitution (placeholders) en attendant l'intégration
@@ -124,6 +125,7 @@ let wallMaterial: THREE.MeshStandardMaterial | null = null;
 export function getWallMaterial(): THREE.MeshStandardMaterial {
   if (!wallMaterial) {
     wallMaterial = new THREE.MeshStandardMaterial({ map: createWallTexture(), roughness: 0.85 });
+    applyVhsEffect(wallMaterial);
   }
   return wallMaterial;
 }
@@ -132,6 +134,7 @@ let floorMaterial: THREE.MeshStandardMaterial | null = null;
 export function getFloorMaterial(): THREE.MeshStandardMaterial {
   if (!floorMaterial) {
     floorMaterial = new THREE.MeshStandardMaterial({ map: createFloorTexture(), roughness: 0.95 });
+    applyVhsEffect(floorMaterial);
   }
   return floorMaterial;
 }
@@ -140,6 +143,7 @@ let ceilingMaterial: THREE.MeshStandardMaterial | null = null;
 export function getCeilingMaterial(): THREE.MeshStandardMaterial {
   if (!ceilingMaterial) {
     ceilingMaterial = new THREE.MeshStandardMaterial({ map: createCeilingTexture(), roughness: 0.8 });
+    applyVhsEffect(ceilingMaterial);
   }
   return ceilingMaterial;
 }
@@ -148,6 +152,20 @@ let pillarMaterial: THREE.MeshStandardMaterial | null = null;
 export function getPillarMaterial(): THREE.MeshStandardMaterial {
   if (!pillarMaterial) {
     pillarMaterial = new THREE.MeshStandardMaterial({ color: 0x8c7a3a, roughness: 0.9 });
+    applyVhsEffect(pillarMaterial);
   }
   return pillarMaterial;
+}
+
+let neonMaterial: THREE.MeshStandardMaterial | null = null;
+export function getNeonMaterial(): THREE.MeshStandardMaterial {
+  if (!neonMaterial) {
+    neonMaterial = new THREE.MeshStandardMaterial({
+      color: 0xfff7d6,
+      emissive: 0xfff2b0,
+      emissiveIntensity: 1.4,
+    });
+    applyVhsEffect(neonMaterial);
+  }
+  return neonMaterial;
 }

@@ -52,7 +52,7 @@ export class ChunkStreamer {
     }
   }
 
-  /** Remplit `target` avec les segments de mur des chunks voisins, pour la collision. */
+  /** Remplit `target` avec les obstacles (murs + piliers) des chunks voisins, pour la collision. */
   collectNearbyWallSegments(playerPosition: THREE.Vector3, target: WallSegment[]): void {
     target.length = 0;
     const chunkX = Math.floor(playerPosition.x / CHUNK_SIZE);
@@ -63,6 +63,7 @@ export class ChunkStreamer {
         const chunk = this.loaded.get(chunkKey(chunkX + dx, chunkZ + dz));
         if (!chunk) continue;
         for (const segment of chunk.layout.wallSegments) target.push(segment);
+        for (const segment of chunk.layout.pillarObstacles) target.push(segment);
       }
     }
   }

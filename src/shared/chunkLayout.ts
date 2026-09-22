@@ -1,5 +1,5 @@
 import type { NoiseFunction2D } from "simplex-noise";
-import { CELL_SIZE, CHUNK_CELLS, SPAWN_CLEARANCE_CELLS, WALL_THICKNESS } from "./constants";
+import { CELL_SIZE, CHUNK_CELLS, PILLAR_SIZE, SPAWN_CLEARANCE_CELLS, WALL_THICKNESS } from "./constants";
 import type { LevelProfile } from "./levelProfile";
 import { coordinateHash01, stringSeedToInt } from "./rng";
 
@@ -16,8 +16,12 @@ export interface WallSegment {
 export interface ChunkLayout {
   chunkX: number;
   chunkZ: number;
+  /** Murs (rendu + collision). */
   wallSegments: WallSegment[];
   pillarPositions: Array<{ x: number; z: number }>;
+  /** Boîtes de collision des piliers, séparées de `wallSegments` : un pilier se rend en cube
+   * (InstancedMesh), pas en plan de mur — seule la collision partage le même type de boîte. */
+  pillarObstacles: WallSegment[];
 }
 
 /**
@@ -35,6 +39,7 @@ export function generateChunkLayout(
   const seedInt = stringSeedToInt(profile.seed);
   const wallSegments: WallSegment[] = [];
   const pillarPositions: Array<{ x: number; z: number }> = [];
+  const pillarObstacles: WallSegment[] = [];
   const baseCellX = chunkX * CHUNK_CELLS;
   const baseCellZ = chunkZ * CHUNK_CELLS;
   const halfThickness = WALL_THICKNESS / 2;
@@ -65,12 +70,20 @@ export function generateChunkLayout(
       }
 
       if (!isInsideSpawnClearance(cellX, cellZ) && coordinateHash01(seedInt, cellX, cellZ, 47) < profile.pillarProbability) {
-        pillarPositions.push({ x: originX + CELL_SIZE / 2, z: originZ + CELL_SIZE / 2 });
+        const pillarCenterX = originX + CELL_SIZE / 2;
+        const pillarCenterZ = originZ + CELL_SIZE / 2;
+        pillarPositions.push({ x: pillarCenterX, z: pillarCenterZ });
+        pillarObstacles.push({
+          minX: pillarCenterX - PILLAR_SIZE / 2,
+          maxX: pillarCenterX + PILLAR_SIZE / 2,
+          minZ: pillarCenterZ - PILLAR_SIZE / 2,
+          maxZ: pillarCenterZ + PILLAR_SIZE / 2,
+        });
       }
     }
   }
 
-  return { chunkX, chunkZ, wallSegments, pillarPositions };
+  return { chunkX, chunkZ, wallSegments, pillarPositions, pillarObstacles };
 }
 
 function isInsideSpawnClearance(cellX: number, cellZ: number): boolean {

@@ -8,6 +8,7 @@ export const CHUNK_CELLS = 8;
 export const CHUNK_SIZE = CELL_SIZE * CHUNK_CELLS;
 export const WALL_HEIGHT = 2.7;
 export const WALL_THICKNESS = 0.15;
+export const PILLAR_SIZE = 0.4;
 
 /** Rayon de streaming en chunks autour du joueur (distance de Chebyshev). */
 export const STREAM_RADIUS_CHUNKS = 2;
