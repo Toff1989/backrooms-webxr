@@ -96,7 +96,7 @@ renderer.setAnimationLoop((timestamp) => {
   corruption.update(deltaSeconds);
 
   comfortVignette.update(movementIntensity, deltaSeconds);
-  vhsOverlay.update(elapsedSeconds);
+  vhsOverlay.update(elapsedSeconds, corruption.value);
   camcorderHud.update(deltaSeconds);
   updateVhsTime(elapsedSeconds);
   renderer.render(scene, camera);

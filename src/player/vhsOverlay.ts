@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import vhsNoiseVideoUrl from "../assets/video/vhs-noise.webm";
 
 const VERTEX_SHADER = /* glsl */ `
   varying vec2 vUv;
@@ -11,34 +12,56 @@ const VERTEX_SHADER = /* glsl */ `
 const FRAGMENT_SHADER = /* glsl */ `
   varying vec2 vUv;
   uniform float uTime;
-
-  float vhsOverlayHash(vec2 p) {
-    return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453123);
-  }
+  uniform float uCorruption;
+  uniform sampler2D uNoiseMap;
 
   void main() {
     float scanline = sin((vUv.y + uTime * 0.03) * 700.0);
     scanline = pow(max(scanline, 0.0), 4.0) * 0.10;
 
-    float grain = (vhsOverlayHash(vUv * 900.0 + uTime * 40.0) - 0.5) * 0.06;
+    // Bruit VHS réel (vidéo de grain TV capturée), pas un hash procédural : dérive dans
+    // le temps pour ne jamais se figer sur le même motif, s'intensifie avec la corruption.
+    vec2 noiseUv = fract(vUv * 1.3 + vec2(uTime * 0.015, uTime * 0.011));
+    float noise = texture2D(uNoiseMap, noiseUv).r;
+    float grain = (noise - 0.5) * (0.35 + uCorruption * 0.45);
 
-    float alpha = clamp(scanline + grain, 0.0, 0.35);
+    float alpha = clamp(scanline + abs(grain), 0.0, 0.65);
     gl_FragColor = vec4(0.0, 0.0, 0.0, alpha);
   }
 `;
 
 /**
- * Scanlines + bruit subtils sur un quad fixé à la tête (pas de post-processing
- * EffectComposer en WebXR). Effet constant, indépendant du mouvement — à distinguer
+ * Scanlines + vrai bruit VHS (vidéo de grain TV, pas un hash procédural) sur un quad
+ * fixé à la tête (pas de post-processing EffectComposer en WebXR). Effet constant,
+ * renforcé par la corruption cumulable (glitchs, transitions de level) — à distinguer
  * de la vignette de confort (qui réagit au déplacement).
  */
 export class VhsOverlay {
   private readonly material: THREE.ShaderMaterial;
+  private readonly video: HTMLVideoElement;
 
   constructor(camera: THREE.Camera) {
+    this.video = document.createElement("video");
+    this.video.src = vhsNoiseVideoUrl;
+    this.video.loop = true;
+    this.video.muted = true;
+    this.video.playsInline = true;
+    this.video.play().catch(() => {});
+
+    const noiseTexture = new THREE.VideoTexture(this.video);
+    noiseTexture.wrapS = THREE.RepeatWrapping;
+    noiseTexture.wrapT = THREE.RepeatWrapping;
+    noiseTexture.magFilter = THREE.NearestFilter;
+    noiseTexture.minFilter = THREE.NearestFilter;
+    noiseTexture.colorSpace = THREE.NoColorSpace;
+
     const geometry = new THREE.PlaneGeometry(4, 4);
     this.material = new THREE.ShaderMaterial({
-      uniforms: { uTime: { value: 0 } },
+      uniforms: {
+        uTime: { value: 0 },
+        uCorruption: { value: 0 },
+        uNoiseMap: { value: noiseTexture },
+      },
       vertexShader: VERTEX_SHADER,
       fragmentShader: FRAGMENT_SHADER,
       transparent: true,
@@ -54,8 +77,8 @@ export class VhsOverlay {
     camera.add(mesh);
   }
 
-  update(elapsedSeconds: number): void {
-    const uniform = this.material.uniforms["uTime"];
-    if (uniform) uniform.value = elapsedSeconds;
+  update(elapsedSeconds: number, corruption: number): void {
+    this.material.uniforms["uTime"]!.value = elapsedSeconds;
+    this.material.uniforms["uCorruption"]!.value = corruption;
   }
 }

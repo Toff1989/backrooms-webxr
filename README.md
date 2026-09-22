@@ -52,10 +52,11 @@ src/
   assets/
     audio/ambientHum.ts      Bourdonnement ambiant des néons (Web Audio, généré procéduralement)
     textures/                Textures PBR CC0 (basecolor/normal/roughness par surface)
+    video/vhs-noise.webm     Vraie vidéo de bruit TV (CC0, retraitée), pas un hash procédural
   player/
     locomotion.ts           Déplacement fluide (joystick gauche) + snap-turn (joystick droit)
     comfortVignette.ts      Vignette de confort (quad shader fixé à la caméra, réagit au mouvement)
-    vhsOverlay.ts            Scanlines + bruit (quad shader fixé à la caméra, effet constant)
+    vhsOverlay.ts            Scanlines + vraie texture vidéo de bruit (quad shader fixé à la caméra)
     camcorderHud.ts          Panneau caméscope (REC, horodatage, batterie, profondeur)
     haptics.ts                Déclenche une pulsation sur les manettes (signal de piège glitch)
   world/
@@ -84,6 +85,10 @@ src/
 - Les textures sont de vraies textures PBR CC0 (ambientCG.com — pas les textures Poliigon
   fournies : licence commerciale incompatible avec un dépôt public, voir `src/world/materials.ts`).
   Déjà en 1K, WebP (basecolor + normal + roughness).
+- Le grain de l'overlay VHS (`vhsOverlay.ts`) vient d'une vraie vidéo de bruit TV (Pixabay,
+  licence Content License — retraitée : redimensionnée, recompressée en WebM, pas le fichier
+  brut, pour rester dans le cadre "modifier/adapter" de la licence), pas d'un hash procédural.
+  Échantillonnée en `NearestFilter` pour garder le grain brut, son intensité suit `uCorruption`.
 - La disposition d'un chunk (murs/piliers/pièges) est une fonction pure de ses coordonnées
   globales et de la seed (`src/shared/`) : deux chunks voisins générés indépendamment restent
   cohérents à leur frontière, et cette logique est réutilisable telle quelle côté serveur pour la

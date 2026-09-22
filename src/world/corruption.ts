@@ -13,6 +13,10 @@ const DECAY_LAMBDA = 2.2;
 class CorruptionState {
   private intensity = 0;
 
+  get value(): number {
+    return this.intensity;
+  }
+
   add(amount: number): void {
     this.intensity = Math.min(1, this.intensity + amount);
   }

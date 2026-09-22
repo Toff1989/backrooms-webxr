@@ -3,8 +3,11 @@ import * as THREE from "three";
 const CANVAS_WIDTH = 512;
 const CANVAS_HEIGHT = 140;
 const UPDATE_INTERVAL_SECONDS = 0.5;
-const PANEL_WIDTH = 0.5;
+// Petit panneau tassé dans le coin bas-gauche du champ de vision (viseur caméscope),
+// pas un bloc flottant au centre de la vue.
+const PANEL_WIDTH = 0.22;
 const PANEL_HEIGHT = (CANVAS_HEIGHT / CANVAS_WIDTH) * PANEL_WIDTH;
+const PANEL_POSITION = new THREE.Vector3(-0.35, -0.3, -0.55);
 
 interface BatteryLike {
   level: number;
@@ -43,7 +46,7 @@ export class CamcorderHud {
     });
     const geometry = new THREE.PlaneGeometry(PANEL_WIDTH, PANEL_HEIGHT);
     const mesh = new THREE.Mesh(geometry, material);
-    mesh.position.set(-0.32, -0.24, -0.65);
+    mesh.position.copy(PANEL_POSITION);
     mesh.renderOrder = 997;
     mesh.frustumCulled = false;
     camera.add(mesh);
