@@ -2,7 +2,11 @@ import * as THREE from "three";
 import { VRButton } from "three/addons/webxr/VRButton.js";
 import { ComfortVignette } from "./player/comfortVignette";
 import { Locomotion } from "./player/locomotion";
-import { buildStaticChunk, ROOM_HALF_EXTENT } from "./world/chunk";
+import type { WallSegment } from "./shared/chunkLayout";
+import { CELL_SIZE } from "./shared/constants";
+import { DEFAULT_PROFILE } from "./shared/levelProfile";
+import { PLAYER_RADIUS, resolveWallCollisions } from "./world/collision";
+import { ChunkStreamer } from "./world/chunkStreamer";
 
 const appRoot = document.getElementById("app");
 if (!appRoot) throw new Error("#app introuvable dans index.html");
@@ -23,13 +27,15 @@ document.body.appendChild(VRButton.createButton(renderer));
 
 const playerRig = new THREE.Group();
 playerRig.name = "player-rig";
-playerRig.position.set(0, 0, 6);
+playerRig.position.set(CELL_SIZE / 2, 0, CELL_SIZE / 2);
 playerRig.add(camera);
 scene.add(playerRig);
 
 scene.add(new THREE.HemisphereLight(0xfff3cf, 0x171512, 0.9));
 scene.add(new THREE.AmbientLight(0xfff0c0, 0.25));
-scene.add(buildStaticChunk());
+
+const chunkStreamer = new ChunkStreamer(scene, DEFAULT_PROFILE);
+chunkStreamer.update(playerRig.position);
 
 const locomotion = new Locomotion(renderer, camera, playerRig);
 const comfortVignette = new ComfortVignette(camera);
@@ -45,19 +51,16 @@ window.addEventListener("resize", () => {
   renderer.setSize(window.innerWidth, window.innerHeight);
 });
 
-/** Limite de déplacement provisoire en attendant la vraie collision par grille (étape 2). */
-function clampPlayerToRoom(): void {
-  playerRig.position.x = THREE.MathUtils.clamp(playerRig.position.x, -ROOM_HALF_EXTENT, ROOM_HALF_EXTENT);
-  playerRig.position.z = THREE.MathUtils.clamp(playerRig.position.z, -ROOM_HALF_EXTENT, ROOM_HALF_EXTENT);
-}
-
+const nearbyWallSegments: WallSegment[] = [];
 const timer = new THREE.Timer();
 
 renderer.setAnimationLoop((timestamp) => {
   timer.update(timestamp);
   const deltaSeconds = Math.min(timer.getDelta(), 0.1);
   const movementIntensity = locomotion.update(deltaSeconds);
-  clampPlayerToRoom();
+  chunkStreamer.update(playerRig.position);
+  chunkStreamer.collectNearbyWallSegments(playerRig.position, nearbyWallSegments);
+  resolveWallCollisions(playerRig.position, PLAYER_RADIUS, nearbyWallSegments);
   comfortVignette.update(movementIntensity, deltaSeconds);
   renderer.render(scene, camera);
 });

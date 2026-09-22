@@ -1,8 +1,12 @@
 import * as THREE from "three";
+import { CHUNK_CELLS } from "../shared/constants";
 
 /**
  * Textures procédurales de substitution (placeholders) en attendant l'intégration
  * des textures Poliigon (catégorie Backrooms) prévues dans la fiche projet.
+ *
+ * Les matériaux sont des singletons partagés par tous les chunks (streaming) : un
+ * seul jeu de textures pour tout le monde généré, pas de recréation par chunk.
  */
 
 function createCanvas(size: number): { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D } {
@@ -26,16 +30,17 @@ function createRandom(seed: number): () => number {
   };
 }
 
-function finalizeTexture(canvas: HTMLCanvasElement): THREE.CanvasTexture {
+function finalizeTexture(canvas: HTMLCanvasElement, repeat: number): THREE.CanvasTexture {
   const texture = new THREE.CanvasTexture(canvas);
   texture.wrapS = THREE.RepeatWrapping;
   texture.wrapT = THREE.RepeatWrapping;
   texture.colorSpace = THREE.SRGBColorSpace;
   texture.anisotropy = 4;
+  texture.repeat.set(repeat, repeat);
   return texture;
 }
 
-export function createWallTexture(): THREE.CanvasTexture {
+function createWallTexture(): THREE.CanvasTexture {
   const size = 512;
   const { canvas, ctx } = createCanvas(size);
   const random = createRandom(1337);
@@ -56,10 +61,11 @@ export function createWallTexture(): THREE.CanvasTexture {
     ctx.fillRect(random() * size, random() * size, 1 + random() * 2, 1 + random() * 2);
   }
 
-  return finalizeTexture(canvas);
+  // Un mur = une cellule (2,5 m) : chaque quad de mur fusionné porte déjà son propre UV 0..1.
+  return finalizeTexture(canvas, 1);
 }
 
-export function createFloorTexture(): THREE.CanvasTexture {
+function createFloorTexture(): THREE.CanvasTexture {
   const size = 512;
   const { canvas, ctx } = createCanvas(size);
   const random = createRandom(4242);
@@ -84,10 +90,11 @@ export function createFloorTexture(): THREE.CanvasTexture {
   }
   ctx.globalAlpha = 1;
 
-  return finalizeTexture(canvas);
+  // Une dalle de sol par chunk : repeat = nombre de cellules par côté de chunk.
+  return finalizeTexture(canvas, CHUNK_CELLS);
 }
 
-export function createCeilingTexture(): THREE.CanvasTexture {
+function createCeilingTexture(): THREE.CanvasTexture {
   const size = 512;
   const { canvas, ctx } = createCanvas(size);
   const tile = 64;
@@ -110,5 +117,37 @@ export function createCeilingTexture(): THREE.CanvasTexture {
     ctx.stroke();
   }
 
-  return finalizeTexture(canvas);
+  return finalizeTexture(canvas, CHUNK_CELLS);
+}
+
+let wallMaterial: THREE.MeshStandardMaterial | null = null;
+export function getWallMaterial(): THREE.MeshStandardMaterial {
+  if (!wallMaterial) {
+    wallMaterial = new THREE.MeshStandardMaterial({ map: createWallTexture(), roughness: 0.85 });
+  }
+  return wallMaterial;
+}
+
+let floorMaterial: THREE.MeshStandardMaterial | null = null;
+export function getFloorMaterial(): THREE.MeshStandardMaterial {
+  if (!floorMaterial) {
+    floorMaterial = new THREE.MeshStandardMaterial({ map: createFloorTexture(), roughness: 0.95 });
+  }
+  return floorMaterial;
+}
+
+let ceilingMaterial: THREE.MeshStandardMaterial | null = null;
+export function getCeilingMaterial(): THREE.MeshStandardMaterial {
+  if (!ceilingMaterial) {
+    ceilingMaterial = new THREE.MeshStandardMaterial({ map: createCeilingTexture(), roughness: 0.8 });
+  }
+  return ceilingMaterial;
+}
+
+let pillarMaterial: THREE.MeshStandardMaterial | null = null;
+export function getPillarMaterial(): THREE.MeshStandardMaterial {
+  if (!pillarMaterial) {
+    pillarMaterial = new THREE.MeshStandardMaterial({ color: 0x8c7a3a, roughness: 0.9 });
+  }
+  return pillarMaterial;
 }

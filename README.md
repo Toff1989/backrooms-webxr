@@ -2,12 +2,14 @@
 
 Jeu d'exploration horrifique en VR, dans le navigateur (WebXR). Voir la fiche projet pour le concept complet.
 
-**État actuel : étape 1 de la roadmap (proto)** — scène WebXR, locomotion fluide + snap-turn,
-vignette de confort, un chunk statique texturé (placeholder).
+**État actuel : étape 2 de la roadmap (génération)** — scène WebXR, locomotion fluide + snap-turn,
+vignette de confort, chunks infinis générés depuis une seed avec streaming autour du joueur et
+collisions par grille.
 
 ## Stack
 
-Three.js (WebXRManager) + TypeScript + Vite (HTTPS local via `vite-plugin-mkcert`).
+Three.js (WebXRManager) + TypeScript + Vite (HTTPS local via `vite-plugin-mkcert`) +
+`simplex-noise` / `seedrandom` pour la génération procédurale seedée.
 
 ## Démarrage
 
@@ -40,29 +42,40 @@ sécurisé).
 
 ```
 src/
-  main.ts                 Bootstrap : scène, renderer XR, boucle de rendu
+  main.ts                   Bootstrap : scène, renderer XR, boucle de rendu
   player/
-    locomotion.ts          Déplacement fluide (joystick gauche) + snap-turn (joystick droit)
+    locomotion.ts           Déplacement fluide (joystick gauche) + snap-turn (joystick droit)
     comfortVignette.ts      Vignette de confort (quad shader fixé à la caméra)
   world/
-    chunk.ts                Chunk statique du proto (salle 20×20 m, piliers, néons)
+    chunkStreamer.ts        Charge/décharge les chunks autour du joueur (rayon 2 chunks)
+    chunkMesh.ts             Construit les meshes THREE d'un chunk (murs fusionnés, piliers instanciés)
+    collision.ts             Résolution de collision cercle/AABB (plan XZ)
     materials.ts             Textures procédurales de substitution (en attendant Poliigon)
+  shared/                    Logique pure, sans dépendance three.js — réutilisable côté serveur
+    constants.ts             Constantes de la grille (taille cellule/chunk, rayon de streaming...)
+    levelProfile.ts          Profil de génération (seed, densité de murs, piliers)
+    rng.ts                   Hash déterministe par coordonnées + PRNG seedé (seedrandom)
+    noise.ts                 Bruit simplex 2D seedé (simplex-noise)
+    chunkLayout.ts           Génère la disposition (murs/piliers) d'un chunk depuis sa seed
 ```
 
-## Notes sur ce proto
+## Notes sur cette étape
 
 - Les textures sont générées proceduralement (canvas 2D) en attente de l'intégration des
   textures Poliigon (KTX2/Basis) prévues dans la fiche projet.
-- Le déplacement est borné aux limites de la salle par un simple clamp de position ; le vrai
-  système de collision par grille (étape 2 de la roadmap) le remplacera.
-- Aucune génération procédurale infinie ni streaming de chunks pour l'instant : un seul chunk
-  statique, conformément à l'étape 1 de la roadmap.
+- La disposition d'un chunk (murs/piliers) est une fonction pure de ses coordonnées globales et
+  de la seed (`src/shared/`) : deux chunks voisins générés indépendamment restent cohérents à
+  leur frontière, et cette logique est réutilisable telle quelle côté serveur pour la validation
+  anti-triche (étape 7 de la roadmap).
+- Les murs de chaque chunk sont fusionnés en une seule géométrie (1 draw call), les piliers en
+  `InstancedMesh`, pour tenir le budget de la fiche projet (<100 draw calls).
+- Pas de niveaux/sortie ni de profondeur pour l'instant : un unique profil génère un monde infini
+  dans toutes les directions (étape 4 de la roadmap pour la progression par niveaux).
 - Pas de post-processing `EffectComposer` : la vignette de confort est un quad shader attaché
   à la caméra, comme prévu pour les futurs overlays VHS.
 
 ## Prochaines étapes (roadmap)
 
-2. Génération de chunks infinis seedés, streaming, collisions par grille, code partagé client/serveur
 3. Direction artistique VHS (shader matériaux, overlay caméscope, néons, brouillard, audio)
 4. Levels, sortie, profils de difficulté, compteur de profondeur
 5. Glitchs (pièges), labyrinthe dynamique
