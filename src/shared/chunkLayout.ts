@@ -23,28 +23,38 @@ export interface ChunkLayout {
   /** Boîtes de collision des piliers, séparées de `wallSegments` : un pilier se rend en cube
    * (InstancedMesh), pas en plan de mur — seule la collision partage le même type de boîte. */
   pillarObstacles: WallSegment[];
+  /** Emplacements des pièges glitch (pas de collision, juste un déclenchement par proximité). */
+  glitchTrapPositions: Array<{ x: number; z: number }>;
 }
 
 /**
- * Génère la disposition d'un chunk (murs + piliers) à partir de la seed du profil.
- * Fonction pure : chaque bord de cellule est identifié uniquement par ses coordonnées
- * globales, donc deux chunks voisins générés indépendamment restent cohérents entre
- * eux (pas de couture visible ni de trou de collision à la frontière). Un couloir est
- * garanti dégagé entre le spawn et la sortie du level (voir `computeGuaranteedPathEdges`).
+ * Génère la disposition d'un chunk (murs + piliers + pièges) à partir de la seed du
+ * profil. Fonction pure : chaque bord de cellule est identifié uniquement par ses
+ * coordonnées globales, donc deux chunks voisins générés indépendamment restent
+ * cohérents entre eux (pas de couture visible ni de trou de collision à la frontière).
+ * Un couloir est garanti dégagé entre le spawn et la sortie du level (voir
+ * `computeGuaranteedPathEdges`), quel que soit `epoch`.
+ *
+ * `epoch` permet de régénérer un chunk avec un agencement différent (labyrinthe
+ * dynamique, étape 5) sans changer sa seed de base : seuls les tirages aléatoires par
+ * cellule changent, la densité générale (bruit) et la sortie restent stables.
  */
 export function generateChunkLayout(
   profile: LevelProfile,
   noise2D: NoiseFunction2D,
   chunkX: number,
   chunkZ: number,
+  epoch = 0,
 ): ChunkLayout {
-  const seedInt = stringSeedToInt(profile.seed);
+  const baseSeedInt = stringSeedToInt(profile.seed);
+  const seedInt = epoch === 0 ? baseSeedInt : (baseSeedInt + epoch * 0x9e3779b1) | 0;
   const exitLocation = getExitLocation(profile);
   const guaranteedPathEdges = computeGuaranteedPathEdges(exitLocation);
 
   const wallSegments: WallSegment[] = [];
   const pillarPositions: Array<{ x: number; z: number }> = [];
   const pillarObstacles: WallSegment[] = [];
+  const glitchTrapPositions: Array<{ x: number; z: number }> = [];
   const baseCellX = chunkX * CHUNK_CELLS;
   const baseCellZ = chunkZ * CHUNK_CELLS;
   const halfThickness = WALL_THICKNESS / 2;
@@ -75,7 +85,8 @@ export function generateChunkLayout(
       }
 
       const inClearance = isInsideSpawnClearance(cellX, cellZ) || isInsideExitClearance(cellX, cellZ, exitLocation);
-      if (!inClearance && coordinateHash01(seedInt, cellX, cellZ, 47) < profile.pillarProbability) {
+      const hasPillar = !inClearance && coordinateHash01(seedInt, cellX, cellZ, 47) < profile.pillarProbability;
+      if (hasPillar) {
         const pillarCenterX = originX + CELL_SIZE / 2;
         const pillarCenterZ = originZ + CELL_SIZE / 2;
         pillarPositions.push({ x: pillarCenterX, z: pillarCenterZ });
@@ -85,11 +96,13 @@ export function generateChunkLayout(
           minZ: pillarCenterZ - PILLAR_SIZE / 2,
           maxZ: pillarCenterZ + PILLAR_SIZE / 2,
         });
+      } else if (!inClearance && coordinateHash01(seedInt, cellX, cellZ, 71) < profile.glitchProbability) {
+        glitchTrapPositions.push({ x: originX + CELL_SIZE / 2, z: originZ + CELL_SIZE / 2 });
       }
     }
   }
 
-  return { chunkX, chunkZ, wallSegments, pillarPositions, pillarObstacles };
+  return { chunkX, chunkZ, wallSegments, pillarPositions, pillarObstacles, glitchTrapPositions };
 }
 
 function isInsideSpawnClearance(cellX: number, cellZ: number): boolean {

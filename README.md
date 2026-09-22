@@ -2,10 +2,10 @@
 
 Jeu d'exploration horrifique en VR, dans le navigateur (WebXR). Voir la fiche projet pour le concept complet.
 
-**État actuel : étape 4 de la roadmap (levels)** — scène WebXR, locomotion fluide + snap-turn,
-génération par chunks streamés avec collisions, look VHS (shader matériaux, scanlines, overlay
-caméscope), néons, ambiance sonore, et maintenant des levels avec sortie signalée (son + lumière),
-difficulté progressive et compteur de profondeur.
+**État actuel : étape 5 de la roadmap (glitchs)** — scène WebXR, locomotion fluide + snap-turn,
+génération par chunks streamés avec collisions, look VHS, textures PBR, levels avec sortie
+signalée et difficulté progressive, et maintenant des pièges glitch (zones de corruption) plus un
+labyrinthe dynamique qui se réagence hors du champ de vision du joueur.
 
 ## Stack
 
@@ -25,8 +25,13 @@ GitHub pour télécharger le binaire `mkcert` ; si ce téléchargement échoue d
 restreint, `http://localhost` fonctionne aussi car les navigateurs le considèrent comme un contexte
 sécurisé).
 
-- **Test sans casque** : [Immersive Web Emulator](https://chromewebstore.google.com/detail/immersive-web-emulator/cgffilbpcibhmcfbgggfhfolhkfbhmik)
-  (extension Chrome) simule une session WebXR et des manettes avec joysticks.
+- **Test sans casque** : `npm run dev:open` ouvre automatiquement le navigateur. Installer
+  [Immersive Web Emulator](https://chromewebstore.google.com/detail/immersive-web-emulator/cgffilbpcibhmcfbgggfhfolhkfbhmik)
+  (extension Chrome) pour simuler une session WebXR et des manettes : ouvrir les DevTools (F12),
+  onglet **WebXR**, choisir un device puis cliquer **Enter VR** sur la page. Les panneaux de
+  contrôleurs affichent les touches clavier mappées à chaque joystick/bouton (ex. WASD pour le
+  joystick gauche) — **une pression = un aller-retour complet de l'axe (modèle toggle)**, pas un
+  maintien : appuyer une fois pour démarrer le mouvement, une seconde fois pour l'arrêter.
 - **Test sur casque** : ouvrir l'URL réseau (`https://<ip-locale>:5173`) dans le navigateur du
   Meta Quest, sur le même réseau que la machine de dev.
 
@@ -44,20 +49,25 @@ sécurisé).
 ```
 src/
   main.ts                   Bootstrap : scène, renderer XR, boucle de rendu
-  audio/
-    ambientHum.ts            Bourdonnement ambiant des néons (Web Audio, généré procéduralement)
+  assets/
+    audio/ambientHum.ts      Bourdonnement ambiant des néons (Web Audio, généré procéduralement)
+    textures/                Textures PBR CC0 (basecolor/normal/roughness par surface)
   player/
     locomotion.ts           Déplacement fluide (joystick gauche) + snap-turn (joystick droit)
     comfortVignette.ts      Vignette de confort (quad shader fixé à la caméra, réagit au mouvement)
     vhsOverlay.ts            Scanlines + bruit (quad shader fixé à la caméra, effet constant)
     camcorderHud.ts          Panneau caméscope (REC, horodatage, batterie, profondeur)
+    haptics.ts                Déclenche une pulsation sur les manettes (signal de piège glitch)
   world/
     levelManager.ts          Orchestre la progression : profil par profondeur, sortie, transition
-    chunkStreamer.ts        Charge/décharge les chunks autour du joueur (rayon 2 chunks)
+    chunkStreamer.ts        Charge/décharge les chunks (rayon 2), anime les pièges, régénère le
+                               labyrinthe hors champ de vision
     chunkMesh.ts             Construit les meshes THREE d'un chunk (murs fusionnés, piliers/néons instanciés)
     exitBeacon.ts             Marqueur de sortie : anneau émissif pulsé + balise sonore positionnelle
+    glitchTrap.ts             Piège "zone de corruption" : marqueur scintillant + grésillement audio
+    corruption.ts             Accumulateur de corruption VHS cumulable, dissipée dans le temps
     collision.ts             Résolution de collision cercle/AABB (plan XZ)
-    materials.ts             Textures procédurales de substitution (en attendant Poliigon)
+    materials.ts             Charge les textures PBR (src/assets/textures) et construit les matériaux
     vhsMaterial.ts            Effet VHS injecté dans les matériaux (onBeforeCompile) : grain,
                                aberration chromatique, quantification des couleurs, teinte jaunâtre
   shared/                    Logique pure, sans dépendance three.js — réutilisable côté serveur
@@ -66,41 +76,52 @@ src/
     exit.ts                   Position de la sortie du level (fonction pure de la seed)
     rng.ts                   Hash déterministe par coordonnées + PRNG seedé (seedrandom)
     noise.ts                 Bruit simplex 2D seedé (simplex-noise)
-    chunkLayout.ts           Génère la disposition (murs/piliers) d'un chunk depuis sa seed
+    chunkLayout.ts           Génère la disposition (murs/piliers/pièges) d'un chunk depuis sa seed
 ```
 
 ## Notes sur cette étape
 
-- Les textures sont générées proceduralement (canvas 2D) en attente de l'intégration des
-  textures Poliigon (KTX2/Basis) prévues dans la fiche projet.
-- La disposition d'un chunk (murs/piliers) est une fonction pure de ses coordonnées globales et
-  de la seed (`src/shared/`) : deux chunks voisins générés indépendamment restent cohérents à
-  leur frontière, et cette logique est réutilisable telle quelle côté serveur pour la validation
-  anti-triche (étape 7 de la roadmap).
-- Les murs de chaque chunk sont fusionnés en une seule géométrie (1 draw call), les piliers et
-  néons en `InstancedMesh`, pour tenir le budget de la fiche projet (<100 draw calls). Les piliers
-  ont désormais une vraie collision (boîte carrée), plus seulement un rendu visuel.
+- Les textures sont de vraies textures PBR CC0 (ambientCG.com — pas les textures Poliigon
+  fournies : licence commerciale incompatible avec un dépôt public, voir `src/world/materials.ts`).
+  Déjà en 1K, WebP (basecolor + normal + roughness).
+- La disposition d'un chunk (murs/piliers/pièges) est une fonction pure de ses coordonnées
+  globales et de la seed (`src/shared/`) : deux chunks voisins générés indépendamment restent
+  cohérents à leur frontière, et cette logique est réutilisable telle quelle côté serveur pour la
+  validation anti-triche (étape 7 de la roadmap).
+- Les murs de chaque chunk sont fusionnés en une seule géométrie boîte (épaisseur réelle, cohérente
+  avec la collision — pas un simple plan), les piliers et néons en `InstancedMesh`, pour tenir le
+  budget de la fiche projet (<100 draw calls). Les piliers ont une vraie collision (boîte carrée).
 - L'effet VHS (`vhsMaterial.ts`) est injecté par matériau via `onBeforeCompile`, pas de
-  post-processing `EffectComposer` (non pris en charge nativement en WebXR). Une uniforme
-  `uCorruption` est déjà câblée pour l'intensité de glitch cumulable de l'étape 5, à 0 pour l'instant.
+  post-processing `EffectComposer` (non pris en charge nativement en WebXR).
 - L'ambiance sonore est un bourdonnement procédural (Web Audio), sans fichier audio externe ; la
   lecture démarre au `sessionstart` XR pour respecter les politiques d'autoplay des navigateurs.
 - Chaque level a sa propre seed dérivée (`<runSeed>:<profondeur>`, `levelProfile.ts`) et sa propre
-  difficulté : densité de murs, probabilité de pilier et distance de la sortie augmentent avec la
-  profondeur (bornées par des plafonds). La seed de run est fixe côté client pour l'instant ; la
-  vraie seed aléatoire signée par le serveur (`POST /run/start`) arrive à l'étape 7.
+  difficulté : densité de murs, probabilité de pilier/piège et distance de la sortie augmentent
+  avec la profondeur (bornées par des plafonds). La seed de run est fixe côté client pour
+  l'instant ; la vraie seed aléatoire signée par le serveur (`POST /run/start`) arrive à l'étape 7.
 - La position de la sortie est dérivée de la seed (`exit.ts`) et un couloir en équerre entre le
-  spawn et la sortie est systématiquement forcé sans mur (`chunkLayout.ts`) : la sortie est donc
-  toujours atteignable, quelle que soit la densité de murs du profil.
+  spawn et la sortie est systématiquement forcé sans mur (`chunkLayout.ts`), y compris après une
+  régénération du labyrinthe dynamique : la sortie reste toujours atteignable.
 - Chaque level repart d'un monde régénéré autour de l'origine locale (`ChunkStreamer.setProfile`) :
   pas de world persistant entre les levels, juste une seed différente à chaque descente.
-- Le passage au level suivant déclenche un bref pic de corruption VHS (`uCorruption`, déjà câblé à
-  l'étape 3) pour masquer la téléportation, en attendant le vrai système de glitchs de l'étape 5.
+- **Corruption VHS cumulable** (`corruption.ts`) : chaque déclencheur (transition de level, piège
+  glitch, régénération de labyrinthe hors champ) ajoute de l'intensité à l'uniforme `uCorruption`
+  du shader ; elle se dissipe ensuite progressivement. Aucune distorsion de la position/rotation
+  caméra — uniquement l'effet shader, comme demandé par la fiche pour le confort VR.
+- **Pièges glitch** (`glitchTrap.ts`) : marqueur au sol scintillant + grésillement audio
+  positionnel comme signaux avant-coureurs. Au contact (rayon de déclenchement), la corruption
+  augmente progressivement tant que le joueur reste à proximité, plus une pulsation haptique sur
+  les manettes à l'entrée. Aucune collision, aucune mort — uniquement la vision qui se dégrade.
+  Seul le type "zone de corruption" de la fiche est implémenté pour l'instant ; les types "mur qui
+  surgit/se déplace" et "boucle spatiale" restent à faire.
+- **Labyrinthe dynamique** (`chunkStreamer.ts`) : toutes les 6 à 12 secondes, un chunk chargé mais
+  hors du champ de vision de la caméra (frustum) et à au moins 2 chunks du joueur est régénéré
+  avec un agencement différent (même sortie, même couloir garanti). Déclenche un petit pic de
+  corruption pour accompagner discrètement le changement.
 - Le panneau caméscope affiche la profondeur réelle, mise à jour à chaque changement de level.
 
 ## Prochaines étapes (roadmap)
 
-5. Glitchs (pièges), labyrinthe dynamique
 6. Collection d'objets FR/EN, menu poignet, persistance IndexedDB
 7. Classement en ligne (API Node + SQLite, validation serveur)
 8. Déploiement (Docker Compose, reverse proxy HTTPS)

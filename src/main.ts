@@ -1,14 +1,16 @@
 import * as THREE from "three";
 import { VRButton } from "three/addons/webxr/VRButton.js";
 import { AmbientHum } from "./assets/audio/ambientHum";
+import { triggerHapticPulse } from "./player/haptics";
 import { CamcorderHud } from "./player/camcorderHud";
 import { ComfortVignette } from "./player/comfortVignette";
 import { Locomotion } from "./player/locomotion";
 import { VhsOverlay } from "./player/vhsOverlay";
 import type { WallSegment } from "./shared/chunkLayout";
 import { PLAYER_RADIUS, resolveWallCollisions } from "./world/collision";
+import { corruption } from "./world/corruption";
 import { LevelManager, SPAWN_LOCAL_POSITION } from "./world/levelManager";
-import { setVhsCorruption, updateVhsTime } from "./world/vhsMaterial";
+import { updateVhsTime } from "./world/vhsMaterial";
 
 const appRoot = document.getElementById("app");
 if (!appRoot) throw new Error("#app introuvable dans index.html");
@@ -69,9 +71,8 @@ window.addEventListener("resize", () => {
 const nearbyWallSegments: WallSegment[] = [];
 const timer = new THREE.Timer();
 
-/** Intensité de corruption VHS déclenchée au passage de level, dissipée dans le temps. */
-const LEVEL_TRANSITION_FLASH_LAMBDA = 3;
-let levelTransitionFlash = 0;
+const TRAP_HAPTIC_INTENSITY = 0.6;
+const TRAP_HAPTIC_DURATION_MS = 120;
 
 renderer.setAnimationLoop((timestamp) => {
   timer.update(timestamp);
@@ -79,18 +80,20 @@ renderer.setAnimationLoop((timestamp) => {
   const elapsedSeconds = timer.getElapsed();
 
   const movementIntensity = locomotion.update(deltaSeconds);
-  levelManager.update(playerRig.position, elapsedSeconds);
+  const levelUpdate = levelManager.update(playerRig.position, camera, elapsedSeconds, deltaSeconds);
   levelManager.collectNearbyWallSegments(playerRig.position, nearbyWallSegments);
   resolveWallCollisions(playerRig.position, PLAYER_RADIUS, nearbyWallSegments);
+
+  if (levelUpdate.corruptionDelta > 0) corruption.add(levelUpdate.corruptionDelta);
+  if (levelUpdate.trapJustTriggered) triggerHapticPulse(renderer, TRAP_HAPTIC_INTENSITY, TRAP_HAPTIC_DURATION_MS);
 
   if (levelManager.hasReachedExit(playerRig.position)) {
     const spawnPosition = levelManager.descend();
     playerRig.position.copy(spawnPosition);
     camcorderHud.depth = levelManager.depth;
-    levelTransitionFlash = 1;
+    corruption.add(1);
   }
-  levelTransitionFlash = THREE.MathUtils.damp(levelTransitionFlash, 0, LEVEL_TRANSITION_FLASH_LAMBDA, deltaSeconds);
-  setVhsCorruption(levelTransitionFlash);
+  corruption.update(deltaSeconds);
 
   comfortVignette.update(movementIntensity, deltaSeconds);
   vhsOverlay.update(elapsedSeconds);

@@ -12,6 +12,13 @@ const EXIT_REACHED_DISTANCE = 1.1;
 /** Chaque level repart d'une grille locale : le spawn est toujours au centre de la cellule (0,0). */
 export const SPAWN_LOCAL_POSITION = new THREE.Vector3(CELL_SIZE / 2, 0, CELL_SIZE / 2);
 
+export interface LevelUpdateResult {
+  /** Corruption VHS à ajouter cette frame (pièges glitch + régénération de labyrinthe hors champ). */
+  corruptionDelta: number;
+  /** Vrai la frame où le joueur entre dans un piège glitch (signal haptique). */
+  trapJustTriggered: boolean;
+}
+
 /**
  * Orchestre la progression par level (fiche projet, étape 4) : profil de difficulté
  * dérivé de la profondeur, sortie signalée (son + lumière), passage au level suivant.
@@ -31,8 +38,8 @@ export class LevelManager {
     private readonly audioListener: THREE.AudioListener,
   ) {
     this.profile = createLevelProfile(this.depth);
-    this.chunkStreamer = new ChunkStreamer(scene, this.profile);
-    this.chunkStreamer.update(SPAWN_LOCAL_POSITION);
+    this.chunkStreamer = new ChunkStreamer(scene, audioListener, this.profile);
+    this.chunkStreamer.primeArea(SPAWN_LOCAL_POSITION);
 
     const exitPosition = getExitWorldPosition(this.profile);
     this.exitWorldX = exitPosition.x;
@@ -45,11 +52,13 @@ export class LevelManager {
   onSessionStart(): void {
     this.sessionStarted = true;
     this.exitBeacon.play();
+    this.chunkStreamer.onSessionStart();
   }
 
-  update(playerPosition: THREE.Vector3, elapsedSeconds: number): void {
-    this.chunkStreamer.update(playerPosition);
+  update(playerPosition: THREE.Vector3, camera: THREE.Camera, elapsedSeconds: number, deltaSeconds: number): LevelUpdateResult {
+    const streamerResult = this.chunkStreamer.update(playerPosition, camera, elapsedSeconds, deltaSeconds);
     this.exitBeacon.update(elapsedSeconds);
+    return streamerResult;
   }
 
   collectNearbyWallSegments(playerPosition: THREE.Vector3, target: WallSegment[]): void {
@@ -67,7 +76,8 @@ export class LevelManager {
     this.depth += 1;
     this.profile = createLevelProfile(this.depth);
     this.chunkStreamer.setProfile(this.profile);
-    this.chunkStreamer.update(SPAWN_LOCAL_POSITION);
+    this.chunkStreamer.primeArea(SPAWN_LOCAL_POSITION);
+    if (this.sessionStarted) this.chunkStreamer.onSessionStart();
 
     this.exitBeacon.dispose();
     this.scene.remove(this.exitBeacon.group);
