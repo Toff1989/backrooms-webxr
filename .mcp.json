@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "iwer": {
+      "command": "npx",
+      "args": ["-y", "@iwer/extension-bridge"]
+    }
+  }
+}
