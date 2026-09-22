@@ -141,6 +141,12 @@ export class ChunkStreamer {
   private updateDynamicMaze(camera: THREE.Camera, deltaSeconds: number): number {
     this.regenTimer -= deltaSeconds;
     if (this.regenTimer > 0) return 0;
+
+    // En session XR, les matrices caméra ne sont resynchronisées que dans renderer.render() —
+    // appelé après cette mise à jour. Si elles ne sont pas encore prêtes (première frame),
+    // on retente au prochain intervalle plutôt que de planter la boucle de rendu.
+    if (!camera.projectionMatrix || !camera.matrixWorldInverse) return 0;
+
     this.regenTimer = randomRegenInterval();
 
     this.frustumMatrix.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
