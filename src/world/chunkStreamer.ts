@@ -6,6 +6,7 @@ import type { LevelProfile } from "../shared/levelProfile";
 import { createSeededNoise2D } from "../shared/noise";
 import { buildChunkGroup } from "./chunkMesh";
 import { GlitchTrap } from "./glitchTrap";
+import { WallTrap } from "./wallTrap";
 
 const REGEN_MIN_INTERVAL_SECONDS = 6;
 const REGEN_MAX_INTERVAL_SECONDS = 12;
@@ -17,14 +18,17 @@ const REGEN_CORRUPTION_PULSE = 0.1;
 interface LoadedChunk {
   group: THREE.Group;
   layout: ChunkLayout;
-  traps: GlitchTrap[];
+  glitchTraps: GlitchTrap[];
+  wallTraps: WallTrap[];
   epoch: number;
   bounds: THREE.Box3;
 }
 
 export interface ChunkStreamerUpdateResult {
   corruptionDelta: number;
-  trapJustTriggered: boolean;
+  glitchTrapJustTriggered: boolean;
+  wallTrapJustWarned: boolean;
+  wallTrapJustPopped: boolean;
 }
 
 /**
@@ -77,7 +81,7 @@ export class ChunkStreamer {
   onSessionStart(): void {
     this.sessionStarted = true;
     for (const chunk of this.loaded.values()) {
-      for (const trap of chunk.traps) trap.play();
+      for (const trap of chunk.glitchTraps) trap.play();
     }
   }
 
@@ -91,21 +95,30 @@ export class ChunkStreamer {
     }
 
     let corruptionDelta = 0;
-    let trapJustTriggered = false;
+    let glitchTrapJustTriggered = false;
+    let wallTrapJustWarned = false;
+    let wallTrapJustPopped = false;
+
     for (const chunk of this.loaded.values()) {
-      for (const trap of chunk.traps) {
+      for (const trap of chunk.glitchTraps) {
         const result = trap.update(playerPosition, elapsedSeconds, deltaSeconds);
         corruptionDelta += result.corruptionDelta;
-        trapJustTriggered = trapJustTriggered || result.justTriggered;
+        glitchTrapJustTriggered = glitchTrapJustTriggered || result.justTriggered;
+      }
+      for (const trap of chunk.wallTraps) {
+        const result = trap.update(playerPosition, deltaSeconds);
+        corruptionDelta += result.corruptionDelta;
+        wallTrapJustWarned = wallTrapJustWarned || result.justWarned;
+        wallTrapJustPopped = wallTrapJustPopped || result.justPopped;
       }
     }
 
     corruptionDelta += this.updateDynamicMaze(camera, deltaSeconds);
 
-    return { corruptionDelta, trapJustTriggered };
+    return { corruptionDelta, glitchTrapJustTriggered, wallTrapJustWarned, wallTrapJustPopped };
   }
 
-  /** Remplit `target` avec les obstacles (murs + piliers) des chunks voisins, pour la collision. */
+  /** Remplit `target` avec les obstacles (murs + piliers + murs-pièges actifs) des chunks voisins. */
   collectNearbyWallSegments(playerPosition: THREE.Vector3, target: WallSegment[]): void {
     target.length = 0;
     const chunkX = Math.floor(playerPosition.x / CHUNK_SIZE);
@@ -117,6 +130,10 @@ export class ChunkStreamer {
         if (!chunk) continue;
         for (const segment of chunk.layout.wallSegments) target.push(segment);
         for (const segment of chunk.layout.pillarObstacles) target.push(segment);
+        for (const trap of chunk.wallTraps) {
+          const segment = trap.getActiveSegment();
+          if (segment) target.push(segment);
+        }
       }
     }
   }
@@ -184,10 +201,16 @@ export class ChunkStreamer {
     const group = buildChunkGroup(layout, originX, originZ, CHUNK_SIZE);
     this.scene.add(group);
 
-    const traps = layout.glitchTrapPositions.map((position) => {
-      const trap = new GlitchTrap(position.x, position.z, this.audioListener);
+    const glitchTraps = layout.glitchTrapPositions.map((position) => {
+      const trap = new GlitchTrap(position.x, position.z, this.audioListener, layout.wallSegments);
       this.scene.add(trap.group);
       if (this.sessionStarted) trap.play();
+      return trap;
+    });
+
+    const wallTraps = layout.wallTrapCandidates.map((segment) => {
+      const trap = new WallTrap(segment, this.audioListener);
+      this.scene.add(trap.group);
       return trap;
     });
 
@@ -196,7 +219,7 @@ export class ChunkStreamer {
       new THREE.Vector3(originX + CHUNK_SIZE, WALL_HEIGHT, originZ + CHUNK_SIZE),
     );
 
-    this.loaded.set(key, { group, layout, traps, epoch, bounds });
+    this.loaded.set(key, { group, layout, glitchTraps, wallTraps, epoch, bounds });
   }
 
   private unloadChunk(key: string): void {
@@ -204,7 +227,11 @@ export class ChunkStreamer {
     if (!chunk) return;
     this.scene.remove(chunk.group);
     disposeGroup(chunk.group);
-    for (const trap of chunk.traps) {
+    for (const trap of chunk.glitchTraps) {
+      this.scene.remove(trap.group);
+      trap.dispose();
+    }
+    for (const trap of chunk.wallTraps) {
       this.scene.remove(trap.group);
       trap.dispose();
     }

@@ -2,10 +2,12 @@
 
 Jeu d'exploration horrifique en VR, dans le navigateur (WebXR). Voir la fiche projet pour le concept complet.
 
-**État actuel : étape 5 de la roadmap (glitchs)** — scène WebXR, locomotion fluide + snap-turn,
-génération par chunks streamés avec collisions, look VHS, textures PBR, levels avec sortie
-signalée et difficulté progressive, et maintenant des pièges glitch (zones de corruption) plus un
-labyrinthe dynamique qui se réagence hors du champ de vision du joueur.
+**État actuel : étape 5 de la roadmap (glitchs), look affiné** — scène WebXR, locomotion fluide +
+snap-turn, génération par chunks streamés avec collisions, levels avec sortie signalée et
+difficulté progressive, deux types de pièges glitch (zones de corruption plaquées sur les
+surfaces + murs qui surgissent temporairement) et un labyrinthe dynamique. Look VHS affiné après
+retours visuels : vraie vidéo de bruit en overlay, papier peint à motif chevron, plafond avec
+dalles lumineuses tissées dans la texture (plus d'objets 3D pour les néons).
 
 ## Stack
 
@@ -63,12 +65,15 @@ src/
     levelManager.ts          Orchestre la progression : profil par profondeur, sortie, transition
     chunkStreamer.ts        Charge/décharge les chunks (rayon 2), anime les pièges, régénère le
                                labyrinthe hors champ de vision
-    chunkMesh.ts             Construit les meshes THREE d'un chunk (murs fusionnés, piliers/néons instanciés)
+    chunkMesh.ts             Construit les meshes THREE d'un chunk (murs fusionnés, piliers instanciés)
     exitBeacon.ts             Marqueur de sortie : anneau émissif pulsé + balise sonore positionnelle
-    glitchTrap.ts             Piège "zone de corruption" : marqueur scintillant + grésillement audio
+    glitchTrap.ts             Piège "zone de corruption" : décalques (sol + mur proche) scintillants
+    wallTrap.ts                Piège "mur qui surgit" : bloque temporairement un passage ouvert
+    vhsNoiseTexture.ts         Texture vidéo de bruit VHS partagée (un seul <video> décodé)
     corruption.ts             Accumulateur de corruption VHS cumulable, dissipée dans le temps
     collision.ts             Résolution de collision cercle/AABB (plan XZ)
-    materials.ts             Charge les textures PBR (src/assets/textures) et construit les matériaux
+    materials.ts             Charge/génère les textures et construit les matériaux (mur : motif
+                               chevron par canvas ; plafond : dalles lumineuses en emissiveMap)
     vhsMaterial.ts            Effet VHS injecté dans les matériaux (onBeforeCompile) : grain,
                                aberration chromatique, quantification des couleurs, teinte jaunâtre
   shared/                    Logique pure, sans dépendance three.js — réutilisable côté serveur
@@ -85,6 +90,12 @@ src/
 - Les textures sont de vraies textures PBR CC0 (ambientCG.com — pas les textures Poliigon
   fournies : licence commerciale incompatible avec un dépôt public, voir `src/world/materials.ts`).
   Déjà en 1K, WebP (basecolor + normal + roughness).
+- Le motif chevron du papier peint (référence fournie) n'existe pas en CC0 : généré par canvas
+  (`createWallBaseColorTexture`), en réutilisant le relief/la rugosité de la vraie photo pour
+  garder un grain de surface réaliste.
+- Les dalles lumineuses du plafond sont tissées dans la texture (`emissiveMap`, son propre
+  `repeat` indépendant du `map`) plutôt que d'être des objets 3D séparés — plus de InstancedMesh
+  de néons, juste un plan de plafond dont le matériau porte les panneaux émissifs.
 - Le grain de l'overlay VHS (`vhsOverlay.ts`) vient d'une vraie vidéo de bruit TV (Pixabay,
   licence Content License — retraitée : redimensionnée, recompressée en WebM, pas le fichier
   brut, pour rester dans le cadre "modifier/adapter" de la licence), pas d'un hash procédural.
@@ -94,8 +105,8 @@ src/
   cohérents à leur frontière, et cette logique est réutilisable telle quelle côté serveur pour la
   validation anti-triche (étape 7 de la roadmap).
 - Les murs de chaque chunk sont fusionnés en une seule géométrie boîte (épaisseur réelle, cohérente
-  avec la collision — pas un simple plan), les piliers et néons en `InstancedMesh`, pour tenir le
-  budget de la fiche projet (<100 draw calls). Les piliers ont une vraie collision (boîte carrée).
+  avec la collision — pas un simple plan), les piliers en `InstancedMesh`, pour tenir le budget de
+  la fiche projet (<100 draw calls). Les piliers ont une vraie collision (boîte carrée).
 - L'effet VHS (`vhsMaterial.ts`) est injecté par matériau via `onBeforeCompile`, pas de
   post-processing `EffectComposer` (non pris en charge nativement en WebXR).
 - L'ambiance sonore est un bourdonnement procédural (Web Audio), sans fichier audio externe ; la

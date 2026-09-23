@@ -13,10 +13,14 @@ const EXIT_REACHED_DISTANCE = 1.1;
 export const SPAWN_LOCAL_POSITION = new THREE.Vector3(CELL_SIZE / 2, 0, CELL_SIZE / 2);
 
 export interface LevelUpdateResult {
-  /** Corruption VHS à ajouter cette frame (pièges glitch + régénération de labyrinthe hors champ). */
+  /** Corruption VHS à ajouter cette frame (pièges glitch + murs-pièges + labyrinthe dynamique). */
   corruptionDelta: number;
-  /** Vrai la frame où le joueur entre dans un piège glitch (signal haptique). */
-  trapJustTriggered: boolean;
+  /** Vrai la frame où le joueur entre dans une zone de corruption (signal haptique léger). */
+  glitchTrapJustTriggered: boolean;
+  /** Vrai la frame où un mur-piège commence son avertissement (signal haptique léger). */
+  wallTrapJustWarned: boolean;
+  /** Vrai la frame où un mur-piège surgit pleinement (signal haptique fort). */
+  wallTrapJustPopped: boolean;
 }
 
 /**

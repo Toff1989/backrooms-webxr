@@ -1,19 +1,15 @@
 import * as THREE from "three";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
-import { CELL_SIZE, PILLAR_SIZE, WALL_HEIGHT, WALL_THICKNESS } from "../shared/constants";
+import { PILLAR_SIZE, WALL_HEIGHT, WALL_THICKNESS } from "../shared/constants";
 import type { ChunkLayout } from "../shared/chunkLayout";
-import { getCeilingMaterial, getFloorMaterial, getNeonMaterial, getPillarMaterial, getWallMaterial } from "./materials";
-
-const NEON_WIDTH = 1.6;
-const NEON_DEPTH = 0.25;
-const NEON_THICKNESS = 0.05;
-/** Espacement des néons, en cellules (ambiance bakée, pas d'ombres dynamiques). */
-const NEON_SPACING_CELLS = 3;
+import { getCeilingMaterial, getFloorMaterial, getPillarMaterial, getWallMaterial } from "./materials";
 
 /**
  * Construit le groupe THREE d'un chunk à partir de sa disposition (murs/piliers).
  * Les murs sont fusionnés en une seule géométrie (1 draw call) pour tenir le budget
  * de la fiche projet (<100 draw calls) même avec plusieurs dizaines de chunks chargés.
+ * Les néons ne sont plus des objets 3D séparés : ce sont des panneaux émissifs tissés
+ * dans la texture du plafond (voir `materials.ts`, `createCeilingEmissiveTexture`).
  */
 export function buildChunkGroup(layout: ChunkLayout, chunkOriginX: number, chunkOriginZ: number, chunkSize: number): THREE.Group {
   const group = new THREE.Group();
@@ -30,9 +26,6 @@ export function buildChunkGroup(layout: ChunkLayout, chunkOriginX: number, chunk
 
   const pillars = buildPillars(layout);
   if (pillars) group.add(pillars);
-
-  const neonStrips = buildNeonStrips(chunkOriginX, chunkOriginZ, chunkSize);
-  if (neonStrips) group.add(neonStrips);
 
   return group;
 }
@@ -92,32 +85,6 @@ function buildPillars(layout: ChunkLayout): THREE.InstancedMesh | null {
 
   layout.pillarPositions.forEach((position, index) => {
     matrix.setPosition(position.x, WALL_HEIGHT / 2, position.z);
-    mesh.setMatrixAt(index, matrix);
-  });
-  mesh.instanceMatrix.needsUpdate = true;
-
-  return mesh;
-}
-
-/** Néons émissifs plafonniers (sans point lights dynamiques : ambiance bakée). */
-function buildNeonStrips(chunkOriginX: number, chunkOriginZ: number, chunkSize: number): THREE.InstancedMesh | null {
-  const spacing = CELL_SIZE * NEON_SPACING_CELLS;
-  const margin = CELL_SIZE;
-  const positions: Array<{ x: number; z: number }> = [];
-
-  for (let x = chunkOriginX + margin; x <= chunkOriginX + chunkSize - margin; x += spacing) {
-    for (let z = chunkOriginZ + margin; z <= chunkOriginZ + chunkSize - margin; z += spacing) {
-      positions.push({ x, z });
-    }
-  }
-  if (positions.length === 0) return null;
-
-  const geometry = new THREE.BoxGeometry(NEON_WIDTH, NEON_THICKNESS, NEON_DEPTH);
-  const mesh = new THREE.InstancedMesh(geometry, getNeonMaterial(), positions.length);
-  const matrix = new THREE.Matrix4();
-
-  positions.forEach((position, index) => {
-    matrix.setPosition(position.x, WALL_HEIGHT - NEON_THICKNESS, position.z);
     mesh.setMatrixAt(index, matrix);
   });
   mesh.instanceMatrix.needsUpdate = true;

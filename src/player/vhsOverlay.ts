@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import vhsNoiseVideoUrl from "../assets/video/vhs-noise.webm";
+import { getVhsNoiseTexture } from "../world/vhsNoiseTexture";
 
 const VERTEX_SHADER = /* glsl */ `
   varying vec2 vUv;
@@ -38,22 +38,9 @@ const FRAGMENT_SHADER = /* glsl */ `
  */
 export class VhsOverlay {
   private readonly material: THREE.ShaderMaterial;
-  private readonly video: HTMLVideoElement;
 
   constructor(camera: THREE.Camera) {
-    this.video = document.createElement("video");
-    this.video.src = vhsNoiseVideoUrl;
-    this.video.loop = true;
-    this.video.muted = true;
-    this.video.playsInline = true;
-    this.video.play().catch(() => {});
-
-    const noiseTexture = new THREE.VideoTexture(this.video);
-    noiseTexture.wrapS = THREE.RepeatWrapping;
-    noiseTexture.wrapT = THREE.RepeatWrapping;
-    noiseTexture.magFilter = THREE.NearestFilter;
-    noiseTexture.minFilter = THREE.NearestFilter;
-    noiseTexture.colorSpace = THREE.NoColorSpace;
+    const noiseTexture = getVhsNoiseTexture();
 
     const geometry = new THREE.PlaneGeometry(4, 4);
     this.material = new THREE.ShaderMaterial({

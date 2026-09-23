@@ -71,8 +71,12 @@ window.addEventListener("resize", () => {
 const nearbyWallSegments: WallSegment[] = [];
 const timer = new THREE.Timer();
 
-const TRAP_HAPTIC_INTENSITY = 0.6;
-const TRAP_HAPTIC_DURATION_MS = 120;
+const GLITCH_HAPTIC_INTENSITY = 0.6;
+const GLITCH_HAPTIC_DURATION_MS = 120;
+const WALL_TRAP_WARNING_HAPTIC_INTENSITY = 0.35;
+const WALL_TRAP_WARNING_HAPTIC_DURATION_MS = 90;
+const WALL_TRAP_POP_HAPTIC_INTENSITY = 1;
+const WALL_TRAP_POP_HAPTIC_DURATION_MS = 180;
 
 renderer.setAnimationLoop((timestamp) => {
   timer.update(timestamp);
@@ -85,7 +89,9 @@ renderer.setAnimationLoop((timestamp) => {
   resolveWallCollisions(playerRig.position, PLAYER_RADIUS, nearbyWallSegments);
 
   if (levelUpdate.corruptionDelta > 0) corruption.add(levelUpdate.corruptionDelta);
-  if (levelUpdate.trapJustTriggered) triggerHapticPulse(renderer, TRAP_HAPTIC_INTENSITY, TRAP_HAPTIC_DURATION_MS);
+  if (levelUpdate.glitchTrapJustTriggered) triggerHapticPulse(renderer, GLITCH_HAPTIC_INTENSITY, GLITCH_HAPTIC_DURATION_MS);
+  if (levelUpdate.wallTrapJustWarned) triggerHapticPulse(renderer, WALL_TRAP_WARNING_HAPTIC_INTENSITY, WALL_TRAP_WARNING_HAPTIC_DURATION_MS);
+  if (levelUpdate.wallTrapJustPopped) triggerHapticPulse(renderer, WALL_TRAP_POP_HAPTIC_INTENSITY, WALL_TRAP_POP_HAPTIC_DURATION_MS);
 
   if (levelManager.hasReachedExit(playerRig.position)) {
     const spawnPosition = levelManager.descend();

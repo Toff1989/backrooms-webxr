@@ -25,6 +25,9 @@ export interface ChunkLayout {
   pillarObstacles: WallSegment[];
   /** Emplacements des pièges glitch (pas de collision, juste un déclenchement par proximité). */
   glitchTrapPositions: Array<{ x: number; z: number }>;
+  /** Bords actuellement ouverts choisis comme mur-piège (fiche : "mur qui surgit"). Pas de
+   * collision tant qu'il n'a pas surgi — voir WallTrap, qui gère l'apparition temporaire. */
+  wallTrapCandidates: WallSegment[];
 }
 
 /**
@@ -55,6 +58,7 @@ export function generateChunkLayout(
   const pillarPositions: Array<{ x: number; z: number }> = [];
   const pillarObstacles: WallSegment[] = [];
   const glitchTrapPositions: Array<{ x: number; z: number }> = [];
+  const wallTrapCandidates: WallSegment[] = [];
   const baseCellX = chunkX * CHUNK_CELLS;
   const baseCellZ = chunkZ * CHUNK_CELLS;
   const halfThickness = WALL_THICKNESS / 2;
@@ -66,23 +70,33 @@ export function generateChunkLayout(
       const originX = cellX * CELL_SIZE;
       const originZ = cellZ * CELL_SIZE;
 
-      if (hasWallEdge(profile, noise2D, seedInt, exitLocation, guaranteedPathEdges, cellX, cellZ, "north")) {
-        wallSegments.push({
-          minX: originX - halfThickness,
-          maxX: originX + CELL_SIZE + halfThickness,
-          minZ: originZ - halfThickness,
-          maxZ: originZ + halfThickness,
-        });
-      }
+      processEdge(
+        profile,
+        noise2D,
+        seedInt,
+        exitLocation,
+        guaranteedPathEdges,
+        cellX,
+        cellZ,
+        "north",
+        { minX: originX - halfThickness, maxX: originX + CELL_SIZE + halfThickness, minZ: originZ - halfThickness, maxZ: originZ + halfThickness },
+        wallSegments,
+        wallTrapCandidates,
+      );
 
-      if (hasWallEdge(profile, noise2D, seedInt, exitLocation, guaranteedPathEdges, cellX, cellZ, "west")) {
-        wallSegments.push({
-          minX: originX - halfThickness,
-          maxX: originX + halfThickness,
-          minZ: originZ - halfThickness,
-          maxZ: originZ + CELL_SIZE + halfThickness,
-        });
-      }
+      processEdge(
+        profile,
+        noise2D,
+        seedInt,
+        exitLocation,
+        guaranteedPathEdges,
+        cellX,
+        cellZ,
+        "west",
+        { minX: originX - halfThickness, maxX: originX + halfThickness, minZ: originZ - halfThickness, maxZ: originZ + CELL_SIZE + halfThickness },
+        wallSegments,
+        wallTrapCandidates,
+      );
 
       const inClearance = isInsideSpawnClearance(cellX, cellZ) || isInsideExitClearance(cellX, cellZ, exitLocation);
       const hasPillar = !inClearance && coordinateHash01(seedInt, cellX, cellZ, 47) < profile.pillarProbability;
@@ -102,7 +116,7 @@ export function generateChunkLayout(
     }
   }
 
-  return { chunkX, chunkZ, wallSegments, pillarPositions, pillarObstacles, glitchTrapPositions };
+  return { chunkX, chunkZ, wallSegments, pillarPositions, pillarObstacles, glitchTrapPositions, wallTrapCandidates };
 }
 
 function isInsideSpawnClearance(cellX: number, cellZ: number): boolean {
@@ -175,7 +189,11 @@ function computeGuaranteedPathEdges(exit: ExitLocation): Set<string> {
   return edges;
 }
 
-function hasWallEdge(
+/**
+ * Décide si le bord porte un mur, et sinon (bord ouvert, hors dégagement/couloir
+ * garanti) s'il cache un mur-piège — pousse le segment dans le tableau approprié.
+ */
+function processEdge(
   profile: LevelProfile,
   noise2D: NoiseFunction2D,
   seedInt: number,
@@ -184,12 +202,29 @@ function hasWallEdge(
   cellX: number,
   cellZ: number,
   edge: WallEdge,
-): boolean {
-  if (edgeTouchesClearance(cellX, cellZ, edge, exit)) return false;
-  if (guaranteedPathEdges.has(edgeKey(cellX, cellZ, edge))) return false;
-
-  const density = wallDensityAt(profile, noise2D, cellX, cellZ);
+  segment: WallSegment,
+  wallSegments: WallSegment[],
+  wallTrapCandidates: WallSegment[],
+): void {
+  const protectedEdge = edgeTouchesClearance(cellX, cellZ, edge, exit) || guaranteedPathEdges.has(edgeKey(cellX, cellZ, edge));
   const salt = edge === "north" ? 11 : 23;
-  const roll = coordinateHash01(seedInt, cellX, cellZ, salt);
-  return roll < density;
+
+  if (!protectedEdge) {
+    const density = wallDensityAt(profile, noise2D, cellX, cellZ);
+    const roll = coordinateHash01(seedInt, cellX, cellZ, salt);
+    if (roll < density) {
+      wallSegments.push(segment);
+      return;
+    }
+  }
+
+  // Bord ouvert (ou protégé) : jamais un mur-piège sur le couloir garanti/le dégagement,
+  // pour ne jamais bloquer la route vers la sortie.
+  if (!protectedEdge) {
+    const wallTrapSalt = edge === "north" ? 111 : 123;
+    const wallTrapRoll = coordinateHash01(seedInt, cellX, cellZ, wallTrapSalt);
+    if (wallTrapRoll < profile.wallTrapProbability) {
+      wallTrapCandidates.push(segment);
+    }
+  }
 }

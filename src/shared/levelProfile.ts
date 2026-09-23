@@ -19,6 +19,8 @@ export interface LevelProfile {
   exitMinDistanceCells: number;
   /** Probabilité [0..1] qu'une cellule porte un piège glitch. */
   glitchProbability: number;
+  /** Probabilité [0..1] qu'un bord actuellement ouvert cache un mur-piège (surgit au contact). */
+  wallTrapProbability: number;
 }
 
 /**
@@ -43,6 +45,10 @@ const BASE_GLITCH_PROBABILITY = 0.015;
 const GLITCH_PROBABILITY_PER_DEPTH = 0.003;
 const MAX_GLITCH_PROBABILITY = 0.08;
 
+const BASE_WALL_TRAP_PROBABILITY = 0.008;
+const WALL_TRAP_PROBABILITY_PER_DEPTH = 0.0015;
+const MAX_WALL_TRAP_PROBABILITY = 0.04;
+
 /** Construit le profil du level à une profondeur donnée : seed dérivée + difficulté croissante. */
 export function createLevelProfile(depth: number): LevelProfile {
   return {
@@ -54,5 +60,6 @@ export function createLevelProfile(depth: number): LevelProfile {
     pillarProbability: Math.min(MAX_PILLAR_PROBABILITY, BASE_PILLAR_PROBABILITY + depth * PILLAR_PROBABILITY_PER_DEPTH),
     exitMinDistanceCells: Math.min(MAX_EXIT_DISTANCE_CELLS, BASE_EXIT_DISTANCE_CELLS + depth * EXIT_DISTANCE_PER_DEPTH),
     glitchProbability: Math.min(MAX_GLITCH_PROBABILITY, BASE_GLITCH_PROBABILITY + depth * GLITCH_PROBABILITY_PER_DEPTH),
+    wallTrapProbability: Math.min(MAX_WALL_TRAP_PROBABILITY, BASE_WALL_TRAP_PROBABILITY + depth * WALL_TRAP_PROBABILITY_PER_DEPTH),
   };
 }
