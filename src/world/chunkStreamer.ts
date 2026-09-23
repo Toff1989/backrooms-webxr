@@ -121,7 +121,12 @@ export class ChunkStreamer {
     let wallTrapJustWarned = false;
     let wallTrapJustPopped = false;
 
-    this.collectNearbyWallSegments(playerPosition, this.physicsWallScratch);
+    // Uniquement les murs/piliers/pièges (jamais les objets dynamiques eux-mêmes, voir
+    // `collectStaticWallSegments`) : sinon un objet se retrouverait dans sa propre liste
+    // de collision (distance ~0 → écarté d'un coup plein rayon par `resolveWallCollisions`,
+    // chaque frame — l'objet est alors "éjecté" à grande vitesse au lieu de simplement
+    // glisser). Les objets ne se bousculent pas entre eux, seulement contre le décor fixe.
+    this.collectStaticWallSegments(playerPosition, this.physicsWallScratch);
 
     for (const chunk of this.loaded.values()) {
       for (const trap of chunk.glitchTraps) {
@@ -151,15 +156,11 @@ export class ChunkStreamer {
     return { corruptionDelta, glitchTrapJustTriggered, wallTrapJustWarned, wallTrapJustPopped };
   }
 
-  /**
-   * Remplit `target` avec les obstacles (murs + piliers + murs-pièges actifs + mobilier +
-   * objets de collection) des chunks voisins. Le mobilier/les objets de collection sont
-   * dérivés de leur position *actuelle* (pas d'une boîte figée à la génération) : une
-   * fois bousculés par la physique légère (`physics.ts`), leur collision doit suivre
-   * leur position réelle, sinon le joueur bute sur du vide ou traverse l'objet déplacé.
-   * Un objet en main (`isGrabbable()` faux le temps de la saisie) ne bloque pas le joueur.
-   */
-  collectNearbyWallSegments(playerPosition: THREE.Vector3, target: WallSegment[]): void {
+  /** Murs + piliers + murs-pièges actifs uniquement (décor fixe) : c'est la liste contre
+   * laquelle les objets dynamiques (mobilier, collection) résolvent leur propre physique
+   * (voir `update`). Ne doit JAMAIS inclure d'objet dynamique, sinon un objet se
+   * retrouverait dans sa propre liste de collision. */
+  private collectStaticWallSegments(playerPosition: THREE.Vector3, target: WallSegment[]): void {
     target.length = 0;
     const chunkX = Math.floor(playerPosition.x / CHUNK_SIZE);
     const chunkZ = Math.floor(playerPosition.z / CHUNK_SIZE);
@@ -174,6 +175,28 @@ export class ChunkStreamer {
           const segment = trap.getActiveSegment();
           if (segment) target.push(segment);
         }
+      }
+    }
+  }
+
+  /**
+   * Remplit `target` avec les obstacles pour le *joueur* : décor fixe (voir
+   * `collectStaticWallSegments`) + mobilier + objets de collection, dérivés de leur
+   * position *actuelle* (pas d'une boîte figée à la génération) : une fois bousculés par
+   * la physique légère (`physics.ts`), leur collision doit suivre leur position réelle.
+   * Un objet en main (`isGrabbable()` faux le temps de la saisie) ne bloque pas le joueur.
+   * Réservé au joueur : ne jamais passer cette liste à la résolution physique d'un objet
+   * dynamique lui-même (voir le commentaire dans `update`).
+   */
+  collectNearbyWallSegments(playerPosition: THREE.Vector3, target: WallSegment[]): void {
+    this.collectStaticWallSegments(playerPosition, target);
+    const chunkX = Math.floor(playerPosition.x / CHUNK_SIZE);
+    const chunkZ = Math.floor(playerPosition.z / CHUNK_SIZE);
+
+    for (let dx = -1; dx <= 1; dx++) {
+      for (let dz = -1; dz <= 1; dz++) {
+        const chunk = this.loaded.get(chunkKey(chunkX + dx, chunkZ + dz));
+        if (!chunk) continue;
         for (const entry of chunk.propPhysics) {
           target.push(squareSegment(entry.object.position.x, entry.object.position.z, PROP_PHYSICS_RADIUS));
         }
