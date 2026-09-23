@@ -4,3 +4,7 @@ dist
 *.local
 *.tsbuildinfo
 .DS_Store
+
+# Backend (étape 7/8) : secrets et base SQLite locale, jamais committés.
+.env
+server/data

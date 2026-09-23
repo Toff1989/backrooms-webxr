@@ -2,12 +2,14 @@
 
 Jeu d'exploration horrifique en VR, dans le navigateur (WebXR). Voir la fiche projet pour le concept complet.
 
-**État actuel : étape 5 de la roadmap (glitchs), look affiné** — scène WebXR, locomotion fluide +
-snap-turn, génération par chunks streamés avec collisions, levels avec sortie signalée et
-difficulté progressive, deux types de pièges glitch (zones de corruption plaquées sur les
-surfaces + murs qui surgissent temporairement) et un labyrinthe dynamique. Look VHS affiné après
-retours visuels : vraie vidéo de bruit en overlay, papier peint à motif chevron, plafond avec
-dalles lumineuses tissées dans la texture (plus d'objets 3D pour les néons).
+**État actuel : étape 8 de la roadmap (déploiement)** — scène WebXR, locomotion fluide +
+snap-turn, génération par chunks streamés avec collisions, levels avec sortie signalée (portail
+VHS, pas un simple anneau) et difficulté progressive, deux types de pièges glitch (zones de
+corruption + murs qui surgissent) et un labyrinthe dynamique. Décor (mobilier CC0) et ~50 objets
+de collection (vrais modèles CC0, rareté fixe par objet) avec physique légère (bousculade, chute),
+ramassage/manipulation au grip, menu poignet, persistance IndexedDB. Classement en ligne (API
+Node + SQLite, validation anti-triche serveur, filtre pseudo, écran de fin de run) et
+déploiement (Docker + scripts SSH/PM2 pour Plesk).
 
 ## Stack
 
@@ -16,16 +18,23 @@ Three.js (WebXRManager) + TypeScript + Vite (HTTPS local via `vite-plugin-mkcert
 
 ## Démarrage
 
+Le front seul fonctionne sans backend (seed locale de secours, voir `main.ts`), mais le
+classement (étape 7) a besoin du serveur API :
+
 ```bash
 npm install
-npm run dev
+npm run dev            # front, https://localhost:5173
+
+cd server
+npm install
+npm run dev            # API, http://127.0.0.1:8787 — proxiée par Vite sous /api en dev
 ```
 
-Le serveur de dev tourne en HTTPS (requis par WebXR hors `localhost`) grâce à `vite-plugin-mkcert`,
-qui génère un certificat local à la première exécution (nécessite un accès réseau sortant vers
-GitHub pour télécharger le binaire `mkcert` ; si ce téléchargement échoue dans un environnement
-restreint, `http://localhost` fonctionne aussi car les navigateurs le considèrent comme un contexte
-sécurisé).
+Le serveur de dev front tourne en HTTPS (requis par WebXR hors `localhost`) grâce à
+`vite-plugin-mkcert`, qui génère un certificat local à la première exécution (nécessite un accès
+réseau sortant vers GitHub pour télécharger le binaire `mkcert` ; si ce téléchargement échoue dans
+un environnement restreint, `http://localhost` fonctionne aussi car les navigateurs le considèrent
+comme un contexte sécurisé).
 
 - **Test sans casque** : `npm run dev:open` ouvre automatiquement le navigateur. Installer
   [Immersive Web Emulator](https://chromewebstore.google.com/detail/immersive-web-emulator/cgffilbpcibhmcfbgggfhfolhkfbhmik)
@@ -72,8 +81,9 @@ src/
     vhsNoiseTexture.ts         Texture vidéo de bruit VHS partagée (un seul <video> décodé)
     corruption.ts             Accumulateur de corruption VHS cumulable, dissipée dans le temps
     collision.ts             Résolution de collision cercle/AABB (plan XZ)
-    materials.ts             Charge/génère les textures et construit les matériaux (mur : motif
-                               chevron par canvas ; plafond : dalles lumineuses en emissiveMap)
+    materials.ts             Charge les textures PBR (basecolor/normal/roughness/ao/displacement)
+                               et construit les matériaux ; plafond : vraie carte d'émission Poliigon
+                               en emissiveMap (dalles lumineuses déjà présentes dans la photo)
     vhsMaterial.ts            Effet VHS injecté dans les matériaux (onBeforeCompile) : grain,
                                aberration chromatique, quantification des couleurs, teinte jaunâtre
   shared/                    Logique pure, sans dépendance three.js — réutilisable côté serveur
@@ -82,28 +92,37 @@ src/
     exit.ts                   Position de la sortie du level (fonction pure de la seed)
     rng.ts                   Hash déterministe par coordonnées + PRNG seedé (seedrandom)
     noise.ts                 Bruit simplex 2D seedé (simplex-noise)
-    chunkLayout.ts           Génère la disposition (murs/piliers/pièges) d'un chunk depuis sa seed
+    chunkLayout.ts           Génère la disposition (murs/piliers/pièges/collection) d'un chunk
+    collectibles.ts          Pool des ~50 objets de collection (rareté fixe, lore FR/EN)
+    pseudoGenerator.ts       Suggestions de pseudo (templates seedés, pas de clavier virtuel)
+server/                      API de classement (étape 7) — voir server/src/, code partagé avec le
+                               client via des imports relatifs vers src/shared/
+deploy/                      Scripts de déploiement SSH/Plesk (étape 8) — voir deploy/README.md
 ```
 
 ## Notes sur cette étape
 
-- Les textures sont de vraies textures PBR CC0 (ambientCG.com — pas les textures Poliigon
-  fournies : licence commerciale incompatible avec un dépôt public, voir `src/world/materials.ts`).
-  Déjà en 1K, WebP (basecolor + normal + roughness).
-- Le motif chevron du papier peint (référence fournie) n'existe pas en CC0 : généré par canvas
-  (`createWallBaseColorTexture`), en réutilisant le relief/la rugosité de la vraie photo pour
-  garder un grain de surface réaliste.
-- Les dalles lumineuses du plafond sont tissées dans la texture (`emissiveMap`, son propre
-  `repeat` indépendant du `map`) plutôt que d'être des objets 3D séparés — plus de InstancedMesh
-  de néons, juste un plan de plafond dont le matériau porte les panneaux émissifs.
+- Les textures sont de vraies textures PBR Poliigon (collection Backrooms, téléchargées
+  gratuitement sur le site), redimensionnées en 1K et converties en WebP : basecolor, normal,
+  roughness, ao et displacement pour les 4 surfaces (mur/sol/plafond/pilier), plus une vraie
+  carte d'émission pour le plafond. Voir `src/world/materials.ts`.
+- Le displacement déplace réellement les sommets (`displacementMap` + `displacementScale`/`Bias`
+  faibles) : sol/murs/plafond/piliers sont subdivisés en conséquence dans `chunkMesh.ts`
+  (sinon seuls les coins du quad bougeraient, ce qui gondole toute la surface au lieu de créer
+  un relief). L'aoMap réutilise le même jeu d'UV que le reste (`texture.channel = 0` par défaut
+  en three.js), pas besoin d'un second canal UV.
+- Les dalles lumineuses du plafond viennent de la vraie carte d'émission Poliigon (`emissiveMap`,
+  alignée pixel pour pixel avec le carrelage photographié) plutôt que d'être des objets 3D séparés
+  — plus de InstancedMesh de néons, juste un plan de plafond dont le matériau porte les panneaux
+  émissifs.
 - Le grain de l'overlay VHS (`vhsOverlay.ts`) vient d'une vraie vidéo de bruit TV (Pixabay,
   licence Content License — retraitée : redimensionnée, recompressée en WebM, pas le fichier
   brut, pour rester dans le cadre "modifier/adapter" de la licence), pas d'un hash procédural.
   Échantillonnée en `NearestFilter` pour garder le grain brut, son intensité suit `uCorruption`.
 - La disposition d'un chunk (murs/piliers/pièges) est une fonction pure de ses coordonnées
   globales et de la seed (`src/shared/`) : deux chunks voisins générés indépendamment restent
-  cohérents à leur frontière, et cette logique est réutilisable telle quelle côté serveur pour la
-  validation anti-triche (étape 7 de la roadmap).
+  cohérents à leur frontière, et cette logique est réellement réutilisée côté serveur pour la
+  validation anti-triche (`server/src/validation.ts`, étape 7).
 - Les murs de chaque chunk sont fusionnés en une seule géométrie boîte (épaisseur réelle, cohérente
   avec la collision — pas un simple plan), les piliers en `InstancedMesh`, pour tenir le budget de
   la fiche projet (<100 draw calls). Les piliers ont une vraie collision (boîte carrée).
@@ -113,8 +132,9 @@ src/
   lecture démarre au `sessionstart` XR pour respecter les politiques d'autoplay des navigateurs.
 - Chaque level a sa propre seed dérivée (`<runSeed>:<profondeur>`, `levelProfile.ts`) et sa propre
   difficulté : densité de murs, probabilité de pilier/piège et distance de la sortie augmentent
-  avec la profondeur (bornées par des plafonds). La seed de run est fixe côté client pour
-  l'instant ; la vraie seed aléatoire signée par le serveur (`POST /run/start`) arrive à l'étape 7.
+  avec la profondeur (bornées par des plafonds). La seed de run vient du serveur (`POST
+  /run/start`, étape 7) ; le tout premier rendu démarre sur une seed locale de secours le temps
+  de l'aller-retour réseau (`LevelManager.restartRun`), pour ne jamais bloquer l'affichage.
 - La position de la sortie est dérivée de la seed (`exit.ts`) et un couloir en équerre entre le
   spawn et la sortie est systématiquement forcé sans mur (`chunkLayout.ts`), y compris après une
   régénération du labyrinthe dynamique : la sortie reste toujours atteignable.
@@ -136,9 +156,34 @@ src/
   corruption pour accompagner discrètement le changement.
 - Le panneau caméscope affiche la profondeur réelle, mise à jour à chaque changement de level.
 
-## Prochaines étapes (roadmap)
+## Étapes 6–8 (résumé)
 
-6. Collection d'objets FR/EN, menu poignet, persistance IndexedDB
-7. Classement en ligne (API Node + SQLite, validation serveur)
-8. Déploiement (Docker Compose, reverse proxy HTTPS)
+- **Collection (étape 6)** : ~50 modèles CC0 distincts (Poly Haven), rareté fixe par objet
+  (commun/rare/légendaire — pas un tirage indépendant), lore FR/EN généré par templates seedés,
+  espacement minimal entre objets (difficiles à trouver, jamais groupés). Ramassage au grip :
+  l'objet suit la main (`Object3D.attach`, manipulable en 3D) puis, au relâchement, soit rangé
+  dans la collection (près du corps) soit simplement lâché (physique légère, `world/physics.ts`)
+  — mobilier et collection ont tous deux une collision dynamique (dérivée de leur position
+  réelle, pas d'une boîte figée à la génération) et peuvent être bousculés par le joueur.
+  Menu poignet (main gauche) : pagination/tri au clic des thumbsticks. Persistance IndexedDB
+  (`world/collection.ts`).
+- **Classement (étape 7)** : `server/` (Fastify + SQLite/`better-sqlite3`). `POST /run/start`
+  fournit une seed signée (HMAC, `server/src/token.ts`) ; le client l'utilise pour générer le
+  monde (remplace la seed locale de secours du tout premier rendu). `POST /run/level` valide
+  chaque passage : le serveur régénère le level *sortant* avec le même code de génération pur
+  que le client (`src/shared/`) et calcule la distance spawn→sortie en ligne droite — le temps
+  écoulé doit être ≥ `distance / vitesse max du joueur`, une borne physique, pas une heuristique
+  (`server/src/validation.ts`). "STOP REC" (gâchette droite maintenue ~1,4s,
+  `player/stopRecControl.ts`) ouvre l'écran de fin de run (`player/endRunScreen.ts`) : pseudo
+  suggéré (pas de clavier virtuel — templates seedés FR-flavored, filtrés côté serveur contre une
+  liste FR+EN, `server/src/wordFilter.ts`), puis classement.
+- **Déploiement (étape 8)** : un seul process Node sert le build statique du front ET l'API
+  (`server/src/server.ts`), plus simple à héberger qu'un couple de conteneurs séparés.
+  `docker-compose.yml` + `Dockerfile` pour un usage local/VPS générique ; `deploy/` pour un
+  déploiement SSH direct vers un serveur Plesk (rsync + PM2, sans dépendre de l'extension Docker
+  de Plesk — voir `deploy/README.md`). Plesk gère son propre reverse proxy + HTTPS : le process
+  n'écoute qu'en local (`127.0.0.1`), jamais exposé directement.
+
+## Prochaine étape
+
 9. Optimisation Quest (profiling fps/draw calls, réglages de confort)

@@ -21,13 +21,11 @@ export interface LevelProfile {
   glitchProbability: number;
   /** Probabilité [0..1] qu'un bord actuellement ouvert cache un mur-piège (surgit au contact). */
   wallTrapProbability: number;
+  /** Probabilité [0..1] qu'une cellule porte un amas de mobilier (chaises, bureaux, meubles). */
+  propClusterProbability: number;
+  /** Probabilité [0..1] qu'une cellule porte un objet de collection. */
+  collectibleProbability: number;
 }
-
-/**
- * Seed de la run. Pour l'instant fixe côté client ; la vraie seed aléatoire signée par
- * le serveur (`POST /run/start`) arrive à l'étape 7 (classement + anti-triche).
- */
-const RUN_SEED = "backrooms-proto";
 
 const BASE_WALL_DENSITY = 0.24;
 const WALL_DENSITY_PER_DEPTH = 0.01;
@@ -49,10 +47,22 @@ const BASE_WALL_TRAP_PROBABILITY = 0.008;
 const WALL_TRAP_PROBABILITY_PER_DEPTH = 0.0015;
 const MAX_WALL_TRAP_PROBABILITY = 0.04;
 
-/** Construit le profil du level à une profondeur donnée : seed dérivée + difficulté croissante. */
-export function createLevelProfile(depth: number): LevelProfile {
+/** Décor, pas une difficulté : constant avec la profondeur. */
+const PROP_CLUSTER_PROBABILITY = 0.05;
+
+/** Volontairement rare : les objets de collection doivent être difficiles à trouver, pas
+ * un ramassage systématique — combiné à l'espacement minimal (voir `chunkLayout.ts`). */
+const COLLECTIBLE_PROBABILITY = 0.012;
+
+/**
+ * Construit le profil du level à une profondeur donnée : seed dérivée + difficulté
+ * croissante. `runSeed` vient du serveur (`POST /run/start`, étape 7) — signée et
+ * régénérable à l'identique côté serveur pour la validation anti-triche
+ * (`server/src/validation.ts`), ce qui est tout l'intérêt d'une fonction pure ici.
+ */
+export function createLevelProfile(depth: number, runSeed: string): LevelProfile {
   return {
-    seed: `${RUN_SEED}:${depth}`,
+    seed: `${runSeed}:${depth}`,
     depth,
     wallDensityBase: Math.min(MAX_WALL_DENSITY, BASE_WALL_DENSITY + depth * WALL_DENSITY_PER_DEPTH),
     wallDensityNoiseInfluence: 0.3,
@@ -61,5 +71,7 @@ export function createLevelProfile(depth: number): LevelProfile {
     exitMinDistanceCells: Math.min(MAX_EXIT_DISTANCE_CELLS, BASE_EXIT_DISTANCE_CELLS + depth * EXIT_DISTANCE_PER_DEPTH),
     glitchProbability: Math.min(MAX_GLITCH_PROBABILITY, BASE_GLITCH_PROBABILITY + depth * GLITCH_PROBABILITY_PER_DEPTH),
     wallTrapProbability: Math.min(MAX_WALL_TRAP_PROBABILITY, BASE_WALL_TRAP_PROBABILITY + depth * WALL_TRAP_PROBABILITY_PER_DEPTH),
+    propClusterProbability: PROP_CLUSTER_PROBABILITY,
+    collectibleProbability: COLLECTIBLE_PROBABILITY,
   };
 }

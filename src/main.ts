@@ -4,12 +4,19 @@ import { AmbientHum } from "./assets/audio/ambientHum";
 import { triggerHapticPulse } from "./player/haptics";
 import { CamcorderHud } from "./player/camcorderHud";
 import { ComfortVignette } from "./player/comfortVignette";
+import { ControllerRig } from "./player/controllerRig";
+import { EndRunScreen } from "./player/endRunScreen";
+import { GrabInteraction } from "./player/grabInteraction";
 import { Locomotion } from "./player/locomotion";
+import { StopRecControl } from "./player/stopRecControl";
 import { VhsOverlay } from "./player/vhsOverlay";
+import { WristMenu } from "./player/wristMenu";
 import type { WallSegment } from "./shared/chunkLayout";
+import { CollectionStore, toCollectionEntry } from "./world/collection";
 import { PLAYER_RADIUS, resolveWallCollisions } from "./world/collision";
 import { corruption } from "./world/corruption";
 import { LevelManager, SPAWN_LOCAL_POSITION } from "./world/levelManager";
+import { endRun, reportLevel, startRun, type RunSessionInfo } from "./world/runSession";
 import { updateVhsTime } from "./world/vhsMaterial";
 
 const appRoot = document.getElementById("app");
@@ -44,13 +51,86 @@ scene.add(new THREE.AmbientLight(0xfff0c0, 0.25));
 const audioListener = new THREE.AudioListener();
 camera.add(audioListener);
 
-const levelManager = new LevelManager(scene, audioListener);
+/**
+ * Étape 7 : la vraie seed de run vient du serveur (`POST /run/start`), mais le premier
+ * rendu ne doit jamais attendre l'aller-retour réseau — on démarre sur une seed locale
+ * temporaire, remplacée dès que le serveur répond (voir `LevelManager.restartRun`). Si
+ * le serveur est injoignable, le jeu reste jouable indéfiniment sur cette seed locale
+ * (aucune fonctionnalité de jeu ne dépend du classement).
+ */
+const LOCAL_FALLBACK_SEED = "local-offline";
+const levelManager = new LevelManager(scene, audioListener, LOCAL_FALLBACK_SEED);
+
+let currentSession: RunSessionInfo | null = null;
 
 const locomotion = new Locomotion(renderer, camera, playerRig);
 const comfortVignette = new ComfortVignette(camera);
 const vhsOverlay = new VhsOverlay(camera);
 const camcorderHud = new CamcorderHud(camera);
 const ambientHum = new AmbientHum(audioListener);
+
+const controllerRig = new ControllerRig(renderer, playerRig);
+const collectionStore = new CollectionStore();
+const wristMenu = new WristMenu(renderer, controllerRig, collectionStore);
+const GRAB_RADIUS = 0.4;
+// Ramassage confirmé seulement si l'objet est relâché près du corps (le "sac par-dessus
+// l'épaule" de la fiche) ; relâché plus loin, il tombe simplement (physique légère).
+const COLLECT_CONFIRM_RADIUS = 0.5;
+const releasePosition = new THREE.Vector3();
+new GrabInteraction(renderer, controllerRig, {
+  onGrabAttempt: (controller, worldPosition) => {
+    const instance = levelManager.tryHoldCollectible(worldPosition, GRAB_RADIUS);
+    if (instance) instance.beginHold(controller);
+    return instance;
+  },
+  onRelease: (_controller, instance) => {
+    releasePosition.copy(instance.endHold(scene));
+    const dx = releasePosition.x - playerRig.position.x;
+    const dz = releasePosition.z - playerRig.position.z;
+    if (Math.hypot(dx, dz) < COLLECT_CONFIRM_RADIUS) {
+      collectionStore.add(toCollectionEntry(instance.placement, levelManager.depth));
+      wristMenu.notifyCollectionChanged();
+      instance.beginCollect();
+    } else {
+      instance.dropWithPhysics();
+      levelManager.adoptDroppedCollectible(instance);
+    }
+  },
+});
+
+const endRunScreen = new EndRunScreen(
+  renderer,
+  camera,
+  (pseudo) => {
+    if (!currentSession) return Promise.reject(new Error("Pas de session de run active"));
+    return endRun(currentSession, pseudo);
+  },
+  () => {
+    stopRecControl.enabled = true;
+    beginNewRun();
+  },
+);
+
+const stopRecControl = new StopRecControl(renderer, () => {
+  stopRecControl.enabled = false;
+  endRunScreen.show(levelManager.depth);
+});
+
+/** Démarre une run côté serveur (seed + token) ; jouable en local si le serveur est injoignable (voir `runSession.ts`). */
+function beginNewRun(): void {
+  startRun()
+    .then((session) => {
+      currentSession = session;
+      const spawnPosition = levelManager.restartRun(session.seed);
+      playerRig.position.copy(spawnPosition);
+      camcorderHud.depth = levelManager.depth;
+    })
+    .catch(() => {
+      currentSession = null;
+    });
+}
+
+beginNewRun();
 
 renderer.xr.addEventListener("sessionstart", () => {
   ambientHum.start();
@@ -98,12 +178,16 @@ renderer.setAnimationLoop((timestamp) => {
     playerRig.position.copy(spawnPosition);
     camcorderHud.depth = levelManager.depth;
     corruption.add(1);
+    if (currentSession) reportLevel(currentSession, levelManager.depth);
   }
   corruption.update(deltaSeconds);
 
   comfortVignette.update(movementIntensity, deltaSeconds);
   vhsOverlay.update(elapsedSeconds, corruption.value);
   camcorderHud.update(deltaSeconds);
+  wristMenu.update(!endRunScreen.isVisible);
+  stopRecControl.update(deltaSeconds);
+  endRunScreen.update();
   updateVhsTime(elapsedSeconds);
   renderer.render(scene, camera);
 });

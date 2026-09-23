@@ -5,7 +5,10 @@ import { CHUNK_SIZE, STREAM_RADIUS_CHUNKS, WALL_HEIGHT } from "../shared/constan
 import type { LevelProfile } from "../shared/levelProfile";
 import { createSeededNoise2D } from "../shared/noise";
 import { buildChunkGroup } from "./chunkMesh";
+import { CollectibleInstance, COLLECTIBLE_PHYSICS_RADIUS, spawnCollectible } from "./collectible";
 import { GlitchTrap } from "./glitchTrap";
+import { PhysicsBody } from "./physics";
+import { spawnProp } from "./propLoader";
 import { WallTrap } from "./wallTrap";
 
 const REGEN_MIN_INTERVAL_SECONDS = 6;
@@ -15,11 +18,29 @@ const REGEN_MIN_DISTANCE_CHUNKS = 2;
 /** Corruption ajoutée quand un chunk hors champ se régénère (masque discrètement le changement). */
 const REGEN_CORRUPTION_PULSE = 0.1;
 
+/** Physique légère du mobilier (voir `physics.ts`) : un meuble bousculé glisse/tombe avant de se stabiliser.
+ * Le rayon de bousculade doit dépasser la distance de blocage (PLAYER_RADIUS + PROP_PHYSICS_RADIUS,
+ * voir `collectNearbyWallSegments`), sinon la collision empêche le joueur de jamais l'atteindre. */
+const PROP_PHYSICS_RADIUS = 0.35;
+const PROP_NUDGE_RADIUS = 0.75;
+const PROP_NUDGE_STRENGTH = 1.2;
+
+interface PropPhysicsEntry {
+  object: THREE.Object3D;
+  body: PhysicsBody;
+}
+
 interface LoadedChunk {
   group: THREE.Group;
+  /** Conteneur séparé pour le mobilier : chargement asynchrone, géométrie/matériaux
+   * partagés entre instances (jamais disposés au déchargement d'un chunk, contrairement
+   * à `group`). */
+  propsGroup: THREE.Group;
+  propPhysics: PropPhysicsEntry[];
   layout: ChunkLayout;
   glitchTraps: GlitchTrap[];
   wallTraps: WallTrap[];
+  collectibles: CollectibleInstance[];
   epoch: number;
   bounds: THREE.Box3;
 }
@@ -48,6 +69,7 @@ export class ChunkStreamer {
   private regenTimer = randomRegenInterval();
   private readonly frustum = new THREE.Frustum();
   private readonly frustumMatrix = new THREE.Matrix4();
+  private readonly physicsWallScratch: WallSegment[] = [];
 
   constructor(
     private readonly scene: THREE.Scene,
@@ -99,6 +121,8 @@ export class ChunkStreamer {
     let wallTrapJustWarned = false;
     let wallTrapJustPopped = false;
 
+    this.collectNearbyWallSegments(playerPosition, this.physicsWallScratch);
+
     for (const chunk of this.loaded.values()) {
       for (const trap of chunk.glitchTraps) {
         const result = trap.update(playerPosition, elapsedSeconds, deltaSeconds);
@@ -111,6 +135,15 @@ export class ChunkStreamer {
         wallTrapJustWarned = wallTrapJustWarned || result.justWarned;
         wallTrapJustPopped = wallTrapJustPopped || result.justPopped;
       }
+      for (const collectible of chunk.collectibles) collectible.update(deltaSeconds, playerPosition, this.physicsWallScratch);
+      for (const entry of chunk.propPhysics) {
+        if (entry.body.isSettled) {
+          const dx = entry.object.position.x - playerPosition.x;
+          const dz = entry.object.position.z - playerPosition.z;
+          if (Math.hypot(dx, dz) < PROP_NUDGE_RADIUS) entry.body.nudgeFrom(entry.object, playerPosition, PROP_NUDGE_STRENGTH);
+        }
+        entry.body.update(entry.object, deltaSeconds, this.physicsWallScratch);
+      }
     }
 
     corruptionDelta += this.updateDynamicMaze(camera, deltaSeconds);
@@ -118,7 +151,14 @@ export class ChunkStreamer {
     return { corruptionDelta, glitchTrapJustTriggered, wallTrapJustWarned, wallTrapJustPopped };
   }
 
-  /** Remplit `target` avec les obstacles (murs + piliers + murs-pièges actifs) des chunks voisins. */
+  /**
+   * Remplit `target` avec les obstacles (murs + piliers + murs-pièges actifs + mobilier +
+   * objets de collection) des chunks voisins. Le mobilier/les objets de collection sont
+   * dérivés de leur position *actuelle* (pas d'une boîte figée à la génération) : une
+   * fois bousculés par la physique légère (`physics.ts`), leur collision doit suivre
+   * leur position réelle, sinon le joueur bute sur du vide ou traverse l'objet déplacé.
+   * Un objet en main (`isGrabbable()` faux le temps de la saisie) ne bloque pas le joueur.
+   */
   collectNearbyWallSegments(playerPosition: THREE.Vector3, target: WallSegment[]): void {
     target.length = 0;
     const chunkX = Math.floor(playerPosition.x / CHUNK_SIZE);
@@ -134,8 +174,56 @@ export class ChunkStreamer {
           const segment = trap.getActiveSegment();
           if (segment) target.push(segment);
         }
+        for (const entry of chunk.propPhysics) {
+          target.push(squareSegment(entry.object.position.x, entry.object.position.z, PROP_PHYSICS_RADIUS));
+        }
+        for (const collectible of chunk.collectibles) {
+          if (!collectible.isGrabbable()) continue;
+          target.push(squareSegment(collectible.group.position.x, collectible.group.position.z, COLLECTIBLE_PHYSICS_RADIUS));
+        }
       }
     }
+  }
+
+  /**
+   * Cherche l'objet de collection ramassable le plus proche (distance XZ) à portée de
+   * `worldPosition` — appelé au `squeezestart` d'un contrôleur XR. Ne fait que le
+   * retourner (voir `CollectibleInstance.beginHold`) : c'est l'appelant qui décide,
+   * au relâchement, entre ramassage définitif et simple dépose (manipulation en main
+   * avant/après ramassage, voir `main.ts`).
+   */
+  tryHoldCollectible(worldPosition: THREE.Vector3, maxDistance: number): CollectibleInstance | null {
+    let best: CollectibleInstance | null = null;
+    let bestDistanceSq = maxDistance * maxDistance;
+
+    for (const chunk of this.loaded.values()) {
+      for (const collectible of chunk.collectibles) {
+        if (!collectible.isGrabbable()) continue;
+        const dx = worldPosition.x - collectible.group.position.x;
+        const dz = worldPosition.z - collectible.group.position.z;
+        const distanceSq = dx * dx + dz * dz;
+        if (distanceSq < bestDistanceSq) {
+          bestDistanceSq = distanceSq;
+          best = collectible;
+        }
+      }
+    }
+
+    return best;
+  }
+
+  /**
+   * Après une dépose (`CollectibleInstance.endHold` + `dropWithPhysics`) : réinscrit
+   * l'instance dans le chunk qui couvre sa position d'atterrissage, pour qu'elle
+   * continue à être mise à jour (chute/stabilisation) et reste trouvable/ramassable.
+   * Silencieux si ce chunk n'est plus chargé (le joueur a marché très loin en la tenant).
+   */
+  adoptDroppedCollectible(collectible: CollectibleInstance): void {
+    const chunkX = Math.floor(collectible.group.position.x / CHUNK_SIZE);
+    const chunkZ = Math.floor(collectible.group.position.z / CHUNK_SIZE);
+    const chunk = this.loaded.get(chunkKey(chunkX, chunkZ));
+    if (!chunk || chunk.collectibles.includes(collectible)) return;
+    chunk.collectibles.push(collectible);
   }
 
   private streamAround(chunkX: number, chunkZ: number): void {
@@ -219,7 +307,35 @@ export class ChunkStreamer {
       new THREE.Vector3(originX + CHUNK_SIZE, WALL_HEIGHT, originZ + CHUNK_SIZE),
     );
 
-    this.loaded.set(key, { group, layout, glitchTraps, wallTraps, epoch, bounds });
+    const propsGroup = new THREE.Group();
+    propsGroup.name = `chunk-props-${chunkX}-${chunkZ}`;
+    this.scene.add(propsGroup);
+
+    const loadedChunk: LoadedChunk = { group, propsGroup, propPhysics: [], layout, glitchTraps, wallTraps, collectibles: [], epoch, bounds };
+    this.loaded.set(key, loadedChunk);
+
+    for (const placement of layout.propPlacements) {
+      spawnProp(placement.kind)
+        .then((prop) => {
+          // Le chunk a pu être déchargé/régénéré pendant le chargement asynchrone du modèle.
+          if (this.loaded.get(key) !== loadedChunk) return;
+          prop.position.set(placement.x, 0, placement.z);
+          prop.rotation.y = placement.rotationY;
+          propsGroup.add(prop);
+          loadedChunk.propPhysics.push({ object: prop, body: new PhysicsBody(0, PROP_PHYSICS_RADIUS) });
+        })
+        .catch(() => {});
+    }
+
+    for (const placement of layout.collectiblePlacements) {
+      spawnCollectible(placement, this.audioListener)
+        .then((collectible) => {
+          if (this.loaded.get(key) !== loadedChunk) return;
+          this.scene.add(collectible.group);
+          loadedChunk.collectibles.push(collectible);
+        })
+        .catch(() => {});
+    }
   }
 
   private unloadChunk(key: string): void {
@@ -227,6 +343,9 @@ export class ChunkStreamer {
     if (!chunk) return;
     this.scene.remove(chunk.group);
     disposeGroup(chunk.group);
+    // Le mobilier partage géométrie/matériaux entre instances (voir propLoader.ts) :
+    // on le retire de la scène sans rien disposer.
+    this.scene.remove(chunk.propsGroup);
     for (const trap of chunk.glitchTraps) {
       this.scene.remove(trap.group);
       trap.dispose();
@@ -234,6 +353,10 @@ export class ChunkStreamer {
     for (const trap of chunk.wallTraps) {
       this.scene.remove(trap.group);
       trap.dispose();
+    }
+    for (const collectible of chunk.collectibles) {
+      this.scene.remove(collectible.group);
+      collectible.dispose();
     }
     this.loaded.delete(key);
   }
@@ -245,6 +368,11 @@ function randomRegenInterval(): number {
 
 function chunkKey(chunkX: number, chunkZ: number): string {
   return `${chunkX},${chunkZ}`;
+}
+
+/** Petite boîte englobante carrée autour d'une position, pour réutiliser `resolveWallCollisions` (cercle/AABB) avec des objets ponctuels (mobilier, collection). */
+function squareSegment(x: number, z: number, radius: number): WallSegment {
+  return { minX: x - radius, maxX: x + radius, minZ: z - radius, maxZ: z + radius };
 }
 
 function parseChunkKey(key: string): [number, number] {

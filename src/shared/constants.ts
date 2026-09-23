@@ -18,3 +18,7 @@ export const SPAWN_CLEARANCE_CELLS = 2;
 
 /** Rayon (en cellules) autour de la sortie toujours dégagé. */
 export const EXIT_CLEARANCE_CELLS = 1;
+
+/** Vitesse de déplacement fluide (m/s, voir `player/locomotion.ts`) — partagée avec la
+ * validation anti-triche serveur (étape 7) : borne physique de vitesse max du joueur. */
+export const PLAYER_MOVE_SPEED = 2.2;

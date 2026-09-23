@@ -1,8 +1,18 @@
 import type { NoiseFunction2D } from "simplex-noise";
-import { CELL_SIZE, CHUNK_CELLS, EXIT_CLEARANCE_CELLS, PILLAR_SIZE, SPAWN_CLEARANCE_CELLS, WALL_THICKNESS } from "./constants";
-import { getExitLocation, type ExitLocation } from "./exit";
-import type { LevelProfile } from "./levelProfile";
-import { coordinateHash01, stringSeedToInt } from "./rng";
+import {
+  COLLECTIBLE_SCALE_MAX,
+  COLLECTIBLE_SCALE_MIN,
+  generateCollectibleLore,
+  getCollectibleRarity,
+  pickCollectibleKind,
+  type CollectibleKind,
+  type CollectibleRarity,
+} from "./collectibles.js";
+import { CELL_SIZE, CHUNK_CELLS, EXIT_CLEARANCE_CELLS, PILLAR_SIZE, SPAWN_CLEARANCE_CELLS, WALL_THICKNESS } from "./constants.js";
+import { getExitLocation, type ExitLocation } from "./exit.js";
+import type { LevelProfile } from "./levelProfile.js";
+import { pickPropKind, type PropKind } from "./props.js";
+import { coordinateHash01, stringSeedToInt } from "./rng.js";
 
 export type WallEdge = "north" | "west";
 
@@ -28,6 +38,34 @@ export interface ChunkLayout {
   /** Bords actuellement ouverts choisis comme mur-piège (fiche : "mur qui surgit"). Pas de
    * collision tant qu'il n'a pas surgi — voir WallTrap, qui gère l'apparition temporaire. */
   wallTrapCandidates: WallSegment[];
+  /** Amas de mobilier décoratif (chaises, bureaux, meubles), inspiré des images de référence. */
+  propPlacements: PropPlacement[];
+  /** Une boîte de collision par amas (approximative, pas par meuble individuel). */
+  propObstacles: WallSegment[];
+  /** Objets de collection (fiche projet étape 6) : pas de collision, ramassage au grip. */
+  collectiblePlacements: CollectiblePlacement[];
+}
+
+export interface PropPlacement {
+  kind: PropKind;
+  x: number;
+  z: number;
+  rotationY: number;
+}
+
+export interface CollectiblePlacement {
+  /** Identifiant stable (seed + coordonnées + epoch) : sert de clé de persistance IndexedDB. */
+  id: string;
+  kind: CollectibleKind;
+  rarity: CollectibleRarity;
+  x: number;
+  z: number;
+  rotationY: number;
+  scale: number;
+  nameFr: string;
+  nameEn: string;
+  descriptionFr: string;
+  descriptionEn: string;
 }
 
 /**
@@ -59,6 +97,9 @@ export function generateChunkLayout(
   const pillarObstacles: WallSegment[] = [];
   const glitchTrapPositions: Array<{ x: number; z: number }> = [];
   const wallTrapCandidates: WallSegment[] = [];
+  const propPlacements: PropPlacement[] = [];
+  const propObstacles: WallSegment[] = [];
+  const collectiblePlacements: CollectiblePlacement[] = [];
   const baseCellX = chunkX * CHUNK_CELLS;
   const baseCellZ = chunkZ * CHUNK_CELLS;
   const halfThickness = WALL_THICKNESS / 2;
@@ -112,11 +153,128 @@ export function generateChunkLayout(
         });
       } else if (!inClearance && coordinateHash01(seedInt, cellX, cellZ, 71) < profile.glitchProbability) {
         glitchTrapPositions.push({ x: originX + CELL_SIZE / 2, z: originZ + CELL_SIZE / 2 });
+      } else if (!inClearance && coordinateHash01(seedInt, cellX, cellZ, 89) < profile.propClusterProbability) {
+        generatePropCluster(seedInt, cellX, cellZ, originX, originZ, propPlacements, propObstacles);
+      } else if (!inClearance && coordinateHash01(seedInt, cellX, cellZ, 201) < profile.collectibleProbability) {
+        generateCollectiblePlacement(profile, seedInt, chunkX, chunkZ, epoch, cellX, cellZ, originX, originZ, collectiblePlacements);
       }
     }
   }
 
-  return { chunkX, chunkZ, wallSegments, pillarPositions, pillarObstacles, glitchTrapPositions, wallTrapCandidates };
+  return {
+    chunkX,
+    chunkZ,
+    wallSegments,
+    pillarPositions,
+    pillarObstacles,
+    glitchTrapPositions,
+    wallTrapCandidates,
+    propPlacements,
+    propObstacles,
+    collectiblePlacements,
+  };
+}
+
+const PROP_CLUSTER_MAX_RADIUS = 0.7;
+const PROP_CLUSTER_OBSTACLE_MARGIN = 0.4;
+
+/**
+ * Amas de mobilier autour du centre d'une cellule : une chaise isolée le plus souvent,
+ * parfois un petit groupe, rarement un empilement dense — comme sur les images de
+ * référence (pièces majoritairement vides, un coin encombré). Une seule boîte de
+ * collision approximative couvre tout l'amas (pas de précision par meuble).
+ */
+function generatePropCluster(
+  seedInt: number,
+  cellX: number,
+  cellZ: number,
+  originX: number,
+  originZ: number,
+  propPlacements: PropPlacement[],
+  propObstacles: WallSegment[],
+): void {
+  const centerX = originX + CELL_SIZE / 2;
+  const centerZ = originZ + CELL_SIZE / 2;
+
+  const sizeRoll = coordinateHash01(seedInt, cellX, cellZ, 90);
+  const clusterSize = sizeRoll < 0.55 ? 1 : sizeRoll < 0.85 ? 2 + Math.floor(coordinateHash01(seedInt, cellX, cellZ, 91) * 2) : 4 + Math.floor(coordinateHash01(seedInt, cellX, cellZ, 92) * 2);
+
+  for (let i = 0; i < clusterSize; i++) {
+    const kind = pickPropKind(coordinateHash01(seedInt, cellX, cellZ, 100 + i));
+    const angle = coordinateHash01(seedInt, cellX, cellZ, 120 + i) * Math.PI * 2;
+    const radius = coordinateHash01(seedInt, cellX, cellZ, 140 + i) * PROP_CLUSTER_MAX_RADIUS;
+    const rotationY = coordinateHash01(seedInt, cellX, cellZ, 160 + i) * Math.PI * 2;
+
+    propPlacements.push({
+      kind,
+      x: centerX + Math.cos(angle) * radius,
+      z: centerZ + Math.sin(angle) * radius,
+      rotationY,
+    });
+  }
+
+  const half = PROP_CLUSTER_MAX_RADIUS + PROP_CLUSTER_OBSTACLE_MARGIN;
+  propObstacles.push({
+    minX: centerX - half,
+    maxX: centerX + half,
+    minZ: centerZ - half,
+    maxZ: centerZ + half,
+  });
+}
+
+const COLLECTIBLE_JITTER_RATIO = 0.4;
+/** Distance minimale entre deux objets de collection du même chunk : ils doivent rester
+ * difficiles à trouver, jamais groupés (fiche : "ne pas être les uns à côté des autres"). */
+const COLLECTIBLE_MIN_SPACING = CELL_SIZE * 3;
+
+/**
+ * Place un objet de collection au centre d'une cellule (léger jitter) : kind (dont la
+ * rareté découle directement, voir `collectibles.ts`)/échelle/lore FR+EN tous dérivés
+ * de la seed, de l'epoch et des coordonnées de cellule — déterministe, donc
+ * reproductible tant que le chunk n'est pas régénéré (labyrinthe dynamique) sous un
+ * epoch différent. `id` sert de clé de persistance. Rejette le tirage si un autre objet
+ * du même chunk est trop proche, pour garder les objets dispersés/difficiles à trouver.
+ */
+function generateCollectiblePlacement(
+  profile: LevelProfile,
+  seedInt: number,
+  chunkX: number,
+  chunkZ: number,
+  epoch: number,
+  cellX: number,
+  cellZ: number,
+  originX: number,
+  originZ: number,
+  collectiblePlacements: CollectiblePlacement[],
+): void {
+  const centerX = originX + CELL_SIZE / 2;
+  const centerZ = originZ + CELL_SIZE / 2;
+
+  for (const existing of collectiblePlacements) {
+    const dx = existing.x - centerX;
+    const dz = existing.z - centerZ;
+    if (Math.hypot(dx, dz) < COLLECTIBLE_MIN_SPACING) return;
+  }
+
+  const jitterX = (coordinateHash01(seedInt, cellX, cellZ, 207) - 0.5) * CELL_SIZE * COLLECTIBLE_JITTER_RATIO;
+  const jitterZ = (coordinateHash01(seedInt, cellX, cellZ, 208) - 0.5) * CELL_SIZE * COLLECTIBLE_JITTER_RATIO;
+
+  const kind = pickCollectibleKind(coordinateHash01(seedInt, cellX, cellZ, 202));
+  const rarity = getCollectibleRarity(kind);
+  const scale = COLLECTIBLE_SCALE_MIN + coordinateHash01(seedInt, cellX, cellZ, 205) * (COLLECTIBLE_SCALE_MAX - COLLECTIBLE_SCALE_MIN);
+  const rotationY = coordinateHash01(seedInt, cellX, cellZ, 206) * Math.PI * 2;
+  const lore = generateCollectibleLore(kind, coordinateHash01(seedInt, cellX, cellZ, 210), coordinateHash01(seedInt, cellX, cellZ, 211));
+
+  collectiblePlacements.push({
+    id: `${profile.seed}#${chunkX},${chunkZ}#${cellX},${cellZ}#e${epoch}`,
+    kind,
+    rarity,
+    x: centerX + jitterX,
+    z: centerZ + jitterZ,
+    rotationY,
+    scale,
+    ...lore,
+  });
 }
 
 function isInsideSpawnClearance(cellX: number, cellZ: number): boolean {

@@ -3,6 +3,7 @@ import { CELL_SIZE } from "../shared/constants";
 import { getExitWorldPosition } from "../shared/exit";
 import { createLevelProfile, type LevelProfile } from "../shared/levelProfile";
 import type { WallSegment } from "../shared/chunkLayout";
+import type { CollectibleInstance } from "./collectible";
 import { ChunkStreamer } from "./chunkStreamer";
 import { ExitBeacon } from "./exitBeacon";
 
@@ -26,6 +27,10 @@ export interface LevelUpdateResult {
 /**
  * Orchestre la progression par level (fiche projet, étape 4) : profil de difficulté
  * dérivé de la profondeur, sortie signalée (son + lumière), passage au level suivant.
+ * `runSeed` (étape 7) vient du serveur (`POST /run/start`) — `restartRun` permet de la
+ * remplacer une fois la réponse reçue (le monde démarre avec une seed locale temporaire
+ * le temps de l'aller-retour réseau, pour ne jamais bloquer le premier rendu) ou de
+ * repartir sur une run neuve après un "STOP REC".
  */
 export class LevelManager {
   depth = 0;
@@ -36,12 +41,15 @@ export class LevelManager {
   private exitWorldX: number;
   private exitWorldZ: number;
   private sessionStarted = false;
+  private runSeed: string;
 
   constructor(
     private readonly scene: THREE.Scene,
     private readonly audioListener: THREE.AudioListener,
+    initialRunSeed: string,
   ) {
-    this.profile = createLevelProfile(this.depth);
+    this.runSeed = initialRunSeed;
+    this.profile = createLevelProfile(this.depth, this.runSeed);
     this.chunkStreamer = new ChunkStreamer(scene, audioListener, this.profile);
     this.chunkStreamer.primeArea(SPAWN_LOCAL_POSITION);
 
@@ -69,20 +77,48 @@ export class LevelManager {
     this.chunkStreamer.collectNearbyWallSegments(playerPosition, target);
   }
 
+  tryHoldCollectible(worldPosition: THREE.Vector3, maxDistance: number): CollectibleInstance | null {
+    return this.chunkStreamer.tryHoldCollectible(worldPosition, maxDistance);
+  }
+
+  adoptDroppedCollectible(collectible: CollectibleInstance): void {
+    this.chunkStreamer.adoptDroppedCollectible(collectible);
+  }
+
   hasReachedExit(playerPosition: THREE.Vector3): boolean {
     const dx = playerPosition.x - this.exitWorldX;
     const dz = playerPosition.z - this.exitWorldZ;
     return Math.hypot(dx, dz) < EXIT_REACHED_DISTANCE;
   }
 
-  /** Passage au level suivant : nouveau profil (seed dérivée, difficulté accrue), monde reconstruit. */
+  /** Passage au level suivant : nouveau profil (même seed de run, difficulté accrue), monde reconstruit. */
   descend(): THREE.Vector3 {
     this.depth += 1;
-    this.profile = createLevelProfile(this.depth);
+    this.profile = createLevelProfile(this.depth, this.runSeed);
     this.chunkStreamer.setProfile(this.profile);
     this.chunkStreamer.primeArea(SPAWN_LOCAL_POSITION);
     if (this.sessionStarted) this.chunkStreamer.onSessionStart();
+    this.rebuildExitBeacon();
+    return SPAWN_LOCAL_POSITION.clone();
+  }
 
+  /**
+   * Repart sur une nouvelle run à la profondeur 0 : soit la seed serveur authentique
+   * vient d'arriver (remplace la seed locale temporaire du tout premier rendu), soit le
+   * joueur a fait "STOP REC" et enchaîne une nouvelle run (étape 7).
+   */
+  restartRun(runSeed: string): THREE.Vector3 {
+    this.runSeed = runSeed;
+    this.depth = 0;
+    this.profile = createLevelProfile(this.depth, this.runSeed);
+    this.chunkStreamer.setProfile(this.profile);
+    this.chunkStreamer.primeArea(SPAWN_LOCAL_POSITION);
+    if (this.sessionStarted) this.chunkStreamer.onSessionStart();
+    this.rebuildExitBeacon();
+    return SPAWN_LOCAL_POSITION.clone();
+  }
+
+  private rebuildExitBeacon(): void {
     this.exitBeacon.dispose();
     this.scene.remove(this.exitBeacon.group);
     const exitPosition = getExitWorldPosition(this.profile);
@@ -91,7 +127,5 @@ export class LevelManager {
     this.exitBeacon = new ExitBeacon(this.exitWorldX, this.exitWorldZ, this.audioListener);
     this.scene.add(this.exitBeacon.group);
     if (this.sessionStarted) this.exitBeacon.play();
-
-    return SPAWN_LOCAL_POSITION.clone();
   }
 }

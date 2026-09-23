@@ -1,0 +1,28 @@
+{
+  "name": "backrooms-webxr-server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "API de classement + validation anti-triche (fiche projet étape 7) — sert aussi le build statique du front en production (étape 8).",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "start": "tsx src/server.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@fastify/cors": "^10.0.1",
+    "@fastify/rate-limit": "^10.1.1",
+    "@fastify/static": "^10.1.4",
+    "better-sqlite3": "^11.5.0",
+    "fastify": "^5.1.0",
+    "seedrandom": "^3.0.5",
+    "simplex-noise": "^4.0.3",
+    "tsx": "^4.19.2"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.11",
+    "@types/node": "^22.9.0",
+    "@types/seedrandom": "^3.0.8",
+    "typescript": "^5.9.0"
+  }
+}

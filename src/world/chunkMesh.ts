@@ -30,8 +30,16 @@ export function buildChunkGroup(layout: ChunkLayout, chunkOriginX: number, chunk
   return group;
 }
 
+// Nombre de segments par côté pour le sol/plafond/murs/piliers : sans subdivision, le
+// displacementMap (voir materials.ts) ne déplace que les sommets des coins et gondole
+// tout le quad au lieu de créer un relief de surface.
+const PLANE_SEGMENTS_PER_CHUNK = 24;
+const WALL_SEGMENTS_LENGTH = 12;
+const WALL_SEGMENTS_HEIGHT = 6;
+const PILLAR_SEGMENTS = 4;
+
 function buildFloor(centerX: number, centerZ: number, size: number): THREE.Mesh {
-  const geometry = new THREE.PlaneGeometry(size, size);
+  const geometry = new THREE.PlaneGeometry(size, size, PLANE_SEGMENTS_PER_CHUNK, PLANE_SEGMENTS_PER_CHUNK);
   const mesh = new THREE.Mesh(geometry, getFloorMaterial());
   mesh.rotation.x = -Math.PI / 2;
   mesh.position.set(centerX, 0, centerZ);
@@ -39,7 +47,7 @@ function buildFloor(centerX: number, centerZ: number, size: number): THREE.Mesh 
 }
 
 function buildCeiling(centerX: number, centerZ: number, size: number): THREE.Mesh {
-  const geometry = new THREE.PlaneGeometry(size, size);
+  const geometry = new THREE.PlaneGeometry(size, size, PLANE_SEGMENTS_PER_CHUNK, PLANE_SEGMENTS_PER_CHUNK);
   const mesh = new THREE.Mesh(geometry, getCeilingMaterial());
   mesh.rotation.x = Math.PI / 2;
   mesh.position.set(centerX, WALL_HEIGHT, centerZ);
@@ -50,7 +58,8 @@ function buildWalls(layout: ChunkLayout): THREE.Mesh | null {
   if (layout.wallSegments.length === 0) return null;
 
   // Boîte (pas un plan) : le mur a une vraie épaisseur, cohérente avec la boîte de collision.
-  const baseBox = new THREE.BoxGeometry(1, WALL_HEIGHT, WALL_THICKNESS);
+  // Segments sur la longueur/hauteur pour laisser le displacementMap créer un relief.
+  const baseBox = new THREE.BoxGeometry(1, WALL_HEIGHT, WALL_THICKNESS, WALL_SEGMENTS_LENGTH, WALL_SEGMENTS_HEIGHT, 1);
   const geometries: THREE.BufferGeometry[] = [];
 
   for (const segment of layout.wallSegments) {
@@ -79,7 +88,7 @@ function buildWalls(layout: ChunkLayout): THREE.Mesh | null {
 function buildPillars(layout: ChunkLayout): THREE.InstancedMesh | null {
   if (layout.pillarPositions.length === 0) return null;
 
-  const geometry = new THREE.BoxGeometry(PILLAR_SIZE, WALL_HEIGHT, PILLAR_SIZE);
+  const geometry = new THREE.BoxGeometry(PILLAR_SIZE, WALL_HEIGHT, PILLAR_SIZE, PILLAR_SEGMENTS, WALL_SEGMENTS_HEIGHT, PILLAR_SEGMENTS);
   const mesh = new THREE.InstancedMesh(geometry, getPillarMaterial(), layout.pillarPositions.length);
   const matrix = new THREE.Matrix4();
 

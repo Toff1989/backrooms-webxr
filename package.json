@@ -12,6 +12,7 @@
     "typecheck": "tsc -b --noEmit"
   },
   "dependencies": {
+    "idb-keyval": "^6.3.0",
     "seedrandom": "^3.0.5",
     "simplex-noise": "^4.0.3",
     "three": "^0.186.0"

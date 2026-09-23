@@ -1,6 +1,6 @@
-import { CELL_SIZE } from "./constants";
-import type { LevelProfile } from "./levelProfile";
-import { coordinateHash01, stringSeedToInt } from "./rng";
+import { CELL_SIZE } from "./constants.js";
+import type { LevelProfile } from "./levelProfile.js";
+import { coordinateHash01, stringSeedToInt } from "./rng.js";
 
 export interface ExitLocation {
   cellX: number;

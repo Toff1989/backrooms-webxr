@@ -1,6 +1,6 @@
 import * as THREE from "three";
+import { PLAYER_MOVE_SPEED } from "../shared/constants";
 
-const MOVE_SPEED = 2.2; // m/s
 const MOVE_DEADZONE = 0.15;
 const SNAP_TURN_ANGLE = THREE.MathUtils.degToRad(45);
 const SNAP_TURN_DEADZONE = 0.6;
@@ -66,7 +66,7 @@ export class Locomotion {
       this.moveDelta.normalize().multiplyScalar(magnitude);
     }
 
-    this.playerRig.position.addScaledVector(this.moveDelta, MOVE_SPEED * deltaSeconds);
+    this.playerRig.position.addScaledVector(this.moveDelta, PLAYER_MOVE_SPEED * deltaSeconds);
 
     return magnitude;
   }

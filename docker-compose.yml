@@ -1,0 +1,31 @@
+# Backrooms VR (fiche projet étape 8). Usage local / VPS générique :
+#   docker compose up -d --build
+#
+# Sur Plesk : Plesk gère déjà son propre reverse proxy + HTTPS (Let's Encrypt intégré) —
+# ne PAS ajouter Caddy/Nginx en plus ici, juste pointer le domaine (panneau Plesk, ou
+# "Additional nginx directives" en proxy_pass) vers le port exposé par ce conteneur.
+# Voir deploy/README.md pour le déploiement SSH réel (PM2, sans Docker, souvent plus
+# simple à intégrer à l'hébergement Node natif de Plesk).
+#
+# Sur un VPS sans Plesk : ajoutez un service Caddy devant celui-ci pour l'HTTPS
+# automatique (fiche projet : "Caddy ou Nginx + Let's Encrypt").
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8787:8787"
+    environment:
+      PORT: "8787"
+      HOST: "0.0.0.0"
+      DB_PATH: "/app/server/data/backrooms.sqlite"
+      # Obligatoire en production : secret HMAC des tokens de run (voir server/src/token.ts).
+      # `openssl rand -hex 32` pour en générer un ; ne jamais committer sa vraie valeur.
+      RUN_TOKEN_SECRET: ${RUN_TOKEN_SECRET:?définir RUN_TOKEN_SECRET (voir .env.example)}
+    volumes:
+      - backrooms-data:/app/server/data
+    restart: unless-stopped
+
+volumes:
+  backrooms-data:
