@@ -20,7 +20,7 @@ import { applyVhsEffect } from "./vhsMaterial";
 const BODY_SCALE = 1.12;
 /** Distance parcourue par cycle de marche de l'animation (m, à l'échelle du monstre). */
 const STRIDE_LENGTH = 1.35 * BODY_SCALE;
-const CAMCORDER_SCALE = 1.9;
+const CAMCORDER_SCALE = 3;
 /** Allongement des avant-bras. */
 const FOREARM_STRETCH = 1.35;
 /** Dos voûté, tête rentrée (radians). */
@@ -86,7 +86,7 @@ export async function loadCadreur(): Promise<CadreurRig> {
   camera.scale.setScalar(CAMCORDER_SCALE / neckScale);
   // Position : là où était la tête (repère du cou), un peu plus haut ; orientation : objectif
   // vers l'avant du corps en pose de référence, puis la caméra suit le cou.
-  camera.position.copy(head.position).add(new THREE.Vector3(0, -0.05 / neckScale, 0.03 / neckScale));
+  camera.position.copy(head.position).add(new THREE.Vector3(0, 0.01 / neckScale, 0.04 / neckScale));
   camera.quaternion.copy(neck.getWorldQuaternion(new THREE.Quaternion()).invert());
   neck.add(camera);
 
