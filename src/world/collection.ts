@@ -5,6 +5,8 @@ import { LORE_FRAGMENT_COUNT } from "../i18n";
 
 const STORAGE_KEY = "backrooms-vr:collection";
 const LORE_KEY = "backrooms-vr:lore-next";
+/** Présent une fois l'inventaire passé à l'ordre manuel (avant : toujours trié par date). */
+const ORDER_KEY = "backrooms-vr:manual-order";
 
 /**
  * Supports d'enregistrement : le premier rangement de l'un d'eux révèle le fragment suivant
@@ -30,6 +32,9 @@ export interface CollectionEntry {
 
 const KNOWN_KINDS = new Set<string>(COLLECTIBLE_KINDS);
 
+export type CollectionSortMode = "recent" | "rarity" | "depth" | "name";
+export const SORT_MODES: CollectionSortMode[] = ["recent", "rarity", "depth", "name"];
+
 /**
  * Inventaire persistant (fiche projet étape 6, "Persistance") : ce que le joueur a rangé
  * dans son inventaire survit entre les runs (IndexedDB via `idb-keyval`) — la progression
@@ -44,9 +49,14 @@ export class CollectionStore {
   private readonly listeners = new Set<() => void>();
 
   constructor() {
-    this.ready = Promise.all([get<CollectionEntry[]>(STORAGE_KEY), get<number>(LORE_KEY)])
-      .then(([stored, nextFragment]) => {
+    this.ready = Promise.all([get<CollectionEntry[]>(STORAGE_KEY), get<number>(LORE_KEY), get<boolean>(ORDER_KEY)])
+      .then(([stored, nextFragment, manualOrder]) => {
         this.nextFragment = nextFragment ?? 0;
+        // Ancienne sauvegarde (affichée triée par date) : on part de cet ordre-là.
+        if (!manualOrder && stored) {
+          stored.sort((a, b) => b.collectedAt - a.collectedAt);
+          void set(ORDER_KEY, true).catch(() => {});
+        }
         // Anciennes versions du jeu (formes primitives "key"/"doll"...) : ignorées plutôt que de
         // planter le chargement de modèles inexistants.
         this.entries = (stored ?? []).filter((entry) => KNOWN_KINDS.has(entry.kind));
@@ -84,7 +94,30 @@ export class CollectionStore {
       stored.fragment = this.nextFragment++;
       void set(LORE_KEY, this.nextFragment).catch(() => {});
     }
-    this.entries.push(stored);
+    // Les nouveaux objets arrivent en tête de l'inventaire (le joueur réorganise ensuite).
+    this.entries.unshift(stored);
+    this.persist();
+  }
+
+  /** Déplace l'objet d'index `from` à l'index `to` (réorganisation manuelle de l'inventaire). */
+  move(from: number, to: number): void {
+    if (from === to || from < 0 || from >= this.entries.length) return;
+    const [entry] = this.entries.splice(from, 1);
+    if (!entry) return;
+    this.entries.splice(Math.min(Math.max(0, to), this.entries.length), 0, entry);
+    this.persist();
+  }
+
+  /** Trie tout l'inventaire (l'ordre obtenu reste modifiable à la main). */
+  sort(mode: CollectionSortMode): void {
+    const rarityRank = { legendary: 0, rare: 1, common: 2 } as const;
+    const compare: Record<CollectionSortMode, (a: CollectionEntry, b: CollectionEntry) => number> = {
+      recent: (a, b) => b.collectedAt - a.collectedAt,
+      rarity: (a, b) => rarityRank[a.rarity] - rarityRank[b.rarity] || b.collectedAt - a.collectedAt,
+      depth: (a, b) => b.depth - a.depth || b.collectedAt - a.collectedAt,
+      name: (a, b) => a.nameFr.localeCompare(b.nameFr),
+    };
+    this.entries.sort(compare[mode]);
     this.persist();
   }
 

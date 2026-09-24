@@ -35,7 +35,7 @@ main, menus sans quitter le jeu) :
 | Lâcher / lancer | Relâcher le grip (l'objet part avec la vitesse de la main) |
 | Ranger l'objet tenu | A / X, ou le relâcher sur le menu d'inventaire ouvert |
 | Pousser / frapper | Poing fermé (grip sans objet) ou geste vif |
-| Inventaire | Y (ouvrir/fermer) ; viser + gâchette pour les boutons, viser une case + grip pour sortir l'objet à taille réelle |
+| Inventaire | Y (ouvrir/fermer) ; viser + gâchette pour les boutons ; gâchette sur une case puis sur une autre : déplacer l'objet ; bouton TRI (récent / rareté / profondeur / nom) ; viser une case + grip pour sortir l'objet à taille réelle |
 | Lampe frontale | B (batterie limitée, HUD `BAT` : ramasser des piles au sol en marchant dessus ou en les touchant) |
 | Recaler la hauteur / STOP REC | Boutons du menu d'inventaire |
 

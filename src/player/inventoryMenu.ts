@@ -3,7 +3,7 @@ import { getLanguage, loreFragment, onLanguageChange, setLanguage, t } from "../
 import { getModelShape } from "../physics/modelShape";
 import { drawButton, drawPanelBackground, inRect, UiPanel, wrapText, type PressButton, type Rect } from "../ui/uiPanel";
 import { spawnCollectibleModel } from "../world/collectibleLoader";
-import type { CollectionEntry, CollectionStore } from "../world/collection";
+import { SORT_MODES, type CollectionEntry, type CollectionStore } from "../world/collection";
 import { computePerks } from "../world/collectionPerks";
 import type { Hand } from "./hand";
 import type { Sfx } from "./sfx";
@@ -33,15 +33,16 @@ const MENU_DROP = 0.14;
 const MENU_TILT = THREE.MathUtils.degToRad(14);
 const STOP_CONFIRM_SECONDS = 3;
 
-type ButtonId = "prev" | "next" | "height" | "lang" | "stop" | "close";
+type ButtonId = "prev" | "next" | "sort" | "height" | "lang" | "stop" | "close";
 
 const BUTTONS: Record<ButtonId, Rect> = {
-  prev: { x: 40, y: 556, w: 90, h: 64 },
-  next: { x: 140, y: 556, w: 90, h: 64 },
-  height: { x: 250, y: 556, w: 200, h: 64 },
-  lang: { x: 460, y: 556, w: 90, h: 64 },
+  prev: { x: 40, y: 556, w: 70, h: 64 },
+  next: { x: 120, y: 556, w: 70, h: 64 },
+  sort: { x: 200, y: 556, w: 130, h: 64 },
+  height: { x: 340, y: 556, w: 130, h: 64 },
+  lang: { x: 480, y: 556, w: 80, h: 64 },
   stop: { x: 570, y: 556, w: 220, h: 64 },
-  close: { x: 810, y: 556, w: 174, h: 64 },
+  close: { x: 800, y: 556, w: 184, h: 64 },
 };
 
 const rarityLabel = (rarity: CollectionEntry["rarity"]): string => t(`rarity.${rarity}`);
@@ -70,6 +71,9 @@ export class InventoryMenu extends UiPanel {
   private readonly hoverButton = new Map<Hand, ButtonId | null>();
   private readonly miniatures = new Map<number, Miniature>();
   private stopArmedUntil = 0;
+  /** Objet sélectionné pour être déplacé (index global dans l'inventaire), ou null. */
+  private picked: number | null = null;
+  private sortIndex = 0;
   private statusMessage = "";
   private statusUntil = 0;
   private time = 0;
@@ -109,6 +113,7 @@ export class InventoryMenu extends UiPanel {
 
   close(): void {
     this.group.visible = false;
+    this.picked = null;
     this.sfx.play("click", 0.25);
   }
 
@@ -160,7 +165,8 @@ export class InventoryMenu extends UiPanel {
   onPress(hand: Hand, px: number, py: number, button: PressButton): boolean {
     const slot = this.slotAt(px, py);
     if (slot !== null) {
-      this.takeSlot(hand, slot);
+      if (button === "grip") this.takeSlot(hand, slot);
+      else this.pickOrDrop(slot);
       return true;
     }
     const id = this.buttonAt(px, py);
@@ -185,6 +191,14 @@ export class InventoryMenu extends UiPanel {
         this.actions.recalibrateHeight();
         this.showStatus(t("inv.heightStatus"));
         break;
+      case "sort": {
+        this.sortIndex = (this.sortIndex + 1) % SORT_MODES.length;
+        const mode = SORT_MODES[this.sortIndex]!;
+        this.picked = null;
+        this.store.sort(mode);
+        this.showStatus(t("inv.sortStatus", { mode: t(`sort.${mode}`) }));
+        break;
+      }
       case "lang":
         setLanguage(getLanguage() === "fr" ? "en" : "fr");
         this.showStatus(t("inv.langStatus"));
@@ -201,6 +215,25 @@ export class InventoryMenu extends UiPanel {
       case "close":
         this.close();
         return;
+    }
+    this.invalidate();
+  }
+
+  /** Gâchette sur une case : sélectionne l'objet, puis gâchette sur une autre case : l'y place. */
+  private pickOrDrop(slot: number): void {
+    const index = this.page * SLOTS_PER_PAGE + slot;
+    this.sfx.play("click", 0.35);
+    if (this.picked === null) {
+      if (index >= this.store.count) return;
+      this.picked = index;
+      this.showStatus(t("inv.picked"));
+    } else {
+      const from = this.picked;
+      this.picked = null;
+      if (from !== index) {
+        this.store.move(from, Math.min(index, this.store.count - 1));
+        this.showStatus(t("inv.moved"));
+      } else this.statusUntil = 0;
     }
     this.invalidate();
   }
@@ -225,7 +258,7 @@ export class InventoryMenu extends UiPanel {
   }
 
   private entriesOnPage(): readonly CollectionEntry[] {
-    const all = [...this.store.getAll()].sort((a, b) => b.collectedAt - a.collectedAt);
+    const all = this.store.getAll();
     return all.slice(this.page * SLOTS_PER_PAGE, this.page * SLOTS_PER_PAGE + SLOTS_PER_PAGE);
   }
 
@@ -313,8 +346,9 @@ export class InventoryMenu extends UiPanel {
       ctx.roundRect(rect.x, rect.y, rect.w, rect.h, 16);
       ctx.fillStyle = hovered ? "rgba(255, 232, 170, 0.16)" : "rgba(255, 244, 214, 0.05)";
       ctx.fill();
-      ctx.lineWidth = hovered ? 5 : 2;
-      ctx.strokeStyle = entry ? RARITY_COLOR[entry.rarity] : "rgba(255, 244, 214, 0.15)";
+      const picked = this.picked === this.page * SLOTS_PER_PAGE + slot;
+      ctx.lineWidth = picked ? 8 : hovered ? 5 : 2;
+      ctx.strokeStyle = picked ? "#9fe39f" : entry ? RARITY_COLOR[entry.rarity] : "rgba(255, 244, 214, 0.15)";
       ctx.globalAlpha = entry ? 1 : 0.6;
       ctx.stroke();
       ctx.globalAlpha = 1;
@@ -354,6 +388,7 @@ export class InventoryMenu extends UiPanel {
     const hoveredButtons = new Set(this.hoverButton.values());
     drawButton(ctx, BUTTONS.prev, "◀", { hovered: hoveredButtons.has("prev"), disabled: this.pageCount < 2 });
     drawButton(ctx, BUTTONS.next, "▶", { hovered: hoveredButtons.has("next"), disabled: this.pageCount < 2 });
+    drawButton(ctx, BUTTONS.sort, t("inv.sort"), { hovered: hoveredButtons.has("sort") });
     drawButton(ctx, BUTTONS.height, t("inv.height"), { hovered: hoveredButtons.has("height") });
     drawButton(ctx, BUTTONS.lang, t("inv.lang"), { hovered: hoveredButtons.has("lang") });
     drawButton(ctx, BUTTONS.stop, this.stopArmedUntil ? t("inv.confirm") : t("inv.stop"), {

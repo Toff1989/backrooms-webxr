@@ -13,9 +13,9 @@
   "inv.count": "{count} objet(s) · page {page}/{pages}",
   "inv.found": "{rarity} · trouvé au niveau {depth}",
   "inv.empty": "Inventaire vide — ramassez des objets et relâchez-les ici.",
-  "inv.aim": "Visez un objet pour le détailler, grip pour le prendre en main.",
+  "inv.aim": "Gâchette sur une case : déplacer l'objet · grip : le prendre en main.",
   "inv.store": "Relâchez un objet tenu sur ce menu (ou A/X) pour le ranger.",
-  "inv.height": "HAUTEUR",
+  "inv.height": "HAUT.",
   "inv.heightStatus": "Hauteur recalée sur votre position actuelle.",
   "inv.lang": "EN",
   "inv.langStatus": "Langue : français.",
@@ -60,5 +60,13 @@
     "Je n'ai plus peur du noir. J'ai peur de ce qui éteint les lampes.",
     "Dernière bande. Je vais passer la porte entrouverte. Il y a quelqu'un qui tient la poignée."
   ],
-  "lore.end": "Plus aucune bande : l'histoire s'arrête ici. Ou quelqu'un a cessé de filmer."
+  "lore.end": "Plus aucune bande : l'histoire s'arrête ici. Ou quelqu'un a cessé de filmer.",
+  "inv.sort": "TRI",
+  "inv.sortStatus": "Trié : {mode}.",
+  "sort.recent": "plus récents d'abord",
+  "sort.rarity": "par rareté",
+  "sort.depth": "par profondeur",
+  "sort.name": "par nom",
+  "inv.picked": "Objet sélectionné — gâchette sur une autre case pour l'y placer (même case : annuler).",
+  "inv.moved": "Objet déplacé."
 }

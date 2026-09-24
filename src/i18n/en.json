@@ -13,7 +13,7 @@
   "inv.count": "{count} item(s) · page {page}/{pages}",
   "inv.found": "{rarity} · found on level {depth}",
   "inv.empty": "Inventory empty — pick up items and release them here.",
-  "inv.aim": "Aim at an item for details, grip to take it in hand.",
+  "inv.aim": "Trigger on a slot: move the item · grip: take it in hand.",
   "inv.store": "Release a held item over this menu (or A/X) to store it.",
   "inv.height": "HEIGHT",
   "inv.heightStatus": "Height recalibrated to your current position.",
@@ -60,5 +60,13 @@
     "I'm not afraid of the dark anymore. I'm afraid of what turns the lights off.",
     "Last tape. I'm going through the half-open door. Someone is holding the handle."
   ],
-  "lore.end": "No more tapes: the story ends here. Or someone stopped filming."
+  "lore.end": "No more tapes: the story ends here. Or someone stopped filming.",
+  "inv.sort": "SORT",
+  "inv.sortStatus": "Sorted {mode}.",
+  "sort.recent": "newest first",
+  "sort.rarity": "by rarity",
+  "sort.depth": "by depth",
+  "sort.name": "by name",
+  "inv.picked": "Item selected — trigger on another slot to place it there (same slot: cancel).",
+  "inv.moved": "Item moved."
 }
