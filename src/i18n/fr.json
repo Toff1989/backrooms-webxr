@@ -6,6 +6,7 @@
   "hud.flashlight": "LAMPE",
   "hud.battery": "BAT",
   "blue.level": "NIV {n}",
+  "blue.lost": "SIGNAL PERDU",
   "rarity.common": "Commun",
   "rarity.rare": "Rare",
   "rarity.legendary": "Légendaire",

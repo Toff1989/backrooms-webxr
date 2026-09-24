@@ -20,6 +20,8 @@ import { VhsOverlay } from "./player/vhsOverlay";
 import { XrInput } from "./player/xrInput";
 import { UiPointer } from "./ui/uiPointer";
 import { Atmosphere } from "./world/atmosphere";
+import { Blackout } from "./world/blackout";
+import { Cadreur } from "./world/cadreur";
 import { CollectionStore } from "./world/collection";
 import { computePerks } from "./world/collectionPerks";
 import { corruption } from "./world/corruption";
@@ -110,10 +112,21 @@ perfStats.extra = () => {
     awakeBodies,
     corruption: Math.round(corruption.value * 100) / 100,
     flashlight: flashlight.on,
+    blackout: blackout.active,
+    cadreur: cadreur.present,
   };
 };
 const atmosphere = new Atmosphere(scene, hemisphere, ambient);
 const poltergeist = new Poltergeist(scene, audioListener, grabbables);
+/** Menaces : la Coupure (néons qui meurent en vague) et le Cadreur (il bouge quand on ne le voit pas). */
+const blackout = new Blackout(scene, audioListener);
+const cadreur = new Cadreur(scene, audioListener, physics);
+// Test : `?force=coupure,cadreur` déclenche les menaces au bout de quelques secondes, dès le niveau 0.
+const forcedThreats = new URLSearchParams(window.location.search).get("force")?.split(",") ?? [];
+blackout.forced = forcedThreats.includes("coupure");
+cadreur.forced = forcedThreats.includes("cadreur");
+blackout.reset(0);
+cadreur.reset(0);
 
 /** Bonus de collection : recalculés à chaque rangement/sortie d'objet. */
 function applyPerks(): void {
@@ -172,6 +185,8 @@ function respawn(): void {
   grabSystem.onTeleport();
   atmosphere.setDepth(levelManager.depth);
   atmosphere.triggerFlicker(0.8);
+  blackout.reset(levelManager.depth);
+  cadreur.reset(levelManager.depth);
 }
 
 /**
@@ -327,11 +342,38 @@ renderer.setAnimationLoop((timestamp) => {
     atmosphere.triggerFlicker(0.4);
   }
 
-  if (levelManager.hasReachedExit(player.headWorld)) {
+  perfStats.begin("menaces");
+  const head = player.headWorld;
+  const blackoutEvents = blackout.update(deltaSeconds, head, levelManager.depth);
+  // Avant la coupure, les néons s'étranglent.
+  if (blackout.warning && Math.random() < deltaSeconds * 3) atmosphere.triggerFlicker(0.12);
+  if (blackoutEvents.reachedPlayer) {
+    triggerHapticPulse(renderer, 0.25, 70);
+    cadreur.summon();
+  }
+  const localLight = blackout.lightAt(head.x, head.z);
+  const darkness = Math.max(levelUpdate.darkness, 1 - localLight);
+  const cadreurEvents = cadreur.update(deltaSeconds, {
+    head,
+    camera,
+    flashlight: flashlight.shining,
+    lightAt: (x, z) => levelManager.zoneLightAt(x, z) * blackout.lightAt(x, z) * atmosphere.level,
+    depth: levelManager.depth,
+  });
+  // Découvert : la bande décroche une fraction de seconde.
+  if (cadreurEvents.sighted) vhsOverlay.triggerTrackingLoss(0.35);
+  perfStats.end("menaces");
+
+  const caught = cadreurEvents.caught;
+  if (caught || levelManager.hasReachedExit(player.headWorld)) {
+    // Rattrapé par le Cadreur : réveil un niveau plus bas, les mains vides.
+    if (caught) grabSystem.loseHeld();
     levelManager.descend();
-    log("level", { action: "descend", depth: levelManager.depth });
+    log("level", { action: caught ? "caught" : "descend", depth: levelManager.depth });
     respawn();
-    vhsOverlay.blueScreen(1.4, [t("blue.level", { n: levelManager.depth })]);
+    const lines = [t("blue.level", { n: levelManager.depth })];
+    if (caught) lines.unshift(t("blue.lost"));
+    vhsOverlay.blueScreen(caught ? 2.6 : 1.4, lines);
     corruption.add(1);
     if (currentSession) reportLevel(currentSession, levelManager.depth);
   }
@@ -354,8 +396,8 @@ renderer.setAnimationLoop((timestamp) => {
   hud.update(deltaSeconds);
   flashlight.update(deltaSeconds, corruption.value);
   atmosphere.update(deltaSeconds, corruption.value);
-  poltergeist.update(deltaSeconds, camera, player.headWorld, levelManager.depth, levelUpdate.darkness);
-  ambientHum.update(deltaSeconds, player.headWorld, levelUpdate.darkness, levelManager.depth, atmosphere.level);
+  poltergeist.update(deltaSeconds, camera, player.headWorld, levelManager.depth, darkness);
+  ambientHum.update(deltaSeconds, player.headWorld, darkness, levelManager.depth, atmosphere.level * localLight);
   updateVhsTime(elapsedSeconds);
   runWarmupStep(renderer.xr.isPresenting);
   perfStats.end("effets");

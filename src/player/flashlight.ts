@@ -45,6 +45,11 @@ export class Flashlight {
     camera.add(this.light, this.light.target);
   }
 
+  /** Vrai si la lampe éclaire réellement (allumée et pas en micro-coupure). */
+  get shining(): boolean {
+    return this.intensity > ON_INTENSITY * 0.25;
+  }
+
   /** Bascule la lampe. Faux si elle ne peut pas s'allumer (batterie vide). */
   toggle(): boolean {
     if (!this.on && this.battery <= 0) return false;

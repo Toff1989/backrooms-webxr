@@ -60,7 +60,7 @@ export function hash12(x: number, y: number): number {
   return fract((p3x + p3y) * p3z);
 }
 
-function valueNoise(x: number, y: number): number {
+export function valueNoise(x: number, y: number): number {
   const ix = Math.floor(x);
   const iy = Math.floor(y);
   const fx = x - ix;

@@ -32,6 +32,8 @@ export const CollisionGroups = {
   queryGrabbable: interaction(Groups.HAND, Groups.DYNAMIC),
   /** Requête de visée (saisie à distance) : décor + objets, pour que les murs masquent. */
   querySight: interaction(Groups.PLAYER, Groups.STATIC | Groups.DYNAMIC),
+  /** Ligne de vue à travers le labyrinthe : murs et piliers seulement (les meubles ne cachent pas). */
+  queryWalls: interaction(Groups.PLAYER, Groups.STATIC),
 } as const;
 
 /** Pas de simulation borné : suit la cadence du casque (72/90 Hz) sans sauts, coupé en deux sur un gros à-coup. */

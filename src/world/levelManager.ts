@@ -106,6 +106,11 @@ export class LevelManager {
     return { ...streamerResult, darkness, exitDistance };
   }
 
+  /** Éclairage ambiant des néons [0..1] à une position (0 = zone éteinte). */
+  zoneLightAt(x: number, z: number): number {
+    return sampleZoneLight(this.lightField, x, z);
+  }
+
   hasReachedExit(playerPosition: THREE.Vector3): boolean {
     const trigger = this.exitBeacon.triggerPosition;
     return Math.hypot(playerPosition.x - trigger.x, playerPosition.z - trigger.z) < EXIT_REACHED_DISTANCE;

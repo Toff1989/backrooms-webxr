@@ -6,7 +6,7 @@ Jeu d'exploration horrifique en VR, dans le navigateur (WebXR). Voir la fiche pr
 snap-turn, génération par chunks streamés avec collisions, levels avec sortie sombre (porte
 entrouverte sur le noir, balise sonore, signal du caméscope) et difficulté progressive, murs qui
 surgissent, zones sombres (lampe torche à piles) et un labyrinthe dynamique. Les pièges "glitch"
-visuels ont été retirés (rendu jugé raté). Décor (mobilier CC0) et ~50 objets
+visuels ont été remplacés par deux menaces : la Coupure et le Cadreur. Décor (mobilier CC0) et ~50 objets
 de collection (vrais modèles CC0, rareté fixe par objet) avec un vrai moteur physique (Rapier),
 mains gantées, saisie/lancer au grip (y compris à distance), menu d'inventaire avec aperçus 3D,
 accroupi, jouable assis, persistance IndexedDB. Contrôles inspirés de *The Walking Dead: Saints
@@ -199,6 +199,20 @@ tests/physics.sim.ts         Simulation physique sans rendu (`npm run test:physi
   du shader ; elle se dissipe ensuite progressivement. Aucune distorsion de la position/rotation
   caméra — uniquement l'effet shader, comme demandé par la fiche pour le confort VR.
 - **Pièges glitch** : retirés (rendu jugé raté) ; restent les murs qui surgissent (`wallTrap.ts`).
+- **La Coupure** (`blackout.ts`, `blackoutField.ts`, dès la profondeur 2) : les néons
+  s'étranglent, un disjoncteur saute au loin et le courant meurt en vague vers le joueur (tubes
+  qui agonisent sur le front, bourdonnement qui s'éteint). ~30 s de noir complet (seule la lampe
+  éclaire), puis les tubes redémarrent un à un, starters qui claquent. Même champ calculé sur
+  CPU (audio, visibilité) et GPU (néons du plafond, éclairage ambiant des surfaces).
+- **Le Cadreur** (`cadreur.ts`, `cadreurModel.ts`, dès la profondeur 1) : mannequin sans
+  visage qui te filme avec une vieille caméra 8 mm (LED REC rouge visible dans le noir). Il ne
+  bouge que lorsqu'il n'est pas vu : hors du champ, derrière un mur, ou dans le noir (seule la
+  lampe le fige alors). Il suit la trace exacte du joueur et apparaît derrière lui ; on
+  l'entend (moteur de caméra, pas feutrés qui s'arrêtent quand on se retourne). S'il te
+  rattrape : « SIGNAL PERDU », réveil un niveau plus bas, ce que tu tenais est perdu. La
+  Coupure l'appelle s'il n'est pas déjà là. Poses figées : phase de marche + IK des bras.
+- **Tester les menaces** : `?force=coupure,cadreur` (cumulable avec `?debug=1`) les déclenche
+  au bout de quelques secondes, dès le niveau 0.
 - **Labyrinthe dynamique** (`chunkStreamer.ts`) : toutes les 6 à 12 secondes, un chunk chargé mais
   hors du champ de vision de la caméra (frustum) et à au moins 2 chunks du joueur est régénéré
   avec un agencement différent (même sortie, même couloir garanti). Déclenche un petit pic de
@@ -208,6 +222,9 @@ tests/physics.sim.ts         Simulation physique sans rendu (`npm run test:physi
 ## Étapes 6–8 (résumé)
 
 - **Collection (étape 6)** : ~50 modèles CC0 distincts (Poly Haven), rareté fixe par objet
+  (pièces détachées retirées : cassette du baladeur, câbles de la manette et du multimètre,
+  sangle des jumelles, étui à cigarettes réduit à l'étui ouvert). Modèle du Cadreur : « X Bot »
+  de Mixamo (Adobe), décimé et compressé.
   (commun/rare/légendaire — pas un tirage indépendant), lore FR/EN généré par templates seedés,
   espacement minimal entre objets (difficiles à trouver, jamais groupés).
   - **Physique** : moteur Rapier. Murs/piliers en colliders fixes par chunk, sol et plafond

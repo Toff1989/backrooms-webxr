@@ -380,6 +380,17 @@ export class GrabSystem {
     for (const hand of [...this.remote.keys()]) this.cancelRemote(hand);
   }
 
+  /** Le joueur est emporté (rattrapé par le Cadreur) : ce qu'il tenait reste derrière et disparaît. */
+  loseHeld(): void {
+    const lost = new Set([...this.held.values()].map((state) => state.grabbable));
+    for (const hand of [...this.held.keys()]) this.release(hand, false);
+    for (const grabbable of lost) {
+      this.releasing.delete(grabbable);
+      this.registry.remove(grabbable);
+    }
+    for (const hand of [...this.remote.keys()]) this.cancelRemote(hand);
+  }
+
   /** Sort un objet de l'inventaire directement dans la main, à sa taille réelle. */
   takeIntoHand(hand: Hand, item: CollectionEntry, onFailure: () => void): void {
     if (this.held.has(hand) || this.pendingTake.has(hand)) {

@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { CELL_SIZE, WALL_HEIGHT } from "../shared/constants";
+import { VHS_BLACKOUT_GLSL } from "./blackoutField";
 import { VHS_LIGHT_FIELD_GLSL, type LightFieldParams } from "./lightField";
 
 /** Éclairage ambiant résiduel dans une zone éteinte (proche du noir : lampe torche nécessaire). */
@@ -21,6 +22,9 @@ const sharedUniforms = {
   /** Teinte globale du niveau (dérive du jaune vers un vert malade, puis un gris froid). */
   uLevelTint: { value: new THREE.Color(1, 1, 1) },
   uDesaturate: { value: 0 },
+  /** Coupure de courant (voir `blackout.ts`) : origine XZ, rayon du front, progression du rallumage. */
+  uBlackout: { value: new THREE.Vector4() },
+  uBlackoutOn: { value: 0 },
 };
 
 const TINT_STOPS: Array<[number, THREE.Color]> = [
@@ -57,6 +61,11 @@ export function setVhsCorruption(intensity: number): void {
   sharedUniforms.uCorruption.value = THREE.MathUtils.clamp(intensity, 0, 1);
 }
 
+export function setBlackoutUniforms(on: boolean, originX: number, originZ: number, radius: number, restore: number): void {
+  sharedUniforms.uBlackoutOn.value = on ? 1 : 0;
+  sharedUniforms.uBlackout.value.set(originX, originZ, radius, restore);
+}
+
 export function setLightField(params: LightFieldParams): void {
   sharedUniforms.uLightSeed.value.set(params.seedX, params.seedY);
   sharedUniforms.uDarkThreshold.value = params.threshold;
@@ -80,6 +89,7 @@ const COMMON_GLSL = /* glsl */ `
 const VERTEX_PARS_GLSL = /* glsl */ `
   ${COMMON_GLSL}
   ${VHS_LIGHT_FIELD_GLSL}
+  ${VHS_BLACKOUT_GLSL}
 `;
 
 /** Position/normale monde et éclairage de zone, par sommet (le champ de lumière varie sur ~12 m). */
@@ -95,7 +105,8 @@ const VERTEX_WORLD_GLSL = /* glsl */ `
     #endif
     vhsWorld = modelMatrix * vhsWorld;
     vVhsWorldPos = vhsWorld.xyz;
-    vVhsZoneLight = vhsZoneLight( vhsWorld.xyz );
+    float vhsBlackoutUnstable;
+    vVhsZoneLight = vhsZoneLight( vhsWorld.xyz ) * vhsBlackoutLight( vhsWorld.xz, vhsBlackoutUnstable );
     vVhsWorldNormal = normalize( mat3( modelMatrix ) * objectNormal );
   }
 `;
@@ -103,6 +114,7 @@ const VERTEX_WORLD_GLSL = /* glsl */ `
 const FRAGMENT_PARS_GLSL = /* glsl */ `
   ${COMMON_GLSL}
   ${VHS_LIGHT_FIELD_GLSL}
+  ${VHS_BLACKOUT_GLSL}
   uniform float uDecay;
   uniform vec3 uLevelTint;
   uniform float uDesaturate;
@@ -167,6 +179,13 @@ const CEILING_EMISSIVE_GLSL = /* glsl */ `
     if ( n < uDarkThreshold + 0.04 || cellHash > 0.95 ) {
       float flick = vhsHash12( vec2( floor( uTime * ( 6.0 + cellHash * 10.0 ) ), cell.x * 7.0 + cell.y ) );
       lamp *= step( 0.3, flick ) * ( 0.5 + 0.5 * flick );
+    }
+    // Coupure : néon coupé derrière le front ; juste devant, il agonise (grésillement, sursauts).
+    float blackoutUnstable;
+    lamp *= step( 0.5, vhsBlackoutLight( ( cell + 0.5 ) * ${CELL_SIZE.toFixed(2)}, blackoutUnstable ) );
+    if ( blackoutUnstable > 0.0 ) {
+      float spasm = vhsHash12( vec2( floor( uTime * ( 9.0 + cellHash * 16.0 ) ), cell.x * 3.0 + cell.y * 5.0 ) );
+      lamp *= step( 0.5, spasm ) * ( 0.3 + 0.7 * spasm );
     }
     // Décrépitude : dalles de plafond tombées (trou noir, plus de néon dessous).
     vec2 tile = floor( vVhsWorldPos.xz / ${(CELL_SIZE / 4).toFixed(4)} );
