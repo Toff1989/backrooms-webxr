@@ -1,17 +1,8 @@
-import { del, get, set } from "idb-keyval";
+import { del } from "idb-keyval";
 import type { CollectiblePlacement } from "../shared/chunkLayout";
-import type { CollectibleKind } from "../shared/collectibles";
-import { LORE_FRAGMENT_COUNT } from "../i18n";
 
 /** Anciennes clés : l'inventaire était conservé d'une run à l'autre (effacées au lancement). */
 const LEGACY_KEYS = ["backrooms-vr:collection", "backrooms-vr:manual-order"];
-const LORE_KEY = "backrooms-vr:lore-next";
-
-/**
- * Supports d'enregistrement : le premier rangement de l'un d'eux révèle le fragment suivant
- * du récit des "bandes perdues" (voir `i18n`), dans l'ordre, d'une run à l'autre.
- */
-const LORE_KINDS = new Set<CollectibleKind>(["tape", "note", "photo", "clipboard", "videoCamera", "securityCamera"]);
 
 export interface CollectionEntry {
   id: string;
@@ -25,8 +16,6 @@ export interface CollectionEntry {
   descriptionFr: string;
   descriptionEn: string;
   collectedAt: number;
-  /** Index du fragment de récit porté par cet objet (bandes perdues), s'il en porte un. */
-  fragment?: number;
 }
 
 export type CollectionSortMode = "recent" | "rarity" | "depth" | "name";
@@ -34,22 +23,16 @@ export const SORT_MODES: CollectionSortMode[] = ["recent", "rarity", "depth", "n
 
 /**
  * Inventaire de la run : ce que le joueur a rangé pendant la partie en cours. Il est vidé à
- * chaque début de partie (`clear`) — seule la progression du récit des bandes perdues est
- * conservée d'une partie à l'autre (IndexedDB via `idb-keyval`). Un objet sorti de
+ * chaque début de partie (`clear`) ; les bandes perdues ont leur propre journal, indépendant
+ * (voir `loreJournal.ts`). Un objet sorti de
  * l'inventaire (en main, puis posé/jeté dans le monde) n'en fait plus partie tant qu'il n'y
  * est pas remis : laissé au sol quand on change de level, il est perdu.
  */
 export class CollectionStore {
   private entries: CollectionEntry[] = [];
-  private nextFragment = 0;
   private readonly listeners = new Set<() => void>();
 
   constructor() {
-    get<number>(LORE_KEY)
-      .then((nextFragment) => {
-        this.nextFragment = Math.max(this.nextFragment, nextFragment ?? 0);
-      })
-      .catch(() => {});
     for (const key of LEGACY_KEYS) void del(key).catch(() => {});
   }
 
@@ -80,10 +63,6 @@ export class CollectionStore {
   add(entry: CollectionEntry, index: number | null = null): void {
     if (this.has(entry.id)) return;
     const stored = { ...entry, collectedAt: entry.collectedAt || Date.now() };
-    if (stored.fragment === undefined && LORE_KINDS.has(stored.kind) && this.nextFragment < LORE_FRAGMENT_COUNT) {
-      stored.fragment = this.nextFragment++;
-      void set(LORE_KEY, this.nextFragment).catch(() => {});
-    }
     // Par défaut en tête de l'inventaire ; lâché sur une case : à cette place.
     if (index === null) this.entries.unshift(stored);
     else this.entries.splice(Math.min(Math.max(0, index), this.entries.length), 0, stored);

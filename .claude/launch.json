@@ -7,6 +7,20 @@
       "runtimeArgs": ["run", "dev"],
       "port": 5173,
       "url": "https://localhost:5173"
+    },
+    {
+      "name": "backrooms-dev-alt",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["vite", "--port", "5180", "--strictPort"],
+      "port": 5180,
+      "url": "https://localhost:5180"
+    },
+    {
+      "name": "backrooms-api",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["--prefix", "server", "run", "dev"],
+      "port": 8787,
+      "env": { "DB_PATH": "./data/preview-test.sqlite", "TRUST_PROXY": "0" }
     }
   ]
 }

@@ -51,6 +51,10 @@ export interface GrabHooks {
   /** Index de la case d'inventaire visée/touchée au lâcher (rangement à cet endroit), sinon null. */
   inventorySlotAt?(hand: Hand): number | null;
   store(item: CollectionEntry, slotIndex?: number | null): void;
+  /** Objet saisi (au contact, à distance ou sorti du sac) : une page de bande perdue est lue. */
+  onGrab?(grabbable: Grabbable): void;
+  /** Grip serré sans rien à saisir (main à la ceinture : le journal). Vrai si l'appui est consommé. */
+  onEmptyGrip?(hand: Hand): boolean;
   /** Pose de la tête (rangement "par-dessus l'épaule", comme le sac de Saints & Sinners). */
   head?(): { position: THREE.Vector3; forward: THREE.Vector3 };
 }
@@ -183,10 +187,11 @@ export class GrabSystem {
       const input = hand.input;
       if (this.held.has(hand)) {
         const state = this.held.get(hand)!;
-        if (input.primary.justPressed && state.grabbable.item) this.storeHeld(hand, null);
+        const storable = state.grabbable.isSmall;
+        if (input.primary.justPressed && storable) this.storeHeld(hand, null);
         else if (input.squeeze.justReleased) {
-          if (state.grabbable.item && this.hooks.isOverInventory(hand)) this.storeHeld(hand, this.hooks.inventorySlotAt?.(hand) ?? null);
-          else if (state.grabbable.item && this.isOverShoulder(hand)) this.storeHeld(hand, null);
+          if (storable && this.hooks.isOverInventory(hand)) this.storeHeld(hand, this.hooks.inventorySlotAt?.(hand) ?? null);
+          else if (storable && this.isOverShoulder(hand)) this.storeHeld(hand, null);
           else this.release(hand, true);
         }
         this.setHovered(hand, null);
@@ -218,7 +223,8 @@ export class GrabSystem {
       if (candidate && this.holdersOf(candidate).length === 0) desired.set(candidate, Math.max(desired.get(candidate) ?? 0, near ? 2 : 1) as 1 | 2);
       this.setHovered(hand, candidate);
 
-      if (input.squeeze.justPressed && !frame.consumedGrip && candidate) {
+      if (input.squeeze.justPressed && !frame.consumedGrip && !candidate) this.hooks.onEmptyGrip?.(hand);
+      else if (input.squeeze.justPressed && !frame.consumedGrip && candidate) {
         if (near) this.attach(hand, candidate, "contact");
         else if (candidate.liftable) {
           // Verrouillage : l'objet attend le coup de poignet (ou vient seul après un instant).
@@ -443,7 +449,7 @@ export class GrabSystem {
           const projection = collider.projectPoint(hand.palm, true);
           const gap = projection ? hand.palm.distanceTo(tmpVec.set(projection.point.x, projection.point.y, projection.point.z)) : NEAR_GRAB_RADIUS;
           // À distance égale, on préfère le petit objet de collection au meuble qu'il touche.
-          const score = gap - (grabbable.isCollectible ? 0.05 : 0);
+          const score = gap - (grabbable.isSmall ? 0.05 : 0);
           if (score < bestScore) {
             bestScore = score;
             best = grabbable;
@@ -554,7 +560,8 @@ export class GrabSystem {
     grabbable.body.wakeUp();
     hand.pulse(0.35, 30);
     this.sfx.play("grab", 0.35);
-    log("grab", { action: "attach", mode, mass: grabbable.mass, item: grabbable.item?.kind ?? "prop", hands: this.holdersOf(grabbable).length });
+    log("grab", { action: "attach", mode, mass: grabbable.mass, item: grabbable.item?.kind ?? (grabbable.lorePage ? "lore" : "prop"), hands: this.holdersOf(grabbable).length });
+    this.hooks.onGrab?.(grabbable);
   }
 
   /** Objet léger (ou lourd porté à deux) : il flotte en main ; trop lourd : il pèse, on le traîne. */
@@ -692,10 +699,11 @@ export class GrabSystem {
     this.releasing.set(grabbable, this.time + RELEASE_GRACE_SECONDS);
   }
 
+  /** Range l'objet tenu : objet de collection dans le sac, page de bande perdue au journal. */
   private storeHeld(hand: Hand, slotIndex: number | null): void {
     const state = this.held.get(hand);
-    if (!state?.grabbable.item) return;
-    const item = state.grabbable.item;
+    const { item, lorePage } = state?.grabbable ?? {};
+    if (!state || (!item && !lorePage)) return;
     for (const holder of this.holdersOf(state.grabbable)) {
       this.held.delete(holder);
       holder.holding = null;
@@ -703,11 +711,14 @@ export class GrabSystem {
     }
     state.grabbable.heldBy = null;
     this.registry.remove(state.grabbable);
-    // Filet de sécurité : aucun autre exemplaire de cet objet ne reste au sol.
-    this.registry.removeItemCopies(item.id);
-    this.hooks.store(item, slotIndex);
+    // Une page (déjà lue à la saisie) est simplement classée : elle quitte le monde.
+    if (item) {
+      // Filet de sécurité : aucun autre exemplaire de cet objet ne reste au sol.
+      this.registry.removeItemCopies(item.id);
+      this.hooks.store(item, slotIndex);
+    }
     hand.pulse(0.45, 70);
     this.sfx.play("store", 0.5);
-    log("grab", { action: "store", item: item.kind, slot: slotIndex });
+    log("grab", { action: "store", item: item?.kind ?? "lore", slot: slotIndex });
   }
 }

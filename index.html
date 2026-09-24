@@ -43,6 +43,53 @@
         gap: 8px;
         cursor: pointer;
       }
+      #account-panel {
+        user-select: text;
+        margin-top: 6px;
+        max-width: 260px;
+      }
+      #account-panel summary {
+        cursor: pointer;
+        font-weight: 600;
+        opacity: 0.85;
+      }
+      #account-panel p {
+        margin: 4px 0;
+      }
+      #account-panel .field-label {
+        margin-top: 8px;
+        opacity: 0.75;
+      }
+      #account-panel .field-row {
+        display: flex;
+        gap: 6px;
+      }
+      #account-panel input {
+        flex: 1;
+        min-width: 0;
+        font: inherit;
+        padding: 3px 6px;
+        border-radius: 4px;
+        border: 1px solid rgba(255, 255, 255, 0.25);
+        background: rgba(0, 0, 0, 0.4);
+        color: inherit;
+      }
+      #account-panel button {
+        font: inherit;
+        padding: 3px 10px;
+        border-radius: 4px;
+        border: 1px solid rgba(255, 226, 150, 0.5);
+        background: rgba(255, 226, 150, 0.12);
+        color: inherit;
+        cursor: pointer;
+      }
+      #pair-start {
+        margin-top: 8px;
+      }
+      #pair-code {
+        font-weight: 600;
+        color: #ffe89a;
+      }
       #options-panel h1 {
         font-size: 13px;
         margin: 0 0 6px;
@@ -67,6 +114,23 @@
           <option value="en">English</option>
         </select>
       </label>
+      <details id="account-panel">
+        <summary data-i18n="account.title">Enregistrement</summary>
+        <p><span data-i18n="account.code">Code de cassette :</span> <strong id="account-code">…</strong></p>
+        <p class="field-label" data-i18n="account.restoreLabel">Récupérer un enregistrement</p>
+        <div class="field-row">
+          <input id="restore-input" placeholder="K7-XXXX-XXXX" autocomplete="off" autocapitalize="characters" spellcheck="false" />
+          <button id="restore-button" type="button" data-i18n="account.restore">Récupérer</button>
+        </div>
+        <button id="pair-start" type="button" data-i18n="account.pairStart">Jumeler cet appareil</button>
+        <p id="pair-code"></p>
+        <p class="field-label" data-i18n="account.pairConfirmLabel">Confirmer un nouvel appareil</p>
+        <div class="field-row">
+          <input id="pair-input" inputmode="numeric" maxlength="6" placeholder="000000" autocomplete="off" />
+          <button id="pair-confirm" type="button" data-i18n="account.pairConfirm">Confirmer</button>
+        </div>
+        <p id="account-status"></p>
+      </details>
       <p id="build-id" style="margin: 8px 0 0; font-size: 11px; opacity: 0.6"></p>
     </div>
     <script type="module" src="/src/main.ts"></script>

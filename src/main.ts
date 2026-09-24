@@ -13,11 +13,13 @@ import { GrabSystem } from "./player/grabSystem";
 import { Hand } from "./player/hand";
 import { triggerHapticPulse } from "./player/haptics";
 import { InventoryMenu } from "./player/inventoryMenu";
+import { Journal } from "./player/journal";
 import { PerfStats, setPerf } from "./player/perfStats";
 import { PlayerController } from "./player/playerController";
 import { Sfx } from "./player/sfx";
 import { VhsOverlay } from "./player/vhsOverlay";
 import { XrInput } from "./player/xrInput";
+import { installAccountPanel } from "./ui/accountPanel";
 import { UiPointer } from "./ui/uiPointer";
 import { Atmosphere } from "./world/atmosphere";
 import { Blackout } from "./world/blackout";
@@ -27,6 +29,7 @@ import { computePerks } from "./world/collectionPerks";
 import { corruption } from "./world/corruption";
 import { GrabbableRegistry } from "./world/grabbable";
 import { LevelManager, SPAWN_LOCAL_POSITION } from "./world/levelManager";
+import { LoreJournal } from "./world/loreJournal";
 import { Poltergeist } from "./world/poltergeist";
 import { initMaterials } from "./world/materials";
 import { endRun, reportLevel, startRun, type RunSessionInfo } from "./world/runSession";
@@ -84,6 +87,9 @@ camera.add(audioListener);
 
 const collectionStore = new CollectionStore();
 const grabbables = new GrabbableRegistry(scene, physics);
+/** Bandes perdues : progression indépendante de l'inventaire, gardée d'une run à l'autre (et côté serveur). */
+const loreJournal = new LoreJournal();
+await loreJournal.load();
 
 /**
  * Étape 7 : la vraie seed de run vient du serveur (`POST /run/start`), mais le premier
@@ -92,7 +98,15 @@ const grabbables = new GrabbableRegistry(scene, physics);
  * le serveur est injoignable, le jeu reste jouable sur une seed locale.
  */
 const LOCAL_FALLBACK_SEED = "local-offline";
-const levelManager = new LevelManager(scene, audioListener, physics, grabbables, (id) => collectionStore.has(id), LOCAL_FALLBACK_SEED);
+const levelManager = new LevelManager(
+  scene,
+  audioListener,
+  physics,
+  grabbables,
+  (id) => collectionStore.has(id),
+  () => loreJournal.nextFragment,
+  LOCAL_FALLBACK_SEED,
+);
 player.teleport(SPAWN_LOCAL_POSITION);
 
 const input = new XrInput(renderer, player.body);
@@ -175,6 +189,7 @@ const inventoryMenu = new InventoryMenu(
     },
     recalibrateHeight: () => player.recalibrate(),
     stopRec: () => endRunScreen.show(levelManager.depth),
+    openJournal: () => journal.openFloating(),
     vignetteEnabled: () => comfortVignette.enabled,
     toggleVignette: () => {
       setVignette(!comfortVignette.enabled);
@@ -227,12 +242,32 @@ const endRunScreen = new EndRunScreen(
   () => beginNewRun(true),
 );
 
-const pointer = new UiPointer(hands, scene, [inventoryMenu, endRunScreen]);
+const journal = new Journal(camera, player.body, scene, loreJournal, sfx);
+installAccountPanel(loreJournal);
+
+const pointer = new UiPointer(hands, scene, [inventoryMenu, endRunScreen, journal]);
+
+/** Page de bande perdue saisie : lue, elle entre au journal (et au serveur si la run y est enregistrée). */
+function readLorePage(fragment: number, hand: Hand): void {
+  levelManager.pinLorePage(fragment);
+  if (!loreJournal.read(fragment, currentSession)) return;
+  hud.showNotice(t("lore.new", { n: fragment + 1 }));
+  hand.pulse(0.5, 120);
+  log("lore", { action: "read", fragment, depth: levelManager.depth });
+}
 
 grabSystem = new GrabSystem(physics, grabbables, hands, sfx, {
   isOverInventory: (hand) => inventoryMenu.visible && (inventoryMenu.containsPoint(hand.palm) || pointer.frame(hand).target === inventoryMenu),
   inventorySlotAt: (hand) => inventoryMenu.slotIndexFor(hand),
   store: (item, slotIndex) => collectionStore.add(item, slotIndex ?? null),
+  onGrab: (grabbable) => {
+    if (grabbable.lorePage && grabbable.heldBy instanceof Hand) readLorePage(grabbable.lorePage.fragment, grabbable.heldBy);
+  },
+  onEmptyGrip: (hand) => {
+    if (!journal.isAtHip(hand)) return false;
+    journal.openInHand(hand);
+    return true;
+  },
   head: () => ({ position: player.headWorld, forward: camera.getWorldDirection(new THREE.Vector3()) }),
 }, scene);
 
@@ -287,6 +322,7 @@ function restartWorld(seed: string): void {
 }
 
 beginNewRun(false);
+void loreJournal.sync();
 
 /**
  * Son : les navigateurs (dont celui du Quest) ne démarrent l'audio que pendant un geste de
@@ -391,6 +427,7 @@ renderer.setAnimationLoop((timestamp) => {
   pointer.update();
   inventoryMenu.update(deltaSeconds, hands, (hand) => pointer.frame(hand).target === inventoryMenu);
   endRunScreen.update(hands);
+  journal.update(hands, (hand) => !grabSystem.isHolding(hand));
   grabSystem.update(elapsedSeconds, pointer);
   perfStats.end("joueur");
 

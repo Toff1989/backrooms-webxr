@@ -83,10 +83,14 @@ export function lightNoise(params: LightFieldParams, cellX: number, cellZ: numbe
   return valueNoise(px, py) * 0.65 + valueNoise(px * 2.3 + 17, py * 2.3 + 17) * 0.35 + spawnBoost + exitBoost;
 }
 
+/** Pénombre de part et d'autre du seuil : large, pour un passage progressif du clair au noir. */
+const ZONE_EDGE_BELOW = 0.13;
+const ZONE_EDGE_ABOVE = 0.1;
+
 /** Éclairage ambiant [0..1] à une position monde (0 = zone éteinte). */
 export function sampleZoneLight(params: LightFieldParams, worldX: number, worldZ: number): number {
   const n = lightNoise(params, worldX / CELL_SIZE - 0.5, worldZ / CELL_SIZE - 0.5);
-  return smoothstep(params.threshold - 0.07, params.threshold + 0.05, n);
+  return smoothstep(params.threshold - ZONE_EDGE_BELOW, params.threshold + ZONE_EDGE_ABOVE, n);
 }
 
 function smoothstep(edge0: number, edge1: number, x: number): number {
@@ -118,8 +122,15 @@ export const VHS_LIGHT_FIELD_GLSL = /* glsl */ `
     return vhsValueNoise( p ) * 0.65 + vhsValueNoise( p * 2.3 + 17.0 ) * 0.35 + spawnBoost + exitBoost;
   }
 
+  float vhsZoneNoise( vec3 worldPos ) {
+    return vhsLightNoise( worldPos.xz / ${CELL_SIZE.toFixed(2)} - 0.5 );
+  }
+
+  float vhsZoneLightFromNoise( float n ) {
+    return smoothstep( uDarkThreshold - ${ZONE_EDGE_BELOW.toFixed(2)}, uDarkThreshold + ${ZONE_EDGE_ABOVE.toFixed(2)}, n );
+  }
+
   float vhsZoneLight( vec3 worldPos ) {
-    float n = vhsLightNoise( worldPos.xz / ${CELL_SIZE.toFixed(2)} - 0.5 );
-    return smoothstep( uDarkThreshold - 0.07, uDarkThreshold + 0.05, n );
+    return vhsZoneLightFromNoise( vhsZoneNoise( worldPos ) );
   }
 `;

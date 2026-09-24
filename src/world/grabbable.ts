@@ -14,15 +14,48 @@ const RENDER_DISTANCE = 17;
 /** Au-delà, un objet ne se soulève pas (on peut seulement le pousser) — fiche : physique réaliste. */
 export const MAX_LIFT_MASS = 32;
 
-/** Meubles "boîtes" (armoire, bureau de direction) : collider cuboïde, stable au repos. */
-const BOX_COLLIDER_PROPS = new Set<PropKind>(["cabinet", "officeDesk"]);
+/** Meubles "boîtes" (armoire, bureau, étagères, caisses...) : collider cuboïde, stable au repos et empilable. */
+const BOX_COLLIDER_PROPS = new Set<PropKind>([
+  "cabinet",
+  "officeDesk",
+  "sofa",
+  "coffeeTable",
+  "metalShelves",
+  "bookshelf",
+  "storageCart",
+  "cardboardBox",
+  "plasticCrate",
+  "television",
+]);
 
 const PROP_MASS: Record<PropKind, number> = {
   chair: 6,
   schoolDesk: 14,
   officeDesk: 28,
   cabinet: 45,
+  monoblocChair: 3,
+  armChair: 12,
+  sofa: 35,
+  coffeeTable: 10,
+  metalStool: 4,
+  metalShelves: 18,
+  bookshelf: 40,
+  storageCart: 30,
+  projectorScreen: 7,
+  chalkboard: 9,
+  cardboardBox: 4,
+  plasticCrate: 1.5,
+  wetFloorSign: 1.2,
+  television: 12,
+  pottedPlant: 1.5,
 };
+
+/** Échelle d'import : l'étagère Poly Haven est modélisée ~12× trop grande (21 m de haut). */
+const PROP_SCALE: Partial<Record<PropKind, number>> = { metalShelves: 1.85 / 21.4 };
+/** Hauteur (m) d'où tombe un meuble renversé : il se couche de lui-même sur le sol. */
+const TIPPED_SPAWN_HEIGHT = 0.55;
+const X_AXIS = new THREE.Vector3(1, 0, 0);
+const Y_AXIS = new THREE.Vector3(0, 1, 0);
 
 export type HighlightLevel = 0 | 1 | 2;
 
@@ -57,8 +90,20 @@ export interface GrabbableInit {
   mass: number;
   /** Données d'inventaire : présent uniquement pour les objets de collection (rangeables). */
   item: CollectionEntry | null;
+  /** Page de bande perdue (voir `lorePage.ts`) : saisissable et lisible, jamais rangée dans le sac. */
+  lorePage?: LorePageData | null;
   /** Boîte de collision au lieu de l'enveloppe convexe (meubles massifs et anguleux). */
   boxCollider?: boolean;
+  /** Meuble qui naît éveillé (renversé : il doit retomber avant de s'endormir). */
+  awake?: boolean;
+  /** Libère les ressources propres à cette instance (texture d'une page). */
+  onDispose?: () => void;
+}
+
+/** Page de bande perdue posée dans le monde : identifiant unique par level, fragment de récit porté. */
+export interface LorePageData {
+  id: string;
+  fragment: number;
 }
 
 /**
@@ -71,12 +116,14 @@ export class Grabbable {
   readonly collider: RAPIER.Collider;
   readonly mass: number;
   readonly item: CollectionEntry | null;
+  readonly lorePage: LorePageData | null;
   /** Centre de la boîte englobante, en espace local du corps (échelle comprise). */
   readonly localCenter: THREE.Vector3;
   /** Main qui tient l'objet (opaque ici, voir `GrabSystem`). */
   heldBy: object | null = null;
 
   private highlight: HighlightLevel = 0;
+  private readonly onDispose: (() => void) | undefined;
   private readonly meshes: Array<{ mesh: THREE.Mesh; original: THREE.Material | THREE.Material[] }> = [];
 
   constructor(
@@ -85,6 +132,10 @@ export class Grabbable {
   ) {
     this.mass = init.mass;
     this.item = init.item;
+    this.lorePage = init.lorePage ?? null;
+    this.onDispose = init.onDispose;
+    // Meuble : endormi, fortement amorti. Petit objet (collection, page) : libre, il roule.
+    const furniture = init.item === null && this.lorePage === null;
     this.object = init.model;
     this.object.scale.setScalar(init.scale);
     this.object.position.copy(init.position);
@@ -101,11 +152,11 @@ export class Grabbable {
         // CCD (anti-traversée à grande vitesse) activée seulement une fois l'objet saisi (voir
         // GrabSystem) : au repos, elle faisait trembler les petits objets, jusqu'à traverser le sol.
         // Les meubles naissent endormis, posés au sol : ils ne coûtent rien tant qu'on n'y touche pas.
-        .setSleeping(init.item === null)
+        .setSleeping(furniture && !init.awake)
         // Meubles : fort amortissement (frottement sur la moquette) pour qu'ils se posent et
         // s'endorment vite au lieu de glisser sans fin quand un amas se chevauche au chargement.
-        .setLinearDamping(init.item === null ? 0.8 : 0.25)
-        .setAngularDamping(init.item === null ? 1.5 : 0.9),
+        .setLinearDamping(furniture ? 0.8 : 0.25)
+        .setAngularDamping(furniture ? 1.5 : 0.9),
     );
 
     // L'enveloppe convexe détaillée d'un meuble lourd oscillait sur le sol (contacts instables) ;
@@ -120,11 +171,21 @@ export class Grabbable {
     colliderDesc.setMass(init.mass).setFriction(0.8).setRestitution(0.15).setCollisionGroups(CollisionGroups.dynamic);
     this.collider = physics.world.createCollider(colliderDesc, this.body);
     // L'ajout du collider réveille le corps : un meuble posé se rendort immédiatement.
-    if (init.item === null) this.body.sleep();
+    if (furniture && !init.awake) this.body.sleep();
   }
 
   get isCollectible(): boolean {
     return this.item !== null;
+  }
+
+  /** Petit objet (collection ou page) : préféré au meuble qu'il touche quand on tend la main. */
+  get isSmall(): boolean {
+    return this.item !== null || this.lorePage !== null;
+  }
+
+  /** Identifiant d'unicité dans le monde (objet de collection ou page), null pour un meuble. */
+  get uniqueId(): string | null {
+    return this.item?.id ?? this.lorePage?.id ?? null;
   }
 
   get liftable(): boolean {
@@ -152,6 +213,7 @@ export class Grabbable {
     this.setHighlight(0);
     this.object.removeFromParent();
     this.physics.world.removeRigidBody(this.body);
+    this.onDispose?.();
   }
 }
 
@@ -178,26 +240,31 @@ export class GrabbableRegistry {
     this.scene.add(grabbable.object);
     this.all.add(grabbable);
     this.byCollider.set(grabbable.collider.handle, grabbable);
-    if (grabbable.item) {
+    const uniqueId = grabbable.uniqueId;
+    if (uniqueId) {
       // Un seul exemplaire par objet : un ancien resté au sol disparaît au profit du nouveau.
-      const previous = this.aliveItems.get(grabbable.item.id);
+      const previous = this.aliveItems.get(uniqueId);
       if (previous && !previous.heldBy) this.remove(previous);
-      this.reservedItems.delete(grabbable.item.id);
-      this.aliveItems.set(grabbable.item.id, grabbable);
+      this.reservedItems.delete(uniqueId);
+      this.aliveItems.set(uniqueId, grabbable);
     }
     return grabbable;
   }
 
-  createProp(kind: PropKind, model: THREE.Object3D, template: THREE.Object3D, x: number, z: number, rotationY: number): Grabbable {
+  /** Meuble posé au sol (ou à `y` : caisse empilée, objet sur un bureau), ou renversé (il retombe). */
+  createProp(kind: PropKind, model: THREE.Object3D, template: THREE.Object3D, x: number, z: number, rotationY: number, y = 0, tipped = false): Grabbable {
+    const quaternion = new THREE.Quaternion().setFromAxisAngle(Y_AXIS, rotationY);
+    if (tipped) quaternion.multiply(new THREE.Quaternion().setFromAxisAngle(X_AXIS, Math.PI / 2));
     return this.create({
       model,
       template,
-      scale: 1,
-      position: new THREE.Vector3(x, 0.005, z),
-      quaternion: new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), rotationY),
+      scale: PROP_SCALE[kind] ?? 1,
+      position: new THREE.Vector3(x, tipped ? TIPPED_SPAWN_HEIGHT : y + 0.005, z),
+      quaternion,
       mass: PROP_MASS[kind],
       item: null,
       boxCollider: BOX_COLLIDER_PROPS.has(kind),
+      awake: tipped,
     });
   }
 
@@ -238,7 +305,8 @@ export class GrabbableRegistry {
   remove(grabbable: Grabbable): void {
     if (!this.all.delete(grabbable)) return;
     this.byCollider.delete(grabbable.collider.handle);
-    if (grabbable.item && this.aliveItems.get(grabbable.item.id) === grabbable) this.aliveItems.delete(grabbable.item.id);
+    const uniqueId = grabbable.uniqueId;
+    if (uniqueId && this.aliveItems.get(uniqueId) === grabbable) this.aliveItems.delete(uniqueId);
     grabbable.dispose();
   }
 

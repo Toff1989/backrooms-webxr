@@ -52,6 +52,8 @@ export class LevelManager {
   private runSeed: string;
   /** Part du brouillage de la balise annulée (bonus boussole). */
   beaconSteadiness = 0;
+  /** Bande de la page de ce level une fois lue : elle ne change plus jusqu'au level suivant. */
+  private pinnedLoreFragment: number | null = null;
   private lightField: LightFieldParams;
   private readonly floorCeiling: FloorCeiling;
 
@@ -61,6 +63,8 @@ export class LevelManager {
     private readonly physics: PhysicsWorld,
     grabbables: GrabbableRegistry,
     isItemStored: (id: string) => boolean,
+    /** Prochaine bande perdue à trouver (voir `LoreJournal`), null si le récit est complet. */
+    nextLoreFragment: () => number | null,
     initialRunSeed: string,
   ) {
     this.runSeed = initialRunSeed;
@@ -71,7 +75,7 @@ export class LevelManager {
     setDepthLook(this.depth);
     this.floorCeiling = new FloorCeiling(scene);
     this.floorCeiling.update(SPAWN_LOCAL_POSITION);
-    this.chunkStreamer = new ChunkStreamer(scene, audioListener, physics, grabbables, isItemStored, this.profile);
+    this.chunkStreamer = new ChunkStreamer(scene, audioListener, physics, grabbables, isItemStored, () => this.pinnedLoreFragment ?? nextLoreFragment(), this.profile);
     this.chunkStreamer.primeArea(SPAWN_LOCAL_POSITION);
 
     const exitPosition = getExitWorldPosition(this.profile);
@@ -104,6 +108,14 @@ export class LevelManager {
 
     const exitDistance = Math.hypot(playerPosition.x - this.exitWorldX, playerPosition.z - this.exitWorldZ);
     return { ...streamerResult, darkness, exitDistance };
+  }
+
+  /**
+   * La page du level vient d'être lue : si son chunk se recharge, elle réapparaît avec la même
+   * bande (et non la suivante, qui attend le level d'après).
+   */
+  pinLorePage(fragment: number): void {
+    this.pinnedLoreFragment = fragment;
   }
 
   /** Éclairage ambiant des néons [0..1] à une position (0 = zone éteinte). */
@@ -142,6 +154,7 @@ export class LevelManager {
   }
 
   private rebuild(): void {
+    this.pinnedLoreFragment = null;
     this.profile = createLevelProfile(this.depth, this.runSeed);
     this.lightField = createLightFieldParams(this.profile.seed, this.depth, getExitLocation(this.profile).cellX, getExitLocation(this.profile).cellZ);
     setLightField(this.lightField);

@@ -3,14 +3,14 @@ import { CELL_SIZE, WALL_HEIGHT } from "../shared/constants";
 import { VHS_BLACKOUT_GLSL } from "./blackoutField";
 import { VHS_LIGHT_FIELD_GLSL, type LightFieldParams } from "./lightField";
 
-/** Éclairage ambiant résiduel dans une zone éteinte (proche du noir : lampe torche nécessaire). */
-const DARK_ZONE_AMBIENT = 0.035;
+/** Éclairage ambiant résiduel dans une zone éteinte : pénombre où l'on devine les formes, la lampe reste utile. */
+const DARK_ZONE_AMBIENT = 0.09;
 /**
  * Lumière renvoyée par les surfaces éclairées par la lampe (moquette, papier peint clair) :
  * sans elle, tout ce qui sort du cône restait d'un noir d'encre, découpé net — ça faisait
  * "trou" plutôt que pénombre. Éclairage indirect doux autour du joueur, proportionnel à la lampe.
  */
-const FLASHLIGHT_BOUNCE = 0.16;
+const FLASHLIGHT_BOUNCE = 0.2;
 const FLASHLIGHT_BOUNCE_FALLOFF = 0.3;
 
 /**
@@ -93,7 +93,8 @@ const COMMON_GLSL = /* glsl */ `
   uniform float uCorruption;
   varying vec3 vVhsWorldPos;
   varying vec3 vVhsWorldNormal;
-  varying float vVhsZoneLight;
+  varying float vVhsZoneNoise;
+  varying float vVhsBlackout;
 
   float vhsHash12( vec2 p ) {
     vec3 p3 = fract( vec3( p.xyx ) * 0.1031 );
@@ -138,7 +139,11 @@ const BOX_UV_GLSL = /* glsl */ `
   #undef uv
 `;
 
-/** Position/normale monde et éclairage de zone, par sommet (le champ de lumière varie sur ~12 m). */
+/**
+ * Position/normale monde et éclairage de zone. Par sommet, on ne calcule que le bruit brut
+ * (doux, il varie sur ~12 m : l'interpoler est fidèle) ; le seuil clair/noir est appliqué au
+ * pixel. Seuiller au sommet puis interpoler dessinait les bords des triangles : ombres en biseau.
+ */
 const VERTEX_WORLD_GLSL = /* glsl */ `
   #include <displacementmap_vertex>
   {
@@ -152,7 +157,8 @@ const VERTEX_WORLD_GLSL = /* glsl */ `
     vhsWorld = modelMatrix * vhsWorld;
     vVhsWorldPos = vhsWorld.xyz;
     float vhsBlackoutUnstable;
-    vVhsZoneLight = vhsZoneLight( vhsWorld.xyz ) * vhsBlackoutLight( vhsWorld.xz, vhsBlackoutUnstable );
+    vVhsZoneNoise = vhsZoneNoise( vhsWorld.xyz );
+    vVhsBlackout = vhsBlackoutLight( vhsWorld.xz, vhsBlackoutUnstable );
     vVhsWorldNormal = normalize( mat3( modelMatrix ) * objectNormal );
   }
 `;
@@ -329,7 +335,7 @@ export function applyVhsEffect(material: THREE.Material, options: VhsEffectOptio
       .replace("#include <dithering_fragment>", FINAL_GLSL);
     if (ceilingLights) fragment = fragment.replace("#include <emissivemap_fragment>", CEILING_EMISSIVE_GLSL);
     if (zoneLighting) {
-      const zone = perPixel ? `${ZONE_LIGHT_FRAGMENT}` : "vVhsZoneLight";
+      const zone = perPixel ? `${ZONE_LIGHT_FRAGMENT}` : "vhsZoneLightFromNoise( vVhsZoneNoise ) * vVhsBlackout";
       fragment = fragment.replace("#include <lights_fragment_maps>", `${perPixel ? "float vhsZoneUnstable;" : ""}${zoneLightGlsl(zone)}`);
     }
     shader.fragmentShader = fragment;

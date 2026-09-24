@@ -1,3 +1,4 @@
+import { LORE_FRAGMENT_COUNT } from "../shared/lore";
 import en from "./en.json";
 import fr from "./fr.json";
 
@@ -57,4 +58,6 @@ export function loreFragment(index: number): string | null {
   return DICTIONARIES[current]["lore.fragments"][index] ?? null;
 }
 
-export const LORE_FRAGMENT_COUNT = fr["lore.fragments"].length;
+if (fr["lore.fragments"].length !== LORE_FRAGMENT_COUNT || en["lore.fragments"].length !== LORE_FRAGMENT_COUNT) {
+  throw new Error(`Bandes perdues : ${LORE_FRAGMENT_COUNT} fragments attendus dans chaque langue`);
+}

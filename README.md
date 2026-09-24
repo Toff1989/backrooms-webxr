@@ -38,6 +38,8 @@ main, menus sans quitter le jeu) :
 | Pousser / frapper | Poing fermé (grip sans objet) ou geste vif |
 | Inventaire | Y (ouvrir/fermer) ; gâchette sur une case puis sur une autre : déplacer l'objet ; grip sur une case : sortir l'objet, puis le relâcher sur une autre case pour l'y ranger ; bouton TRI (récent / rareté / profondeur / nom) ; identifiant de build en bas à droite |
 | Lampe frontale | B (batterie limitée, HUD `BAT` : ramasser des piles au sol en marchant dessus ou en les touchant) |
+| Journal des bandes perdues | Grip avec la main à la ceinture (le carnet reste en main tant que le grip est tenu), ou bouton JOURNAL du menu d'inventaire ; l'autre main tourne les pages à la gâchette |
+| Lire une bande perdue | Saisir la page au sol (grip) : elle entre au journal ; A/X ou par-dessus l'épaule pour la classer |
 | Recaler la hauteur / STOP REC | Boutons du menu d'inventaire |
 
 Hauteur : au démarrage de la session, un joueur assis est automatiquement rehaussé à hauteur
@@ -115,6 +117,7 @@ src/
                                collider cinématique (poing fermé = on bouscule)
     grabSystem.ts            Saisie proche/à distance, suivi physique en main, lancer, rangement
     inventoryMenu.ts         Menu d'inventaire : miniatures 3D, sortie à taille réelle, actions système
+    journal.ts               Journal des bandes perdues (carnet en main) : index, lecture, code de cassette, jumelage
     endRunScreen.ts          Écran de fin de run (pseudo, envoi au classement)
     flashlight.ts            Lampe frontale (B)
     comfortVignette.ts      Vignette de confort (quad shader fixé à la caméra, réagit au mouvement)
@@ -124,7 +127,10 @@ src/
   ui/
     uiPanel.ts / uiPointer.ts Panneaux de menu en espace monde + pointeur laser (gâchette/grip)
   world/
-    grabbable.ts             Objets physiques saisissables (mobilier, collection) + registre
+    grabbable.ts             Objets physiques saisissables (mobilier, collection, pages) + registre
+    lorePage.ts              Page de bande perdue : feuille de cahier, texte manuscrit sur le papier
+    loreJournal.ts           Progression des bandes perdues (IndexedDB + serveur), indépendante de l'inventaire
+    playerIdentity.ts        Identité anonyme de l'appareil, code de cassette, jumelage façon télé
     atmosphere.ts            Lumière selon la profondeur, néons qui clignotent (glitchs, pannes)
     levelManager.ts          Orchestre la progression : profil par profondeur, sortie, transition
     chunkStreamer.ts        Charge/décharge les chunks (rayon 2), anime les pièges, régénère le
@@ -145,7 +151,9 @@ src/
     exit.ts                   Position de la sortie du level (fonction pure de la seed)
     rng.ts                   Hash déterministe par coordonnées + PRNG seedé (seedrandom)
     noise.ts                 Bruit simplex 2D seedé (simplex-noise)
-    chunkLayout.ts           Génère la disposition (murs/piliers/pièges/collection) d'un chunk
+    chunkLayout.ts           Génère la disposition (murs/piliers/pièges/mobilier/collection/page) d'un chunk
+    props.ts                 Mises en scène du mobilier (bureau, réserve, classe, salle d'attente, abandon)
+    lore.ts                  Bandes perdues : nombre de fragments, cellule de la page de chaque level
     collectibles.ts          Pool des ~50 objets de collection (rareté fixe, lore FR/EN)
     pseudoGenerator.ts       Suggestions de pseudo (templates seedés, pas de clavier virtuel)
 server/                      API de classement (étape 7) — voir server/src/, code partagé avec le
@@ -217,6 +225,30 @@ tests/physics.sim.ts         Simulation physique sans rendu (`npm run test:physi
   toutes les 10 s que les journaux arrivent, et à l'arrêt (Ctrl+C) exporte la session dans
   `server/logs/export-….jsonl` — à déposer dans la page d'analyse (Artifact « Banc de test
   Backrooms ») puis « Envoyer à Claude », ou directement dans la conversation.
+- **Bandes perdues** (`lore.ts`, `lorePage.ts`, `loreJournal.ts`, `player/journal.ts`) : 16
+  fragments de récit, lus dans l'ordre d'une run à l'autre. À chaque level, une page de cahier
+  arrachée traîne au sol, à l'écart du chemin vers la sortie (cellule dégagée, jamais emmurée) :
+  la saisir la lit (texte manuscrit sur le papier, légèrement luminescent) et l'ajoute au journal.
+  Le journal (carnet pris à la ceinture ou ouvert depuis le menu) liste les bandes lues ou
+  encore perdues. Progression gardée sur l'appareil et côté serveur (une seule nouvelle bande par
+  level et par run, validée contre la run en cours).
+- **Identité sans compte** (`server/src/players.ts`, `pairing.ts`, `routes/player.ts`) : au premier
+  lancement, le serveur attribue à l'appareil un secret (seule son empreinte est stockée) qui le
+  rattache à un joueur ; runs et bandes lui sont rattachées. Pour retrouver sa progression
+  ailleurs : le **code de cassette** (`K7-XXXX-XXXX`, affiché dans le journal, à saisir sur la
+  page d'accueil → Enregistrement → Récupérer) ou le **jumelage façon télé** (le nouvel appareil
+  affiche un code à 6 chiffres, l'appareil déjà enregistré le confirme au pavé numérique du
+  journal ou sur la page d'accueil). Un appareil qui avait déjà sa propre identité y est fusionné
+  (runs et bandes conservées) ; il adopte alors le code de cassette de l'autre.
+- **Mobilier** : 19 modèles CC0 Poly Haven (dont 15 ajoutés : fauteuil, canapé, table basse,
+  tabouret, chaise en plastique, étagère métallique, bibliothèque, chariot, écran de projection,
+  tableau noir, carton, caisse en plastique, panneau « sol glissant », télévision, plante),
+  optimisés avec glTF-Transform (Draco, WebP 512 px). Ils sont placés en mises en scène
+  (`shared/props.ts`) tournées d'un quart de tour aléatoire : coin bureau, réserve avec caisses
+  empilées, salle de classe, salle d'attente, zone abandonnée (chaises renversées), ou épars.
+- **Ombres des zones sombres** : le seuil clair/noir est appliqué au pixel (seul le bruit
+  lumineux, qui varie doucement, est interpolé entre sommets) — fini les ombres en biseau
+  dessinées par les triangles ; pénombre plus large et moins noire.
 - **Tester les menaces** : en mode debug (`?debug=1`), le menu d'inventaire (Y) a une rangée
   bleue de boutons de test : lancer/arrêter la Coupure, appeler/renvoyer le Cadreur (même au
   niveau 0), passer au niveau suivant, recharger la lampe.
@@ -246,7 +278,7 @@ tests/physics.sim.ts         Simulation physique sans rendu (`npm run test:physi
   - **Inventaire** : menu (Y) avec les objets en miniatures 3D ; on en sort un à taille réelle
     directement dans la main, on range l'objet tenu en le relâchant sur le menu ou avec A/X. L'inventaire
     est vidé à chaque nouvelle partie (`world/collection.ts`) ; un objet sorti et laissé au sol
-    est perdu en changeant de level. Seule la progression du récit (bandes perdues) est conservée.
+    est perdu en changeant de level. Les bandes perdues ont leur propre journal, conservé (voir plus bas).
   - **Ambiance** (vers *Saints & Sinners*) : mains gantées, chaque descente assombrit les néons
     et densifie le brouillard, les néons clignotent pendant les glitchs et tombent en panne au
     hasard en profondeur — d'où la lampe frontale (B). Le viseur REC est en haut du champ.

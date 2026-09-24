@@ -38,6 +38,8 @@ export class CamcorderHud {
   private readonly texture: THREE.CanvasTexture;
   private elapsedSeconds = 0;
   private timeSinceRedraw = Infinity;
+  private notice = "";
+  private noticeUntil = 0;
 
   constructor(camera: THREE.Camera) {
     const canvas = document.createElement("canvas");
@@ -60,9 +62,17 @@ export class CamcorderHud {
     camera.add(mesh);
   }
 
+  /** Message bref dans le viseur (ex. bande ajoutée au journal), à la place de la ligne de mesures. */
+  showNotice(text: string, seconds = 4): void {
+    this.notice = text;
+    this.noticeUntil = this.elapsedSeconds + seconds;
+    this.timeSinceRedraw = Infinity;
+  }
+
   /** Remet le compteur REC à zéro (nouvelle run). */
   resetClock(): void {
     this.elapsedSeconds = 0;
+    this.noticeUntil = 0;
     this.timeSinceRedraw = Infinity;
   }
 
@@ -122,7 +132,10 @@ export class CamcorderHud {
     const flags = [this.status.crouching ? t("hud.crouch") : "", this.status.sprinting ? t("hud.sprint") : "", this.status.flashlight ? t("hud.flashlight") : ""].filter(Boolean).join("  ");
     this.text(flags, CANVAS_WIDTH - 20, 120, "right", "#b9e0ff");
 
-    if (this.status.debug) {
+    if (this.elapsedSeconds < this.noticeUntil) {
+      ctx.font = "bold 30px monospace";
+      this.text(this.notice, CANVAS_WIDTH / 2, 185, "center", "#e8c34a");
+    } else if (this.status.debug) {
       ctx.font = "bold 21px monospace";
       this.text(this.status.debug, 20, 185, "left", "#9dff9d");
     }

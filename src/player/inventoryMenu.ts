@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { DEBUG_ENABLED } from "../debug/debugLog";
-import { getLanguage, loreFragment, onLanguageChange, setLanguage, t } from "../i18n";
+import { getLanguage, onLanguageChange, setLanguage, t } from "../i18n";
 import { getModelShape } from "../physics/modelShape";
 import { drawButton, drawPanelBackground, inRect, UiPanel, wrapText, type PressButton, type Rect } from "../ui/uiPanel";
 import { spawnCollectibleModel } from "../world/collectibleLoader";
@@ -36,15 +36,16 @@ const MENU_DROP = 0.14;
 const MENU_TILT = THREE.MathUtils.degToRad(14);
 const STOP_CONFIRM_SECONDS = 3;
 
-type ButtonId = "prev" | "next" | "sort" | "height" | "lang" | "vignette" | "stop" | "close";
+type ButtonId = "prev" | "next" | "sort" | "height" | "lang" | "vignette" | "stop" | "journal" | "close";
 
 /** Rangée 1 : inventaire et fin de run. Rangée 2 : options du jeu (langue, confort, hauteur). */
 const BUTTONS: Record<ButtonId, Rect> = {
   prev: { x: 40, y: 556, w: 70, h: 64 },
   next: { x: 120, y: 556, w: 70, h: 64 },
   sort: { x: 200, y: 556, w: 190, h: 64 },
-  stop: { x: 400, y: 556, w: 300, h: 64 },
-  close: { x: 710, y: 556, w: 274, h: 64 },
+  stop: { x: 400, y: 556, w: 250, h: 64 },
+  journal: { x: 660, y: 556, w: 180, h: 64 },
+  close: { x: 850, y: 556, w: 134, h: 64 },
   lang: { x: 40, y: 632, w: 330, h: 60 },
   vignette: { x: 380, y: 632, w: 330, h: 60 },
   height: { x: 720, y: 632, w: 264, h: 60 },
@@ -62,6 +63,8 @@ export interface InventoryMenuActions {
   takeOut(hand: Hand, entry: CollectionEntry): void;
   recalibrateHeight(): void;
   stopRec(): void;
+  /** Ouvre le journal des bandes perdues (il flotte devant le joueur). */
+  openJournal(): void;
   /** Vignette de confort : état courant, et bascule (renvoie le nouvel état). */
   vignetteEnabled(): boolean;
   toggleVignette(): boolean;
@@ -240,6 +243,10 @@ export class InventoryMenu extends UiPanel {
         }
         this.stopArmedUntil = this.time + STOP_CONFIRM_SECONDS;
         break;
+      case "journal":
+        this.close();
+        this.actions.openJournal();
+        return;
       case "close":
         this.close();
         return;
@@ -419,15 +426,8 @@ export class InventoryMenu extends UiPanel {
       ctx.fillStyle = RARITY_COLOR[focus.rarity];
       ctx.fillText(t("inv.found", { rarity: rarityLabel(focus.rarity), depth: focus.depth }), 40, 496);
       ctx.font = "21px monospace";
-      // Objet porteur d'un fragment du récit : la bande perdue remplace la description.
-      const fragment = focus.fragment !== undefined ? loreFragment(focus.fragment) : null;
-      if (fragment) {
-        ctx.fillStyle = "#e8c34a";
-        wrapText(ctx, `${t("lore.title", { n: (focus.fragment ?? 0) + 1 })} — « ${fragment} »`, 40, 526, width - 80, 24, 1);
-      } else {
-        ctx.fillStyle = "#a79d86";
-        wrapText(ctx, french ? focus.descriptionFr : focus.descriptionEn, 40, 526, width - 80, 24, 1);
-      }
+      ctx.fillStyle = "#a79d86";
+      wrapText(ctx, french ? focus.descriptionFr : focus.descriptionEn, 40, 526, width - 80, 24, 1);
     } else if (this.statusUntil) {
       ctx.font = "26px monospace";
       ctx.fillStyle = "#9fe39f";
@@ -452,6 +452,7 @@ export class InventoryMenu extends UiPanel {
       hovered: hoveredButtons.has("stop"),
       accent: "#ff6b5a",
     });
+    drawButton(ctx, BUTTONS.journal, t("inv.journal"), { hovered: hoveredButtons.has("journal"), accent: "#e8c34a" });
     drawButton(ctx, BUTTONS.close, t("inv.close"), { hovered: hoveredButtons.has("close") });
     if (DEBUG_ENABLED) {
       const debug = this.actions.debug ?? [];

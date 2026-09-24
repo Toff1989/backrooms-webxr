@@ -12,6 +12,7 @@ import { buildChunkGroup } from "./chunkMesh";
 import { spawnCollectibleModel } from "./collectibleLoader";
 import { toCollectionEntry } from "./collection";
 import type { GrabbableRegistry } from "./grabbable";
+import { createLorePageModel, LORE_PAGE_MASS, LORE_PAGE_REST_HEIGHT } from "./lorePage";
 import { spawnProp } from "./propLoader";
 import { WallTrap } from "./wallTrap";
 
@@ -93,6 +94,8 @@ export class ChunkStreamer {
     private readonly grabbables: GrabbableRegistry,
     /** Vrai si l'objet est déjà rangé dans l'inventaire (ne pas le refaire apparaître). */
     private readonly isItemStored: (id: string) => boolean,
+    /** Bande perdue portée par la page de ce level (null : récit complet, pas de page). */
+    private readonly lorePageFragment: () => number | null,
     profile: LevelProfile,
   ) {
     this.profile = profile;
@@ -321,11 +324,13 @@ export class ChunkStreamer {
           this.spawnQueue.push(() => {
             // Le chunk a pu être déchargé/régénéré pendant le chargement asynchrone du modèle.
             if (this.loaded.get(key) !== loadedChunk) return;
-            this.grabbables.createProp(placement.kind, model, template, placement.x, placement.z, placement.rotationY);
+            this.grabbables.createProp(placement.kind, model, template, placement.x, placement.z, placement.rotationY, placement.y, placement.tipped);
           });
         })
         .catch(() => {});
     }
+
+    if (layout.lorePage) this.spawnLorePage(key, loadedChunk, layout.lorePage);
 
     const depth = this.depth;
     for (const placement of layout.collectiblePlacements) {
@@ -346,6 +351,27 @@ export class ChunkStreamer {
         })
         .catch(() => {});
     }
+  }
+
+  /** Page de bande perdue du level (une seule dans le monde, même si son chunk se recharge). */
+  private spawnLorePage(key: string, chunk: LoadedChunk, location: NonNullable<ChunkLayout["lorePage"]>): void {
+    const id = `${this.profile.seed}:lore`;
+    this.spawnQueue.push(() => {
+      const fragment = this.lorePageFragment();
+      if (fragment === null || this.loaded.get(key) !== chunk || this.grabbables.isItemAlive(id)) return;
+      const { model, template, dispose } = createLorePageModel(fragment);
+      this.grabbables.create({
+        model,
+        template,
+        scale: 1,
+        position: new THREE.Vector3(location.x, LORE_PAGE_REST_HEIGHT, location.z),
+        quaternion: new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), location.rotationY),
+        mass: LORE_PAGE_MASS,
+        item: null,
+        lorePage: { id, fragment },
+        onDispose: dispose,
+      });
+    });
   }
 
   private addBoxCollider(body: RAPIER.RigidBody, segment: WallSegment): void {

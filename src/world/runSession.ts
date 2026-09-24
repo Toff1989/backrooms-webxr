@@ -1,4 +1,4 @@
-import { getPlayerId } from "./playerId";
+import { apiCall, ensureIdentity } from "./playerIdentity";
 
 /**
  * Client de l'API de classement (fiche projet étape 7). Chemins relatifs `/api/...` :
@@ -17,35 +17,24 @@ export interface LeaderboardEntry {
   endedAt: number;
 }
 
-async function postJson<T>(path: string, body: unknown): Promise<T> {
-  const response = await fetch(path, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  if (!response.ok) throw new Error(`${path} a répondu ${response.status}`);
-  return (await response.json()) as T;
-}
-
-/** Démarre une run côté serveur : seed + token signé, source de vérité pour le classement. */
+/** Démarre une run côté serveur (rattachée à l'identité de l'appareil) : seed + token signé. */
 export async function startRun(): Promise<RunSessionInfo> {
-  const playerId = await getPlayerId();
-  return postJson<RunSessionInfo>("/api/run/start", { playerId });
+  if (!(await ensureIdentity())) throw new Error("Serveur injoignable : pas d'identité");
+  return apiCall<RunSessionInfo>("POST", "/run/start", {});
 }
 
 /** Signale un passage de level pour la validation anti-triche serveur — best-effort, ne bloque jamais le jeu local. */
 export function reportLevel(session: RunSessionInfo, depth: number): void {
-  postJson("/api/run/level", { runId: session.runId, token: session.token, depth }).catch(() => {});
+  apiCall("POST", "/run/level", { runId: session.runId, token: session.token, depth }).catch(() => {});
 }
 
 /** Clôture la run ("STOP REC") avec le pseudo choisi ; renvoie le classement mis à jour. */
 export async function endRun(session: RunSessionInfo, pseudo: string): Promise<{ leaderboard: LeaderboardEntry[] }> {
-  return postJson("/api/run/end", { runId: session.runId, token: session.token, pseudo });
+  return apiCall("POST", "/run/end", { runId: session.runId, token: session.token, pseudo });
 }
 
-export async function fetchLeaderboard(): Promise<LeaderboardEntry[]> {
-  const response = await fetch("/api/leaderboard");
-  if (!response.ok) throw new Error(`leaderboard a répondu ${response.status}`);
-  const data = (await response.json()) as { leaderboard: LeaderboardEntry[] };
-  return data.leaderboard;
+/** Bande perdue lue pendant la run : enregistrée côté serveur. Renvoie le nombre de bandes connues. */
+export async function unlockLore(session: RunSessionInfo, fragment: number): Promise<number> {
+  const result = await apiCall<{ loreCount: number }>("POST", "/lore/unlock", { runId: session.runId, token: session.token, fragment });
+  return result.loreCount;
 }

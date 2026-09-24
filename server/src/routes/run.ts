@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { FastifyInstance } from "fastify";
 import { createRun, endRun as endRunRow, findRun, getLeaderboard, latestCheckpointTime, recordLevel } from "../db.js";
+import { authenticate } from "../players.js";
 import { signRunToken, verifyRunToken } from "../token.js";
 import { sanitizePseudo } from "../wordFilter.js";
 import { computeMinPlausibleMillis } from "../validation.js";
@@ -9,9 +10,6 @@ import { computeMinPlausibleMillis } from "../validation.js";
 const TIMING_TOLERANCE = 0.85;
 const LEADERBOARD_SIZE = 50;
 
-interface StartBody {
-  playerId?: unknown;
-}
 interface LevelBody {
   runId?: unknown;
   token?: unknown;
@@ -24,14 +22,12 @@ interface EndBody {
 }
 
 export function registerRunRoutes(app: FastifyInstance): void {
-  app.post<{ Body: StartBody }>("/run/start", async (request, reply) => {
-    const { playerId } = request.body;
-    if (typeof playerId !== "string" || playerId.length === 0) {
-      return reply.code(400).send({ error: "playerId manquant" });
-    }
+  app.post("/run/start", async (request, reply) => {
+    const player = authenticate(request);
+    if (!player) return reply.code(401).send({ error: "appareil inconnu" });
 
     const seed = randomUUID();
-    const run = createRun(playerId, seed);
+    const run = createRun(player.id, seed);
     return { runId: run.id, token: signRunToken(run.id), seed: run.seed };
   });
 

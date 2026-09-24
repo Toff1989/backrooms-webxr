@@ -11,7 +11,8 @@ import {
 import { CELL_SIZE, CHUNK_CELLS, EXIT_CLEARANCE_CELLS, PILLAR_SIZE, SPAWN_CLEARANCE_CELLS, WALL_THICKNESS } from "./constants.js";
 import { getExitLocation, type ExitLocation } from "./exit.js";
 import type { LevelProfile } from "./levelProfile.js";
-import { PROP_FOOTPRINT_RADIUS, pickPropKind, type PropKind } from "./props.js";
+import { getLorePageLocation, type LorePageLocation } from "./lore.js";
+import { composePropCluster, PROP_HALF_EXTENTS, type PropKind } from "./props.js";
 import { coordinateHash01, stringSeedToInt } from "./rng.js";
 
 export type WallEdge = "north" | "west";
@@ -44,6 +45,8 @@ export interface ChunkLayout {
   collectiblePlacements: CollectiblePlacement[];
   /** Piles pour la lampe torche : ramassées au passage (id stable pour ne pas réapparaître). */
   batteryPlacements: Array<{ id: string; x: number; z: number; rotationY: number }>;
+  /** Page de bande perdue du level, si elle repose dans ce chunk (une par level, voir `lore.ts`). */
+  lorePage: LorePageLocation | null;
 }
 
 export interface PropPlacement {
@@ -51,6 +54,10 @@ export interface PropPlacement {
   x: number;
   z: number;
   rotationY: number;
+  /** Hauteur de pose (m) : caisse empilée, objet posé sur un bureau. 0 = au sol. */
+  y: number;
+  /** Renversé sur le flanc : naît éveillé et retombe (la physique décide de sa pose). */
+  tipped: boolean;
 }
 
 export interface CollectiblePlacement {
@@ -91,6 +98,13 @@ export function generateChunkLayout(
   const seedInt = epoch === 0 ? baseSeedInt : (baseSeedInt + epoch * 0x9e3779b1) | 0;
   const exitLocation = getExitLocation(profile);
   const guaranteedPathEdges = computeGuaranteedPathEdges(exitLocation);
+  // Cellule de la page de bande perdue : ses quatre bords restent ouverts (jamais emmurée).
+  const lorePageLocation = getLorePageLocation(profile);
+  const { cellX: loreCellX, cellZ: loreCellZ } = lorePageLocation;
+  guaranteedPathEdges.add(edgeKey(loreCellX, loreCellZ, "north"));
+  guaranteedPathEdges.add(edgeKey(loreCellX, loreCellZ, "west"));
+  guaranteedPathEdges.add(edgeKey(loreCellX, loreCellZ + 1, "north"));
+  guaranteedPathEdges.add(edgeKey(loreCellX + 1, loreCellZ, "west"));
 
   const wallSegments: WallSegment[] = [];
   const pillarPositions: Array<{ x: number; z: number }> = [];
@@ -139,7 +153,8 @@ export function generateChunkLayout(
         wallTrapCandidates,
       );
 
-      const inClearance = isInsideSpawnClearance(cellX, cellZ) || isInsideExitClearance(cellX, cellZ, exitLocation);
+      const isLoreCell = cellX === loreCellX && cellZ === loreCellZ;
+      const inClearance = isLoreCell || isInsideSpawnClearance(cellX, cellZ) || isInsideExitClearance(cellX, cellZ, exitLocation);
       const hasPillar = !inClearance && coordinateHash01(seedInt, cellX, cellZ, 47) < profile.pillarProbability;
       if (hasPillar) {
         const pillarCenterX = originX + CELL_SIZE / 2;
@@ -179,17 +194,64 @@ export function generateChunkLayout(
     propObstacles,
     collectiblePlacements,
     batteryPlacements,
+    lorePage:
+      loreCellX >= baseCellX && loreCellX < baseCellX + CHUNK_CELLS && loreCellZ >= baseCellZ && loreCellZ < baseCellZ + CHUNK_CELLS ? lorePageLocation : null,
   };
 }
 
-const PROP_CLUSTER_MAX_RADIUS = 0.7;
-const PROP_CLUSTER_OBSTACLE_MARGIN = 0.4;
+/** Demi-côté (m) de la boîte d'encombrement d'un amas (toute la cellule, murs exclus). */
+const PROP_CLUSTER_OBSTACLE_HALF = 1.1;
+/** Marge (m) entre un meuble et le bord de la cellule (demi-épaisseur de mur en plus). */
+const PROP_WALL_MARGIN = WALL_THICKNESS / 2 + 0.05;
+
+/** Meubles sur lesquels on pose un petit objet, et caisses qui s'empilent. */
+const SUPPORT_PROPS = new Set<PropKind>(["officeDesk", "coffeeTable"]);
+const STACKABLE_PROPS = new Set<PropKind>(["cardboardBox", "plasticCrate"]);
+
+interface PlacedFootprint {
+  kind: PropKind;
+  x: number;
+  z: number;
+  hx: number;
+  hz: number;
+  angle: number;
+  /** Décalage appliqué pour rester dans la cellule : un objet posé dessus suit son support. */
+  shiftX: number;
+  shiftZ: number;
+  /** Position avant ce décalage (repère de l'amas), pour retrouver le support d'un objet posé. */
+  rawX: number;
+  rawZ: number;
+}
+
+/** Le point (repère de l'amas, avant décalage) est-il sur le plateau du meuble ? */
+function isOnTop(support: PlacedFootprint, x: number, z: number): boolean {
+  const dx = x - support.rawX;
+  const dz = z - support.rawZ;
+  const localX = dx * Math.cos(support.angle) - dz * Math.sin(support.angle);
+  const localZ = dx * Math.sin(support.angle) + dz * Math.cos(support.angle);
+  return Math.abs(localX) < support.hx - 0.08 && Math.abs(localZ) < support.hz - 0.08;
+}
+
+/** Deux rectangles orientés au sol se chevauchent-ils ? (axes séparateurs, 4 axes en 2D) */
+function footprintsOverlap(a: PlacedFootprint, b: PlacedFootprint): boolean {
+  const dx = b.x - a.x;
+  const dz = b.z - a.z;
+  for (const angle of [a.angle, a.angle + Math.PI / 2, b.angle, b.angle + Math.PI / 2]) {
+    const ax = Math.cos(angle);
+    const az = -Math.sin(angle);
+    const projection = (f: PlacedFootprint): number =>
+      f.hx * Math.abs(Math.cos(f.angle) * ax - Math.sin(f.angle) * az) + f.hz * Math.abs(Math.sin(f.angle) * ax + Math.cos(f.angle) * az);
+    if (Math.abs(dx * ax + dz * az) > projection(a) + projection(b) - 0.02) return false;
+  }
+  return true;
+}
 
 /**
- * Amas de mobilier autour du centre d'une cellule : une chaise isolée le plus souvent,
- * parfois un petit groupe, rarement un empilement dense — comme sur les images de
- * référence (pièces majoritairement vides, un coin encombré). Une seule boîte de
- * collision approximative couvre tout l'amas (pas de précision par meuble).
+ * Amas de mobilier mis en scène (coin bureau, réserve, salle de classe... voir `props.ts`) au
+ * centre d'une cellule, tourné d'un quart de tour aléatoire. Chaque meuble reste dans la
+ * cellule (jamais dans un mur) et ne chevauche aucun autre posé au sol (sinon il est retiré) ;
+ * un objet posé en hauteur (caisse empilée, plante sur un bureau) suit son support, et
+ * disparaît avec lui. Une seule boîte de collision approximative couvre tout l'amas.
  */
 function generatePropCluster(
   seedInt: number,
@@ -202,34 +264,57 @@ function generatePropCluster(
 ): void {
   const centerX = originX + CELL_SIZE / 2;
   const centerZ = originZ + CELL_SIZE / 2;
+  const { slots, rotationY } = composePropCluster((salt) => coordinateHash01(seedInt, cellX, cellZ, 1000 + salt));
+  const cos = Math.cos(rotationY);
+  const sin = Math.sin(rotationY);
+  const placed: PlacedFootprint[] = [];
+  const limit = CELL_SIZE / 2 - PROP_WALL_MARGIN;
 
-  const sizeRoll = coordinateHash01(seedInt, cellX, cellZ, 90);
-  const clusterSize = sizeRoll < 0.55 ? 1 : sizeRoll < 0.85 ? 2 + Math.floor(coordinateHash01(seedInt, cellX, cellZ, 91) * 2) : 4 + Math.floor(coordinateHash01(seedInt, cellX, cellZ, 92) * 2);
+  let previousAccepted = false;
+  for (const slot of slots) previousAccepted = placeSlot(slot);
 
-  const placed: Array<{ x: number; z: number; radius: number }> = [];
-  for (let i = 0; i < clusterSize; i++) {
-    const kind = pickPropKind(coordinateHash01(seedInt, cellX, cellZ, 100 + i));
-    const footprint = PROP_FOOTPRINT_RADIUS[kind];
-    const angle = coordinateHash01(seedInt, cellX, cellZ, 120 + i) * Math.PI * 2;
-    const radius = coordinateHash01(seedInt, cellX, cellZ, 140 + i) * PROP_CLUSTER_MAX_RADIUS;
-    const rotationY = coordinateHash01(seedInt, cellX, cellZ, 160 + i) * Math.PI * 2;
-    // Reste dans la cellule, à distance des murs de bord (demi-épaisseur + marge).
-    const limit = CELL_SIZE / 2 - WALL_THICKNESS / 2 - 0.05 - footprint;
-    if (limit <= 0) continue;
-    const x = centerX + Math.max(-limit, Math.min(limit, Math.cos(angle) * radius));
-    const z = centerZ + Math.max(-limit, Math.min(limit, Math.sin(angle) * radius));
-    // Pas de chevauchement avec les meubles déjà posés de l'amas : sinon, on renonce à celui-ci.
-    if (placed.some((other) => Math.hypot(other.x - x, other.z - z) < other.radius + footprint)) continue;
-    placed.push({ x, z, radius: footprint });
-    propPlacements.push({ kind, x, z, rotationY });
+  function placeSlot(slot: (typeof slots)[number]): boolean {
+    // Rotation d'un vecteur (dx, dz) autour de Y, même convention que three.js.
+    const rawX = slot.dx * cos + slot.dz * sin;
+    const rawZ = -slot.dx * sin + slot.dz * cos;
+    const angle = rotationY + slot.rotationY;
+    const { x: hx, z: hz } = PROP_HALF_EXTENTS[slot.kind];
+    const y = slot.y ?? 0;
+    let shiftX = 0;
+    let shiftZ = 0;
+
+    if (y > 0) {
+      // Caisse empilée : seulement si l'étage du dessous est posé. Plante/télé : sur un plateau.
+      const support = STACKABLE_PROPS.has(slot.kind)
+        ? previousAccepted
+          ? placed[placed.length - 1]
+          : undefined
+        : placed.find((other) => SUPPORT_PROPS.has(other.kind) && isOnTop(other, rawX, rawZ));
+      if (!support) return false;
+      shiftX = support.shiftX;
+      shiftZ = support.shiftZ;
+    } else {
+      const extentX = Math.abs(Math.cos(angle)) * hx + Math.abs(Math.sin(angle)) * hz;
+      const extentZ = Math.abs(Math.sin(angle)) * hx + Math.abs(Math.cos(angle)) * hz;
+      const maxX = Math.max(0, limit - extentX);
+      const maxZ = Math.max(0, limit - extentZ);
+      shiftX = Math.max(-maxX, Math.min(maxX, rawX)) - rawX;
+      shiftZ = Math.max(-maxZ, Math.min(maxZ, rawZ)) - rawZ;
+    }
+
+    const footprint: PlacedFootprint = { kind: slot.kind, x: rawX + shiftX, z: rawZ + shiftZ, hx, hz, angle, shiftX, shiftZ, rawX, rawZ };
+    if (y === 0 && placed.some((other) => footprintsOverlap(other, footprint))) return false;
+    // Une caisse empilée sert de support à la suivante (dernier élément de `placed`).
+    if (y === 0 || STACKABLE_PROPS.has(slot.kind)) placed.push(footprint);
+    propPlacements.push({ kind: slot.kind, x: centerX + footprint.x, z: centerZ + footprint.z, rotationY: angle, y, tipped: slot.tipped ?? false });
+    return true;
   }
 
-  const half = PROP_CLUSTER_MAX_RADIUS + PROP_CLUSTER_OBSTACLE_MARGIN;
   propObstacles.push({
-    minX: centerX - half,
-    maxX: centerX + half,
-    minZ: centerZ - half,
-    maxZ: centerZ + half,
+    minX: centerX - PROP_CLUSTER_OBSTACLE_HALF,
+    maxX: centerX + PROP_CLUSTER_OBSTACLE_HALF,
+    minZ: centerZ - PROP_CLUSTER_OBSTACLE_HALF,
+    maxZ: centerZ + PROP_CLUSTER_OBSTACLE_HALF,
   });
 }
 
