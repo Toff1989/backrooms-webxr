@@ -10,7 +10,8 @@
     "build": "tsc -b && vite build && node scripts/compress-dist.mjs",
     "preview": "vite preview",
     "typecheck": "tsc -b --noEmit",
-    "test:physics": "vite-node tests/physics.sim.ts"
+    "test:physics": "vite-node tests/physics.sim.ts",
+    "debug": "node scripts/debug-local.mjs"
   },
   "dependencies": {
     "@dimforge/rapier3d-compat": "^0.20.0",

@@ -212,6 +212,11 @@ tests/physics.sim.ts         Simulation physique sans rendu (`npm run test:physi
   lentement ; hors de vue (dos tourné, mur, noir) il accélère ; pris dans le faisceau de la
   lampe, il se fige et sa caméra grésille. S'il te rattrape : « SIGNAL PERDU », réveil un
   niveau plus bas, ce que tu tenais est perdu. La Coupure l'appelle s'il n'est pas déjà là.
+- **Session de test avec journaux** : `npm run debug` installe ce qui manque, lance le serveur
+  (réception des journaux) et le jeu, affiche les adresses PC/casque avec `?debug=1`, confirme
+  toutes les 10 s que les journaux arrivent, et à l'arrêt (Ctrl+C) exporte la session dans
+  `server/logs/export-….jsonl` — à déposer dans la page d'analyse (Artifact « Banc de test
+  Backrooms ») puis « Envoyer à Claude », ou directement dans la conversation.
 - **Tester les menaces** : en mode debug (`?debug=1`), le menu d'inventaire (Y) a une rangée
   bleue de boutons de test : lancer/arrêter la Coupure, appeler/renvoyer le Cadreur (même au
   niveau 0), passer au niveau suivant, recharger la lampe.
