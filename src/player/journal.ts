@@ -1,8 +1,9 @@
 import * as THREE from "three";
-import { loreFragment, onLanguageChange, t, type TranslationKey } from "../i18n";
-import { LORE_FRAGMENT_COUNT } from "../shared/lore";
+import { onLanguageChange, t, type TranslationKey } from "../i18n";
+import { LORE_FRAGMENT_COUNT, loreFormat, type LoreFormat } from "../shared/lore";
 import { drawButton, inRect, UiPanel, wrapText, type PressButton, type Rect } from "../ui/uiPanel";
-import { drawAgedPaper, drawLoreText, HANDWRITING_FONT } from "../world/lorePage";
+import { drawAgedPaper, drawLoreFragment, HANDWRITING_FONT, loreExcerpt, onLorePhotoChange } from "../world/loreArt";
+import { playLoreTape } from "../world/lorePage";
 import type { LoreJournal } from "../world/loreJournal";
 import { confirmPairing, startPairing, type PairingRequest } from "../world/playerIdentity";
 import type { Hand } from "./hand";
@@ -23,6 +24,9 @@ const TAB_BUTTONS: Record<"tapes" | "record" | "close", Rect> = {
 };
 const INDEX_TOP = 128;
 const INDEX_ROW = 29;
+/** Couleur de l'étiquette de forme dans l'index (note, fiche, photo, audio). */
+const FORMAT_COLOR: Record<LoreFormat, string> = { journal: "#1c2753", fiche: "#a3221b", polaroid: "#2f6b2f", audio: "#8a5a2b" };
+const PLAY_BUTTON: Rect = { x: CANVAS_W - 30 - 488 + 30, y: 30 + 570 - 84, w: 250, h: 58 };
 
 /** Carnet tenu en main : devant la paume, décalé du côté opposé à la main, tourné vers les yeux. */
 const HAND_UP = 0.1;
@@ -82,6 +86,7 @@ export class Journal extends UiPanel {
     this.group.name = "journal";
     onLanguageChange(() => this.invalidate());
     lore.onChange(() => this.invalidate());
+    onLorePhotoChange(() => this.invalidate());
   }
 
   /** La main est-elle à la ceinture (zone de prise du journal) ? */
@@ -198,6 +203,10 @@ export class Journal extends UiPanel {
     }
     if (id.startsWith("tape:")) {
       this.selected = Number(id.slice(5));
+      return;
+    }
+    if (id === "audio:play") {
+      playLoreTape(this.selected);
       return;
     }
     if (id === "pair:start") this.beginShowingCode();
@@ -322,16 +331,26 @@ export class Journal extends UiPanel {
       ctx.font = `bold 20px "Courier New", monospace`;
       const label = `n°${String(index + 1).padStart(2, "0")}`;
       ctx.fillText(label, rect.x + 8, rect.y + 21);
+      if (known) {
+        const format = loreFormat(index);
+        ctx.font = `bold 13px "Courier New", monospace`;
+        ctx.fillStyle = FORMAT_COLOR[format];
+        ctx.fillText(t(`lore.format.${format}`), rect.x + 70, rect.y + 20);
+      }
       ctx.font = known ? `20px ${HANDWRITING_FONT}` : `20px "Courier New", monospace`;
       ctx.fillStyle = known ? "#1c2753" : "rgba(58, 47, 34, 0.35)";
-      const text = known ? (loreFragment(index) ?? "") : "— — — — — —";
-      ctx.fillText(ellipsize(ctx, text, rect.w - 90), rect.x + 78, rect.y + 21);
+      const text = known ? loreExcerpt(index) : "— — — — — —";
+      ctx.fillText(ellipsize(ctx, text, rect.w - 132), rect.x + 124, rect.y + 21);
       this.hitRects.push({ id: `tape:${index}`, rect });
     }
 
     if (this.selected < count) {
-      drawLoreText(ctx, RIGHT_PAGE.x, RIGHT_PAGE.y, RIGHT_PAGE.w, this.selected, 34);
-      if (count >= LORE_FRAGMENT_COUNT && this.selected === LORE_FRAGMENT_COUNT - 1) this.note(ctx, RIGHT_PAGE, t("lore.end"), 480);
+      // La bande dans sa forme : note, fiche de montage, polaroid (légende au dos) ou transcription.
+      drawLoreFragment(ctx, RIGHT_PAGE.x, RIGHT_PAGE.y, RIGHT_PAGE.w, RIGHT_PAGE.h, this.selected);
+      if (loreFormat(this.selected) === "audio") {
+        drawButton(ctx, PLAY_BUTTON, t("audio.play"), { hovered: hovered.has("audio:play"), accent: "#8a5a2b" });
+        this.hitRects.push({ id: "audio:play", rect: PLAY_BUTTON });
+      }
     } else {
       this.heading(ctx, RIGHT_PAGE, t("lore.title", { n: this.selected + 1 }));
       this.note(ctx, RIGHT_PAGE, count === 0 ? t("journal.none") : t("journal.locked"), 200);

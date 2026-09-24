@@ -15,8 +15,10 @@ import { triggerHapticPulse } from "./player/haptics";
 import { InventoryMenu } from "./player/inventoryMenu";
 import { Journal } from "./player/journal";
 import { PerfStats, setPerf } from "./player/perfStats";
+import { createPhotoCapture } from "./player/photoCapture";
 import { PlayerController } from "./player/playerController";
 import { Sfx } from "./player/sfx";
+import { TapePlayer } from "./player/tapePlayer";
 import { VhsOverlay } from "./player/vhsOverlay";
 import { XrInput } from "./player/xrInput";
 import { installAccountPanel } from "./ui/accountPanel";
@@ -27,9 +29,10 @@ import { Cadreur } from "./world/cadreur";
 import { CollectionStore } from "./world/collection";
 import { computePerks } from "./world/collectionPerks";
 import { corruption } from "./world/corruption";
-import { GrabbableRegistry } from "./world/grabbable";
+import { GrabbableRegistry, type LorePageData } from "./world/grabbable";
 import { LevelManager, SPAWN_LOCAL_POSITION } from "./world/levelManager";
 import { LoreJournal } from "./world/loreJournal";
+import { configureLoreServices, updateLoreObjects } from "./world/lorePage";
 import { Poltergeist } from "./world/poltergeist";
 import { initMaterials } from "./world/materials";
 import { endRun, reportLevel, startRun, type RunSessionInfo } from "./world/runSession";
@@ -135,6 +138,12 @@ function setVignette(enabled: boolean): void {
 }
 const vhsOverlay = new VhsOverlay(camera);
 const hud = new CamcorderHud(camera);
+/** Bandes perdues : cassettes lues dans le viseur, polaroids photographiés derrière le joueur. */
+const tapePlayer = new TapePlayer(audioListener, hud);
+configureLoreServices({
+  capturePhoto: createPhotoCapture(renderer, scene, camera, physics),
+  playTape: (fragment) => tapePlayer.play(fragment),
+});
 const ambientHum = new AmbientHum(audioListener, scene);
 const flashlight = new Flashlight(camera);
 const perfStats = new PerfStats(renderer, camera);
@@ -247,8 +256,13 @@ installAccountPanel(loreJournal);
 
 const pointer = new UiPointer(hands, scene, [inventoryMenu, endRunScreen, journal]);
 
-/** Page de bande perdue saisie : lue, elle entre au journal (et au serveur si la run y est enregistrée). */
-function readLorePage(fragment: number, hand: Hand): void {
+/**
+ * Bande perdue saisie : lue selon sa forme (photo qui se développe, cassette qui se lance), elle
+ * entre au journal (et au serveur si la run y est enregistrée).
+ */
+function readLorePage(page: LorePageData, hand: Hand): void {
+  const { fragment } = page;
+  page.onRead();
   levelManager.pinLorePage(fragment);
   if (!loreJournal.read(fragment, currentSession)) return;
   hud.showNotice(t("lore.new", { n: fragment + 1 }));
@@ -261,7 +275,7 @@ grabSystem = new GrabSystem(physics, grabbables, hands, sfx, {
   inventorySlotAt: (hand) => inventoryMenu.slotIndexFor(hand),
   store: (item, slotIndex) => collectionStore.add(item, slotIndex ?? null),
   onGrab: (grabbable) => {
-    if (grabbable.lorePage && grabbable.heldBy instanceof Hand) readLorePage(grabbable.lorePage.fragment, grabbable.heldBy);
+    if (grabbable.lorePage && grabbable.heldBy instanceof Hand) readLorePage(grabbable.lorePage, grabbable.heldBy);
   },
   onEmptyGrip: (hand) => {
     if (!journal.isAtHip(hand)) return false;
@@ -273,6 +287,7 @@ grabSystem = new GrabSystem(physics, grabbables, hands, sfx, {
 
 /** Place le joueur au spawn du level courant (changement de level, nouvelle run). */
 function respawn(): void {
+  tapePlayer.stop();
   player.teleport(SPAWN_LOCAL_POSITION);
   syncHands(timer.getElapsed());
   grabSystem.onTeleport();
@@ -282,6 +297,9 @@ function respawn(): void {
   cadreur.reset(levelManager.depth);
 }
 
+/** Prise en cours : chaque fois que le Cadreur rattrape le joueur, « Coupez ! » et on la refait. */
+let take = 1;
+
 /** Niveau suivant : sortie atteinte, rattrapé par le Cadreur (réveil les mains vides), ou menu debug. */
 function goDeeper(caught: boolean): void {
   if (caught) grabSystem.loseHeld();
@@ -289,7 +307,10 @@ function goDeeper(caught: boolean): void {
   log("level", { action: caught ? "caught" : "descend", depth: levelManager.depth });
   respawn();
   const lines = [t("blue.level", { n: levelManager.depth })];
-  if (caught) lines.unshift(t("blue.lost"));
+  if (caught) {
+    take += 1;
+    lines.unshift(t("blue.cut"), t("blue.take", { n: take }));
+  }
   vhsOverlay.blueScreen(caught ? 2.6 : 1.4, lines);
   corruption.add(1);
   if (currentSession) reportLevel(currentSession, levelManager.depth);
@@ -316,6 +337,7 @@ function restartWorld(seed: string): void {
   grabSystem.loseHeld();
   collectionStore.clear();
   levelManager.restartRun(seed);
+  take = 1;
   hud.resetClock();
   respawn();
   log("run", { action: "start", seed });
@@ -493,6 +515,8 @@ renderer.setAnimationLoop((timestamp) => {
   perfStats.begin("effets");
   comfortVignette.update(player.movementIntensity, deltaSeconds);
   vhsOverlay.update(elapsedSeconds, corruption.value, deltaSeconds);
+  tapePlayer.update(deltaSeconds);
+  updateLoreObjects(deltaSeconds);
   hud.update(deltaSeconds);
   flashlight.update(deltaSeconds, corruption.value);
   // Lumière renvoyée par la lampe : centrée un mètre devant, là où tombe le faisceau.

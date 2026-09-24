@@ -39,6 +39,7 @@ export class CamcorderHud {
   private elapsedSeconds = 0;
   private timeSinceRedraw = Infinity;
   private notice = "";
+  private noticeColor = "#e8c34a";
   private noticeUntil = 0;
 
   constructor(camera: THREE.Camera) {
@@ -62,10 +63,19 @@ export class CamcorderHud {
     camera.add(mesh);
   }
 
-  /** Message bref dans le viseur (ex. bande ajoutée au journal), à la place de la ligne de mesures. */
-  showNotice(text: string, seconds = 4): void {
+  /**
+   * Message bref dans le viseur (bande ajoutée au journal, sous-titre d'une cassette), à la
+   * place de la ligne de mesures ; coupé sur deux lignes s'il est long.
+   */
+  showNotice(text: string, seconds = 4, color = "#e8c34a"): void {
     this.notice = text;
+    this.noticeColor = color;
     this.noticeUntil = this.elapsedSeconds + seconds;
+    this.timeSinceRedraw = Infinity;
+  }
+
+  clearNotice(): void {
+    this.noticeUntil = 0;
     this.timeSinceRedraw = Infinity;
   }
 
@@ -133,8 +143,9 @@ export class CamcorderHud {
     this.text(flags, CANVAS_WIDTH - 20, 120, "right", "#b9e0ff");
 
     if (this.elapsedSeconds < this.noticeUntil) {
-      ctx.font = "bold 30px monospace";
-      this.text(this.notice, CANVAS_WIDTH / 2, 185, "center", "#e8c34a");
+      ctx.font = "bold 27px monospace";
+      const lines = wrapTwoLines(ctx, this.notice, CANVAS_WIDTH - 60);
+      lines.forEach((line, index) => this.text(line, CANVAS_WIDTH / 2, lines.length === 1 ? 185 : 168 + index * 34, "center", this.noticeColor));
     } else if (this.status.debug) {
       ctx.font = "bold 21px monospace";
       this.text(this.status.debug, 20, 185, "left", "#9dff9d");
@@ -142,4 +153,15 @@ export class CamcorderHud {
 
     this.texture.needsUpdate = true;
   }
+}
+
+/** Coupe un texte en deux lignes au plus (la seconde tronquée si besoin). */
+function wrapTwoLines(ctx: CanvasRenderingContext2D, text: string, maxWidth: number): string[] {
+  if (ctx.measureText(text).width <= maxWidth) return [text];
+  const words = text.split(" ");
+  let first = "";
+  while (words.length > 0 && ctx.measureText(first ? `${first} ${words[0]}` : words[0]!).width <= maxWidth) first = first ? `${first} ${words.shift()}` : words.shift()!;
+  let second = words.join(" ");
+  while (second.length > 1 && ctx.measureText(second).width > maxWidth) second = `${second.slice(0, -2)}…`;
+  return [first, second];
 }

@@ -9,6 +9,50 @@ import { coordinateHash01, stringSeedToInt } from "./rng.js";
  */
 export const LORE_FRAGMENT_COUNT = 16;
 
+/**
+ * Forme d'une bande : note manuscrite du monteur, fiche de montage (bobine, plan, time-code),
+ * photo polaroid (développée au ramassage), ou cassette audio (grésillement + transcription).
+ */
+export type LoreFormat = "journal" | "fiche" | "polaroid" | "audio";
+
+export interface LoreFragmentMeta {
+  format: LoreFormat;
+  /** Fiche de montage : références du rush (identiques dans toutes les langues). */
+  reel?: number;
+  shot?: string;
+  timecode?: string;
+  /** Le plan en entier, sans coupe (dernière bande). */
+  full?: boolean;
+}
+
+/**
+ * Le Monteur : la veille du rendu, il retire du film les rushes de la nuit du 14, ceux de
+ * l'accident où Julien, le cadreur, est mort en continuant de filmer. Les bandes alternent ses
+ * notes, les fiches des plans coupés, les photos du tournage et les enregistrements audio.
+ */
+export const LORE_FRAGMENTS: readonly LoreFragmentMeta[] = [
+  { format: "journal" },
+  { format: "fiche", reel: 1, shot: "6", timecode: "00:41:12:03" },
+  { format: "journal" },
+  { format: "polaroid" },
+  { format: "audio" },
+  { format: "fiche", reel: 4, shot: "14B", timecode: "01:12:44:08" },
+  { format: "journal" },
+  { format: "polaroid" },
+  { format: "fiche", reel: 4, shot: "14C", timecode: "01:13:02:17" },
+  { format: "audio" },
+  { format: "journal" },
+  { format: "polaroid" },
+  { format: "fiche", reel: 4, shot: "14D", timecode: "01:13:40:00" },
+  { format: "audio" },
+  { format: "journal" },
+  { format: "fiche", reel: 4, shot: "14", timecode: "01:11:58:00", full: true },
+];
+
+export function loreFormat(fragment: number): LoreFormat {
+  return LORE_FRAGMENTS[fragment]?.format ?? "journal";
+}
+
 export interface LorePageLocation {
   cellX: number;
   cellZ: number;

@@ -218,17 +218,25 @@ tests/physics.sim.ts         Simulation physique sans rendu (`npm run test:physi
   boite, s'arrête net puis repart d'un coup, la tête-caméra tressaute et reste braquée sur le
   joueur. Il suit la trace exacte du joueur et apparaît derrière lui. Sous tes yeux il avance
   lentement ; hors de vue (dos tourné, mur, noir) il accélère ; pris dans le faisceau de la
-  lampe, il se fige et sa caméra grésille. S'il te rattrape : « SIGNAL PERDU », réveil un
-  niveau plus bas, ce que tu tenais est perdu. La Coupure l'appelle s'il n'est pas déjà là.
+  lampe, il se fige et sa caméra grésille. S'il te rattrape : « COUPEZ ! PRISE 2 », réveil un
+  niveau plus bas, ce que tu tenais est perdu (on refait la prise, comme au montage). La Coupure l'appelle s'il n'est pas déjà là.
 - **Session de test avec journaux** : `npm run debug` installe ce qui manque, lance le serveur
   (réception des journaux) et le jeu, affiche les adresses PC/casque avec `?debug=1`, confirme
   toutes les 10 s que les journaux arrivent, et à l'arrêt (Ctrl+C) exporte la session dans
   `server/logs/export-….jsonl` — à déposer dans la page d'analyse (Artifact « Banc de test
   Backrooms ») puis « Envoyer à Claude », ou directement dans la conversation.
-- **Bandes perdues** (`lore.ts`, `lorePage.ts`, `loreJournal.ts`, `player/journal.ts`) : 16
-  fragments de récit, lus dans l'ordre d'une run à l'autre. À chaque level, une page de cahier
-  arrachée traîne au sol, à l'écart du chemin vers la sortie (cellule dégagée, jamais emmurée) :
-  la saisir la lit (texte manuscrit sur le papier, légèrement luminescent) et l'ajoute au journal.
+- **Récit : le Monteur.** La veille du rendu, un monteur retire du film les rushes de la nuit du
+  14, ceux de l'accident où Julien, le cadreur, est mort en continuant de filmer. Le Cadreur,
+  c'est lui : il filme pour que quelqu'un voie enfin.
+- **Bandes perdues** (`shared/lore.ts`, `loreArt.ts`, `lorePage.ts`, `loreJournal.ts`,
+  `player/journal.ts`) : 16 bandes, lues dans l'ordre d'une run à l'autre, sous quatre formes :
+  note manuscrite (feuille de cahier), fiche de montage (bobine, plan, time-code, note au stylo
+  rouge), polaroid (vierge quand on le trouve ; ramassé, il se développe en quelques secondes et
+  révèle la scène photographiée derrière le joueur à cet instant, légende au dos —
+  `player/photoCapture.ts`) et cassette (souffle de bande + transcription en sous-titres dans le
+  viseur, `player/tapePlayer.ts`). À chaque level, la bande attendue traîne au sol, à l'écart du
+  chemin vers la sortie (cellule dégagée, jamais emmurée) ; la prendre en main la lit et
+  l'ajoute au journal.
   Le journal (carnet pris à la ceinture ou ouvert depuis le menu) liste les bandes lues ou
   encore perdues. Progression gardée sur l'appareil et côté serveur (une seule nouvelle bande par
   level et par run, validée contre la run en cours).

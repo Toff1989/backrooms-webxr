@@ -12,7 +12,7 @@ import { buildChunkGroup } from "./chunkMesh";
 import { spawnCollectibleModel } from "./collectibleLoader";
 import { toCollectionEntry } from "./collection";
 import type { GrabbableRegistry } from "./grabbable";
-import { createLorePageModel, LORE_PAGE_MASS, LORE_PAGE_REST_HEIGHT } from "./lorePage";
+import { createLoreObject } from "./lorePage";
 import { spawnProp } from "./propLoader";
 import { WallTrap } from "./wallTrap";
 
@@ -353,25 +353,35 @@ export class ChunkStreamer {
     }
   }
 
-  /** Page de bande perdue du level (une seule dans le monde, même si son chunk se recharge). */
+  /**
+   * Bande perdue du level (une seule dans le monde, même si son chunk se recharge) : note,
+   * fiche, polaroid ou cassette selon la bande attendue.
+   */
   private spawnLorePage(key: string, chunk: LoadedChunk, location: NonNullable<ChunkLayout["lorePage"]>): void {
     const id = `${this.profile.seed}:lore`;
-    this.spawnQueue.push(() => {
-      const fragment = this.lorePageFragment();
-      if (fragment === null || this.loaded.get(key) !== chunk || this.grabbables.isItemAlive(id)) return;
-      const { model, template, dispose } = createLorePageModel(fragment);
-      this.grabbables.create({
-        model,
-        template,
-        scale: 1,
-        position: new THREE.Vector3(location.x, LORE_PAGE_REST_HEIGHT, location.z),
-        quaternion: new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), location.rotationY),
-        mass: LORE_PAGE_MASS,
-        item: null,
-        lorePage: { id, fragment },
-        onDispose: dispose,
-      });
-    });
+    const fragment = this.lorePageFragment();
+    if (fragment === null || this.grabbables.isItemAlive(id)) return;
+    createLoreObject(fragment)
+      .then((lore) => {
+        this.spawnQueue.push(() => {
+          if (this.loaded.get(key) !== chunk || this.grabbables.isItemAlive(id)) {
+            lore.dispose();
+            return;
+          }
+          this.grabbables.create({
+            model: lore.model,
+            template: lore.template,
+            scale: 1,
+            position: new THREE.Vector3(location.x, lore.restHeight, location.z),
+            quaternion: new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), location.rotationY),
+            mass: lore.mass,
+            item: null,
+            lorePage: { id, fragment, onRead: lore.onRead },
+            onDispose: lore.dispose,
+          });
+        });
+      })
+      .catch(() => {});
   }
 
   private addBoxCollider(body: RAPIER.RigidBody, segment: WallSegment): void {

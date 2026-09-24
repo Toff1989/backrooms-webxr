@@ -104,6 +104,8 @@ export interface GrabbableInit {
 export interface LorePageData {
   id: string;
   fragment: number;
+  /** Prise en main : la bande est lue selon sa forme (polaroid développé, cassette lancée). */
+  onRead(): void;
 }
 
 /**
