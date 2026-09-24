@@ -55,6 +55,13 @@ Mesures (Chromium/SwiftShader, vue ouverte au spawn, niveau 0) : **110 → 25 dr
 - 1.1 : les meubles restent un objet physique chacun ; ils sont fusionnés par matériau et
   masqués au-delà de 17 m (c'étaient eux, plus que les chunks, qui coûtaient des draw calls).
 
+Session XR émulée (runtime `iwer` Meta Quest 3, Chromium/SwiftShader) : la session démarre
+sans erreur, rendu fovéal actif, franchir la porte fait bien descendre d'un niveau (écran
+bleu). Draw calls **en stéréo** (les deux yeux) au spawn : 76 → 70 après masquage des chunks
+au-delà de 34 m ; ~130 face à la sortie. Le multiview (deux yeux en une passe) n'existe dans
+three.js que pour le moteur WebGPU : y passer demanderait de réécrire les shaders VHS en TSL —
+à envisager seulement si les mesures en casque l'exigent.
+
 À faire en casque : FPS moyen et draw calls au niveau 0 et au niveau 5 avec `?debug=1`,
 à reporter ici ; ajuster `RENDER_DISTANCE` (grabbable.ts) et la densité des zones sombres
 (`lightField.ts`) selon le ressenti.

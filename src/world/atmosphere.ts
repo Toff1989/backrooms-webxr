@@ -5,9 +5,13 @@ const BASE_CEILING_EMISSIVE = 2.2;
 const BASE_HEMISPHERE = 0.9;
 const BASE_AMBIENT = 0.25;
 const BASE_FOG_DENSITY = 0.035;
-/** Chaque niveau plus bas assombrit l'éclairage (plancher à 28 % : il reste toujours un peu de lumière). */
-const DARKENING_PER_DEPTH = 0.09;
-const MIN_LIGHT_LEVEL = 0.28;
+/**
+ * Chaque niveau plus bas assombrit un peu l'éclairage des zones encore allumées (plancher à
+ * 50 %). L'essentiel de l'obscurité vient désormais des zones éteintes (`lightField.ts`, plus
+ * étendues en profondeur) : sans ce plancher, tout devenait uniformément noir dès le niveau 6.
+ */
+const DARKENING_PER_DEPTH = 0.05;
+const MIN_LIGHT_LEVEL = 0.5;
 
 /**
  * Ambiance lumineuse (direction artistique rapprochée de Saints & Sinners : on commence dans

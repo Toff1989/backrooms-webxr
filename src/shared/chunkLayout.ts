@@ -163,7 +163,8 @@ export function generateChunkLayout(
       } else if (!inClearance && coordinateHash01(seedInt, cellX, cellZ, 223) < profile.batteryProbability) {
         // Posée près d'un coin de la cellule, pas au centre : il faut la chercher du regard.
         batteryPlacements.push({
-          id: `${profile.seed}:bat:${cellX}:${cellZ}:${epoch}`,
+          // Sans l'epoch : une cellule régénérée ne rend pas une pile déjà ramassée.
+          id: `${profile.seed}:bat:${cellX}:${cellZ}`,
           x: originX + 0.4 + coordinateHash01(seedInt, cellX, cellZ, 224) * (CELL_SIZE - 0.8),
           z: originZ + 0.4 + coordinateHash01(seedInt, cellX, cellZ, 225) * (CELL_SIZE - 0.8),
           rotationY: coordinateHash01(seedInt, cellX, cellZ, 226) * Math.PI * 2,

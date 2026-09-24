@@ -24,6 +24,11 @@ const REGEN_MIN_DISTANCE_CHUNKS = 2;
  * en se retournant, il voit que le couloir d'où il vient n'est plus le même.
  */
 const REGEN_BEHIND_CHANCE = 0.35;
+/**
+ * Au-delà (m, jusqu'au bord du chunk), un chunk chargé n'est plus dessiné : le brouillard
+ * en masque déjà plus des trois quarts. Économise les draw calls des coins de la zone chargée.
+ */
+const CHUNK_RENDER_DISTANCE = 34;
 /** Distance minimale (m) entre le joueur et les limites d'un chunk voisin régénéré. */
 const REGEN_BEHIND_MIN_DISTANCE = 4;
 /** Corruption ajoutée quand un chunk hors champ se régénère (masque discrètement le changement). */
@@ -154,6 +159,7 @@ export class ChunkStreamer {
     let batteriesPicked = 0;
 
     for (const chunk of this.loaded.values()) {
+      chunk.group.visible = distanceToBox(playerPosition, chunk.bounds) < CHUNK_RENDER_DISTANCE;
       for (const trap of chunk.glitchTraps) {
         const result = trap.update(playerPosition, elapsedSeconds, deltaSeconds);
         corruptionDelta += result.corruptionDelta;
