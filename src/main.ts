@@ -15,6 +15,7 @@ import { triggerHapticPulse } from "./player/haptics";
 import { InventoryMenu } from "./player/inventoryMenu";
 import { Journal } from "./player/journal";
 import { PerfStats, setPerf } from "./player/perfStats";
+import { LiveViews } from "./player/liveViews";
 import { createPhotoCapture } from "./player/photoCapture";
 import { PlayerController } from "./player/playerController";
 import { Sfx } from "./player/sfx";
@@ -40,7 +41,7 @@ import { coordinateHash01, stringSeedToInt } from "./shared/rng";
 import { LevelManager, SPAWN_LOCAL_POSITION, type LevelUpdateResult } from "./world/levelManager";
 import { EditingRoom, INTRO_LORE_ID } from "./world/editingRoom";
 import { CHUNK_SIZE } from "./shared/constants";
-import { LORE_FRAGMENT_COUNT } from "./shared/lore";
+import { LORE_FRAGMENT_COUNT, loreFormat } from "./shared/lore";
 import { LoreJournal } from "./world/loreJournal";
 import { configureLoreServices, updateLoreObjects } from "./world/lorePage";
 import { Poltergeist } from "./world/poltergeist";
@@ -151,6 +152,8 @@ const hud = new CamcorderHud(camera);
 /** Bandes perdues : cassettes lues dans le viseur, polaroids photographiés derrière le joueur. */
 const tapePlayer = new TapePlayer(audioListener, hud);
 const capturePhoto = createPhotoCapture(renderer, scene, camera, physics);
+/** Vues en direct (télé, caméra de surveillance, jumelles, loupe, caméscope). */
+const liveViews = new LiveViews(renderer, scene, camera);
 configureLoreServices({
   capturePhoto,
   playTape: (fragment) => tapePlayer.play(fragment),
@@ -349,6 +352,19 @@ const interactions = new InteractionSystem({
   take: () => take,
   runSeconds: () => hud.recordingSeconds,
   drop: (grabbable) => grabSystem.drop(grabbable),
+  views: liveViews,
+  cadreurEye: () => {
+    const position = cadreur.worldPosition;
+    return position ? { position: new THREE.Vector3(position.x, 1.8, position.z), target: player.headWorld } : null;
+  },
+  playLatestTape: () => {
+    for (let fragment = loreJournal.count - 1; fragment >= 0; fragment--) {
+      if (loreFormat(fragment) !== "audio") continue;
+      tapePlayer.play(fragment);
+      return true;
+    }
+    return false;
+  },
 });
 
 /**
@@ -724,6 +740,7 @@ renderer.setAnimationLoop((timestamp) => {
   runWarmupStep(renderer.xr.isPresenting);
   perfStats.end("effets");
   perfStats.begin("rendu");
+  liveViews.render(deltaSeconds);
   perfStats.beginGpu();
   renderer.render(scene, camera);
   perfStats.endGpu();

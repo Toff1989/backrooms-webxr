@@ -283,6 +283,13 @@ tests/physics.sim.ts         Simulation physique sans rendu (`npm run test:physi
   posés sur la surface trouvée automatiquement dans la géométrie du modèle. **Le bruit attire
   le Cadreur** : un bruit fort le fait venir plus tôt ; présent, il va voir d'où ça vient — un
   objet bruyant lancé au loin sert de leurre.
+- **Vues en direct** (`player/liveViews.ts`) : caméras secondaires rendues en basse définition,
+  à cadence réduite, une seule par frame et seulement quand on les regarde. La télé allumée
+  passe en direct après deux secondes de neige : l'image de la caméra de surveillance qu'on a
+  posée (on la pointe, on la lâche), sinon ce que voit le Cadreur quand il est là, sinon ton
+  couloir filmé de dos. Jumelles (zoom ×5 portées aux yeux), loupe (grossit ce qu'on regarde à
+  travers le verre), caméscope (viseur en vision nocturne porté à l'œil ; gâchette : relit la
+  dernière cassette trouvée).
 - **Tester les menaces** : en mode debug (`?debug=1`), le menu d'inventaire (Y) a une rangée
   bleue de boutons de test : lancer/arrêter la Coupure, appeler/renvoyer le Cadreur (même au
   niveau 0), passer au niveau suivant, recharger la lampe.

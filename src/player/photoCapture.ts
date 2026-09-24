@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { CollisionGroups, RAPIER, type PhysicsWorld } from "../physics/physicsWorld";
+import { renderOffscreen } from "./liveViews";
 
 const PHOTO_SIZE = 256;
 /** Recul (m) de l'objectif derrière la tête du joueur, et marge gardée devant un mur. */
@@ -35,24 +36,8 @@ export function createPhotoCapture(renderer: THREE.WebGLRenderer, scene: THREE.S
     lens.lookAt(tmpHead.x + tmpForward.x * 3, tmpHead.y - 0.25, tmpHead.z + tmpForward.z * 3);
     lens.updateMatrixWorld();
 
-    // Ni HUD, ni vignette, ni grain d'écran : ce qui est accroché à la caméra du joueur est masqué.
-    const hidden = camera.children.filter((child) => child.visible);
-    for (const child of hidden) child.visible = false;
-    // En VR, le rendu remplace la caméra par celle du casque : on le coupe le temps de la photo.
-    const xrEnabled = renderer.xr.enabled;
-    const previousTarget = renderer.getRenderTarget();
-    renderer.xr.enabled = false;
-    try {
-      renderer.setRenderTarget(target);
-      renderer.render(scene, lens);
-      renderer.readRenderTargetPixels(target, 0, 0, PHOTO_SIZE, PHOTO_SIZE, pixels);
-    } catch {
-      return null;
-    } finally {
-      renderer.setRenderTarget(previousTarget);
-      renderer.xr.enabled = xrEnabled;
-      for (const child of hidden) child.visible = true;
-    }
+    if (!renderOffscreen(renderer, scene, camera, lens, target)) return null;
+    renderer.readRenderTargetPixels(target, 0, 0, PHOTO_SIZE, PHOTO_SIZE, pixels);
 
     const canvas = document.createElement("canvas");
     canvas.width = PHOTO_SIZE;

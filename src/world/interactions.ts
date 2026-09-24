@@ -2,6 +2,7 @@ import * as THREE from "three";
 import { tList, t } from "../i18n";
 import { CollisionGroups, RAPIER, type PhysicsWorld } from "../physics/physicsWorld";
 import type { Flashlight } from "../player/flashlight";
+import type { LiveViews } from "../player/liveViews";
 import type { Hand } from "../player/hand";
 import { stringSeedToInt } from "../shared/rng";
 import type { Grabbable, GrabbableRegistry } from "./grabbable";
@@ -28,6 +29,12 @@ export interface InteractionWorld {
   take(): number;
   runSeconds(): number;
   drop(grabbable: Grabbable): void;
+  /** Vues en direct (télé, caméra de surveillance, jumelles, loupe, caméscope). */
+  views: LiveViews;
+  /** Œil du Cadreur (sa tête-caméra) et ce qu'il regarde, quand il est là. */
+  cadreurEye(): { position: THREE.Vector3; target: THREE.Vector3 } | null;
+  /** Relit la dernière cassette audio trouvée (caméscope). Faux s'il n'y en a aucune. */
+  playLatestTape(): boolean;
 }
 
 interface Behaviour {
@@ -125,19 +132,79 @@ function inView(w: InteractionWorld, position: THREE.Vector3, cos = 0.5): boolea
   return tmp.dot(tmp2) > cos;
 }
 
+/** Place `camera` quelques pas derrière le joueur, dans son axe (ce que verrait celui qui le suit). */
+const behindRay = new RAPIER.Ray({ x: 0, y: 0, z: 0 }, { x: 0, y: 0, z: 1 });
+function placeBehindPlayer(w: InteractionWorld, camera: THREE.PerspectiveCamera): void {
+  const head = w.head();
+  w.camera.getWorldDirection(tmp).setY(0);
+  if (tmp.lengthSq() < 1e-6) tmp.set(0, 0, -1);
+  tmp.normalize();
+  behindRay.origin = { x: head.x, y: head.y, z: head.z };
+  behindRay.dir = { x: -tmp.x, y: 0, z: -tmp.z };
+  const hit = w.physics.world.castRay(behindRay, 2.6, true, undefined, CollisionGroups.querySight);
+  const distance = Math.max(0.2, (hit ? hit.timeOfImpact : 2.6) - 0.35);
+  camera.position.set(head.x - tmp.x * distance, head.y + 0.15, head.z - tmp.z * distance);
+  camera.lookAt(head.x + tmp.x * 3, head.y - 0.2, head.z + tmp.z * 3);
+}
+
+/** Masque d'opacité : un disque (loupe) ou deux disques accolés (jumelles). */
+function circleMask(double: boolean): THREE.CanvasTexture {
+  const canvas = document.createElement("canvas");
+  canvas.width = double ? 256 : 128;
+  canvas.height = 128;
+  const ctx = canvas.getContext("2d")!;
+  ctx.fillStyle = "#000";
+  ctx.fillRect(0, 0, canvas.width, 128);
+  const disc = (x: number): void => {
+    const gradient = ctx.createRadialGradient(x, 64, 48, x, 64, 64);
+    gradient.addColorStop(0, "#fff");
+    gradient.addColorStop(1, "#000");
+    ctx.fillStyle = gradient;
+    ctx.beginPath();
+    ctx.arc(x, 64, 64, 0, Math.PI * 2);
+    ctx.fill();
+  };
+  if (double) {
+    disc(78);
+    disc(178);
+  } else disc(64);
+  return new THREE.CanvasTexture(canvas);
+}
+
+/** Calque fixé devant les yeux (jumelles, viseur) : affiché seulement quand l'objet est porté au visage. */
+function eyeOverlay(w: InteractionWorld, width: number, height: number, material: THREE.MeshBasicMaterial): THREE.Mesh {
+  const mesh = new THREE.Mesh(new THREE.PlaneGeometry(width, height), material);
+  mesh.position.set(0, 0, -0.2);
+  mesh.renderOrder = 995;
+  mesh.frustumCulled = false;
+  mesh.visible = false;
+  w.camera.add(mesh);
+  return mesh;
+}
+
+/** L'objet tenu est-il porté au visage ? */
+function atEye(g: Grabbable, w: InteractionWorld, distance: number): boolean {
+  return !!g.heldBy && g.object.position.distanceTo(w.head()) < distance;
+}
+
 // ---------------------------------------------------------------- Mobilier
 
 /** Télévision : neige qui grésille ; console branchée à côté : un jeu ; cassette approchée : lecture. */
-const television: Factory = (g, w) => {
+const television: Factory = (g, w, system) => {
   const face = faceOf(g, FRONT_AXES);
   const screen = face ? new FaceCanvas(g.object, face, 160, 120, { shrink: 0.68, glow: true, raise: 0.08 }) : null;
-  if (screen) screen.visible = false;
+  if (screen) {
+    screen.visible = false;
+    system.displays.add(screen.mesh);
+  }
+  let onSince = 0;
+  let glitchUntil = 0;
   let on = false;
   let hum: LoopHandle | null = null;
   let frame = 0;
   let noiseTimer = 0;
   let scanTimer = 0;
-  let mode: "static" | "game" | "tape" = "static";
+  let mode: "static" | "game" | "tape" | "live" = "static";
   let tapeUntil = 0;
   let tapePhoto: HTMLCanvasElement | null = null;
   let time = 0;
@@ -146,6 +213,7 @@ const television: Factory = (g, w) => {
 
   const setOn = (value: boolean): void => {
     on = value;
+    onSince = time;
     if (screen) screen.visible = on;
     w.audio.playAt(on ? "tvOn" : "tvOff", g.object.position, 0.7);
     if (on) hum = w.audio.loop("tvStatic", g.object, 0.28);
@@ -206,6 +274,26 @@ const television: Factory = (g, w) => {
     ctx.fillText(`01:13:${String(seconds % 60).padStart(2, "0")}:${String(Math.floor((time % 1) * 25)).padStart(2, "0")}`, 70, 112);
   };
 
+  /**
+   * Image en direct : la caméra de surveillance posée (si elle est là), sinon ce que voit le
+   * Cadreur (il te filme), sinon ton couloir, filmé de dos par quelqu'un qui te suit.
+   */
+  const showLive = (material: THREE.MeshBasicMaterial): void => {
+    const security = system.securityCamera;
+    const eye = w.cadreurEye();
+    const id = security ? "security" : eye ? "cadreur" : "behind";
+    const view = w.views.use(id, 192, 144, 10, security ? 70 : 55, [...system.displays]);
+    if (security) system.aimSecurityView(view.camera);
+    else if (eye) {
+      view.camera.position.copy(eye.position);
+      view.camera.lookAt(eye.target);
+    } else placeBehindPlayer(w, view.camera);
+    if (material.map !== view.texture) {
+      material.map = view.texture;
+      material.needsUpdate = true;
+    }
+  };
+
   return {
     use: () => setOn(!on),
     poke: () => setOn(!on),
@@ -234,8 +322,19 @@ const television: Factory = (g, w) => {
           tapeUntil = time + 15;
           tapePhoto = w.capturePhoto();
         }
-        mode = time < tapeUntil ? "tape" : nearbyKind("gamingConsole", 1.6) ? "game" : "static";
+        // Après deux secondes de neige : l'image en direct, coupée de temps en temps par la neige.
+        if (Math.random() < 0.06) glitchUntil = time + 0.35;
+        mode = time < tapeUntil ? "tape" : nearbyKind("gamingConsole", 1.6) ? "game" : time - onSince > 2 && time > glitchUntil ? "live" : "static";
         hum?.setVolume(mode === "static" ? 0.28 : 0.1);
+      }
+      const material = screen.mesh.material as THREE.MeshBasicMaterial;
+      if (mode === "live" && g.object.position.distanceTo(w.head()) < 10) {
+        showLive(material);
+        return;
+      }
+      if (material.map !== screen.texture) {
+        material.map = screen.texture;
+        material.needsUpdate = true;
       }
       if (!near) return;
       frame -= dt;
@@ -248,7 +347,11 @@ const television: Factory = (g, w) => {
     },
     dispose: () => {
       hum?.stop();
-      screen?.dispose();
+      if (screen) {
+        system.displays.delete(screen.mesh);
+        (screen.mesh.material as THREE.MeshBasicMaterial).map = screen.texture;
+        screen.dispose();
+      }
     },
   };
 };
@@ -1012,7 +1115,158 @@ const wallClock: Factory = (g, w) => {
   };
 };
 
+/**
+ * Caméra de surveillance : on la pointe où l'on veut surveiller, on la pose (on la lâche) ; son
+ * image passe alors sur les télés allumées.
+ */
+const securityCamera: Factory = (g, w, system) => {
+  const direction = new THREE.Vector3(0, 0, -1);
+  let wasHeld = false;
+  return {
+    update: () => {
+      const hand = g.heldBy as Hand | null;
+      if (hand) {
+        direction.copy(hand.aimDirection);
+        wasHeld = true;
+        return;
+      }
+      if (!wasHeld) return;
+      wasHeld = false;
+      system.placeSecurityCamera(g, direction);
+      w.audio.playAt("beep", g.object.position, 0.4);
+    },
+    dispose: () => system.removeSecurityCamera(g),
+  };
+};
+
+/** Jumelles : portées aux yeux, un zoom ×5 dans l'axe du regard (deux disques). */
+const binoculars: Factory = (g, w) => {
+  const mask = circleMask(true);
+  const overlay = eyeOverlay(w, 0.22, 0.11, new THREE.MeshBasicMaterial({ alphaMap: mask, transparent: true, depthTest: false, depthWrite: false, toneMapped: false }));
+  return {
+    update: () => {
+      overlay.visible = atEye(g, w, 0.2);
+      if (!overlay.visible) return;
+      const view = w.views.use("binoculars", 256, 128, 15, 11);
+      w.camera.getWorldPosition(view.camera.position);
+      w.camera.getWorldQuaternion(view.camera.quaternion);
+      const material = overlay.material as THREE.MeshBasicMaterial;
+      if (material.map !== view.texture) {
+        material.map = view.texture;
+        material.needsUpdate = true;
+      }
+    },
+    dispose: () => {
+      overlay.removeFromParent();
+      overlay.geometry.dispose();
+      (overlay.material as THREE.Material).dispose();
+      mask.dispose();
+    },
+  };
+};
+
+/** Loupe : ce qu'on regarde à travers le verre apparaît grossi (×2,5). */
+const magnifyingGlass: Factory = (g, w, system) => {
+  const face = faceOf(g);
+  if (!face) return {};
+  const mask = circleMask(false);
+  const material = new THREE.MeshBasicMaterial({ alphaMap: mask, transparent: true, toneMapped: false });
+  const lens = createFacePlane(face, material, 0.85, 1);
+  lens.visible = false;
+  g.object.add(lens);
+  system.displays.add(lens);
+  const center = new THREE.Vector3();
+  return {
+    update: () => {
+      lens.visible = !!g.heldBy && g.object.position.distanceTo(w.head()) < 0.8;
+      if (!lens.visible) return;
+      lens.getWorldPosition(center);
+      const head = w.head();
+      const distance = Math.max(0.05, center.distanceTo(head));
+      const radius = (face.width * 0.85 * g.object.scale.x) / 2;
+      const fov = THREE.MathUtils.radToDeg((2 * Math.atan(radius / distance)) / 2.5);
+      const view = w.views.use("loupe", 160, 160, 15, THREE.MathUtils.clamp(fov, 2, 40), [...system.displays]);
+      view.camera.position.copy(head);
+      view.camera.lookAt(center);
+      if (material.map !== view.texture) {
+        material.map = view.texture;
+        material.needsUpdate = true;
+      }
+    },
+    dispose: () => {
+      system.displays.delete(lens);
+      lens.geometry.dispose();
+      material.dispose();
+      mask.dispose();
+    },
+  };
+};
+
+/**
+ * Caméscope : porté à l'œil, le viseur montre la scène en vision nocturne (le noir n'y cache
+ * plus rien) avec son REC ; gâchette : relit la dernière cassette audio trouvée.
+ */
+const videoCamera: Factory = (g, w, system) => {
+  const material = new THREE.MeshBasicMaterial({ color: new THREE.Color(0.9, 2.4, 1.1), depthTest: false, depthWrite: false, toneMapped: false });
+  const viewfinder = eyeOverlay(w, 0.16, 0.12, material);
+  const recCanvas = document.createElement("canvas");
+  recCanvas.width = 256;
+  recCanvas.height = 192;
+  const rec = recCanvas.getContext("2d")!;
+  rec.strokeStyle = "rgba(255, 255, 255, 0.8)";
+  rec.lineWidth = 3;
+  for (const [x, y, dx, dy] of [[12, 12, 1, 1], [244, 12, -1, 1], [12, 180, 1, -1], [244, 180, -1, -1]] as const) {
+    rec.beginPath();
+    rec.moveTo(x, y + dy * 20);
+    rec.lineTo(x, y);
+    rec.lineTo(x + dx * 20, y);
+    rec.stroke();
+  }
+  rec.fillStyle = "#ff3b30";
+  rec.beginPath();
+  rec.arc(30, 36, 7, 0, Math.PI * 2);
+  rec.fill();
+  rec.font = "bold 18px monospace";
+  rec.fillText("REC", 44, 42);
+  const recTexture = new THREE.CanvasTexture(recCanvas);
+  const frameOverlay = new THREE.Mesh(
+    new THREE.PlaneGeometry(0.16, 0.12),
+    new THREE.MeshBasicMaterial({ map: recTexture, transparent: true, depthTest: false, depthWrite: false, toneMapped: false }),
+  );
+  frameOverlay.position.z = 0.001;
+  frameOverlay.renderOrder = 996;
+  viewfinder.add(frameOverlay);
+  return {
+    use: () => {
+      if (!w.playLatestTape()) w.audio.playAt("crackle", g.object.position, 0.6);
+    },
+    update: () => {
+      viewfinder.visible = atEye(g, w, 0.2);
+      if (!viewfinder.visible) return;
+      const view = w.views.use("camcorder", 192, 144, 12, 50, [...system.displays]);
+      g.object.getWorldPosition(view.camera.position);
+      w.camera.getWorldQuaternion(view.camera.quaternion);
+      if (material.map !== view.texture) {
+        material.map = view.texture;
+        material.needsUpdate = true;
+      }
+    },
+    dispose: () => {
+      viewfinder.removeFromParent();
+      viewfinder.geometry.dispose();
+      material.dispose();
+      frameOverlay.geometry.dispose();
+      (frameOverlay.material as THREE.Material).dispose();
+      recTexture.dispose();
+    },
+  };
+};
+
 const BEHAVIOURS: Record<string, Factory> = {
+  securityCamera,
+  binoculars,
+  magnifyingGlass,
+  videoCamera,
   television,
   projectorScreen,
   chalkboard,
@@ -1084,6 +1338,31 @@ export class InteractionSystem {
   private time = 0;
   /** Lampe trouvée actuellement allumée en main (une seule à la fois). */
   torchOwner: Grabbable | null = null;
+  /** Surfaces qui affichent une vue en direct : masquées pendant le rendu des vues. */
+  readonly displays = new Set<THREE.Object3D>();
+  /** Dernière caméra de surveillance posée (son image passe sur les télés), et son axe. */
+  securityCamera: Grabbable | null = null;
+  private readonly securityDirection = new THREE.Vector3(0, 0, -1);
+
+  placeSecurityCamera(g: Grabbable, direction: THREE.Vector3): void {
+    this.securityCamera = g;
+    this.securityDirection.copy(direction);
+  }
+
+  removeSecurityCamera(g: Grabbable): void {
+    if (this.securityCamera !== g) return;
+    this.securityCamera = null;
+    this.world.views.release("security");
+  }
+
+  /** Oriente la caméra d'une vue comme la caméra de surveillance posée. */
+  aimSecurityView(camera: THREE.PerspectiveCamera): void {
+    const g = this.securityCamera;
+    if (!g) return;
+    camera.position.copy(g.object.position);
+    camera.position.y += 0.05;
+    camera.lookAt(tmp.copy(camera.position).add(this.securityDirection));
+  }
 
   constructor(private readonly world: InteractionWorld) {
     world.registry.onCreate.add((g) => this.attach(g));

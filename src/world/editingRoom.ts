@@ -130,9 +130,12 @@ export class EditingRoom {
     if (variant === "intro") {
       this.startTutorial();
     } else {
-      // Les fins : le moniteur est déjà allumé, la bande tourne.
-      const photo = this.deps.capturePhoto();
-      if (this.television) this.deps.interactions.command(this.television, "tape", photo);
+      // Les fins : le moniteur est déjà allumé. L'aveu : la bobine 4 tourne ; la boucle : le
+      // moniteur montre le joueur en direct, filmé de dos.
+      if (this.television) {
+        if (variant === "aveu") this.deps.interactions.command(this.television, "tape", this.deps.capturePhoto());
+        else this.deps.interactions.command(this.television, "on");
+      }
       const lines = tList(variant === "aveu" ? "ending.aveu" : "ending.boucle").map((line) => line.replace("{take}", String(this.deps.take())));
       this.ending = { lines, index: 0, timer: 1.5 };
     }
