@@ -1,7 +1,7 @@
 import type { CollectionEntry } from "./collection";
 
 /**
- * Bonus passifs tirés de la collection (persistante entre les runs) : ce qu'on a rapporté
+ * Bonus passifs tirés de l'inventaire de la run (vidé à chaque partie) : ce qu'on a ramassé
  * sert réellement. Bonus thématiques, liés à l'objet :
  * - lampes (torche, lampe ancienne) +25 % d'autonomie chacune, briquet +10 %, et +1 % par
  *   objet quelconque (plafond : ×2,5) ;

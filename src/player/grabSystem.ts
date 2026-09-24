@@ -397,20 +397,35 @@ export class GrabSystem {
       onFailure();
       return;
     }
+    // Un exemplaire traîne déjà dans le monde : l'inventaire fait foi, on retire l'autre
+    // (s'il est tenu par l'autre main, c'est lui le vrai : l'entrée d'inventaire disparaît).
+    const existing = this.registry.itemInWorld(item.id);
+    if (existing?.heldBy) return;
+    if (existing) this.registry.remove(existing);
     this.pendingTake.add(hand);
+    this.registry.reserveItem(item.id);
+    let created = false;
     spawnCollectibleModel(item.kind)
       .then(({ model, template }) => {
         this.pendingTake.delete(hand);
         if (this.held.has(hand) || !hand.tracked) {
+          this.registry.releaseItem(item.id);
           onFailure();
           return;
         }
         const grabbable = this.registry.createCollectible(item, model, template, hand.palm.clone(), hand.quaternion.clone());
+        created = true;
         this.attach(hand, grabbable, "centered");
         this.sfx.play("take", 0.45);
       })
-      .catch(() => {
+      .catch((error: unknown) => {
         this.pendingTake.delete(hand);
+        // L'objet est déjà dans la main : ne surtout pas le remettre aussi dans l'inventaire.
+        if (created) {
+          log("error", { where: "takeIntoHand", error: String(error) });
+          return;
+        }
+        this.registry.releaseItem(item.id);
         onFailure();
       });
   }
@@ -688,6 +703,8 @@ export class GrabSystem {
     }
     state.grabbable.heldBy = null;
     this.registry.remove(state.grabbable);
+    // Filet de sécurité : aucun autre exemplaire de cet objet ne reste au sol.
+    this.registry.removeItemCopies(item.id);
     this.hooks.store(item, slotIndex);
     hand.pulse(0.45, 70);
     this.sfx.play("store", 0.5);

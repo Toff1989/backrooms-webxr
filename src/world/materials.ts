@@ -102,13 +102,15 @@ const PILLAR_DISPLACEMENT = { displacementScale: 0.03, displacementBias: -0.018 
 let wallMaterial: THREE.MeshStandardMaterial | null = null;
 export function getWallMaterial(): THREE.MeshStandardMaterial {
   if (!wallMaterial) {
-    // Un mur = une cellule (2,5 m) : chaque quad de mur fusionné porte déjà son propre UV 0..1.
+    // Une tuile de papier peint = une cellule (2,5 m) de large, toute la hauteur : UV projetés
+    // depuis la position monde (voir `boxProjection`), identiques sur les murs, les murs-pièges
+    // et le bloc de la sortie, quelle que soit la longueur du mur.
     wallMaterial = new THREE.MeshStandardMaterial({
       ...surface(wallBaseColorUrl, wallNormalUrl, wallOrmUrl, 1, true),
       displacementMap: texture(wallDisplacementUrl, 1),
       ...WALL_DISPLACEMENT,
     });
-    applyVhsEffect(wallMaterial);
+    applyVhsEffect(wallMaterial, { boxProjection: true });
   }
   return wallMaterial;
 }
@@ -118,7 +120,7 @@ export function getFloorMaterial(): THREE.MeshStandardMaterial {
   if (!floorMaterial) {
     // Un seul plan de sol pour toute la zone chargée : repeat = nombre de cellules par côté.
     floorMaterial = new THREE.MeshStandardMaterial(surface(floorBaseColorUrl, floorNormalUrl, floorOrmUrl, SURFACE_CELLS, false));
-    applyVhsEffect(floorMaterial);
+    applyVhsEffect(floorMaterial, { zoneLightPerPixel: true });
   }
   return floorMaterial;
 }
@@ -134,7 +136,7 @@ export function getCeilingMaterial(): THREE.MeshStandardMaterial {
       emissive: new THREE.Color(0xffffff),
       emissiveIntensity: 2.2,
     });
-    applyVhsEffect(ceilingMaterial, { ceilingLights: true });
+    applyVhsEffect(ceilingMaterial, { ceilingLights: true, zoneLightPerPixel: true });
   }
   return ceilingMaterial;
 }
@@ -147,7 +149,7 @@ export function getPillarMaterial(): THREE.MeshStandardMaterial {
       displacementMap: texture(pillarDisplacementUrl, 1),
       ...PILLAR_DISPLACEMENT,
     });
-    applyVhsEffect(pillarMaterial);
+    applyVhsEffect(pillarMaterial, { boxProjection: true });
   }
   return pillarMaterial;
 }

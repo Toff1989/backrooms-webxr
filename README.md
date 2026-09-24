@@ -244,9 +244,9 @@ tests/physics.sim.ts         Simulation physique sans rendu (`npm run test:physi
     les murs au lieu de les traverser (et se lâche s'il reste coincé), un objet lourd traîne
     derrière la main, et au relâchement il part avec la vitesse réelle de la main (lancer).
   - **Inventaire** : menu (Y) avec les objets en miniatures 3D ; on en sort un à taille réelle
-    directement dans la main, on range l'objet tenu en le relâchant sur le menu ou avec A/X. Ce
-    qui est rangé persiste entre les runs (IndexedDB, `world/collection.ts`) ; un objet sorti et
-    laissé au sol est perdu en changeant de level.
+    directement dans la main, on range l'objet tenu en le relâchant sur le menu ou avec A/X. L'inventaire
+    est vidé à chaque nouvelle partie (`world/collection.ts`) ; un objet sorti et laissé au sol
+    est perdu en changeant de level. Seule la progression du récit (bandes perdues) est conservée.
   - **Ambiance** (vers *Saints & Sinners*) : mains gantées, chaque descente assombrit les néons
     et densifie le brouillard, les néons clignotent pendant les glitchs et tombent en panne au
     hasard en profondeur — d'où la lampe frontale (B). Le viseur REC est en haut du champ.

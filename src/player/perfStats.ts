@@ -1,5 +1,14 @@
 import * as THREE from "three";
-import { DEBUG_ENABLED, log } from "../debug/debugLog";
+import { DEBUG_ENABLED, flushStats, log } from "../debug/debugLog";
+
+/** Baisse du tas JS d'une frame à l'autre au-delà de laquelle on note un passage du ramasse-miettes. */
+const GC_DROP_BYTES = 2 * 1048576;
+const MAX_PENDING_GPU_QUERIES = 8;
+
+interface TimerQueryExtension {
+  TIME_ELAPSED_EXT: number;
+  GPU_DISJOINT_EXT: number;
+}
 
 /** Durée de la frame visée (Quest : 72 Hz). Au-delà de 1,5×, la frame est un à-coup. */
 const TARGET_FRAME_MS = 1000 / 72;
@@ -12,6 +21,10 @@ export interface HitchRecord {
   at: number;
   frameMs: number;
   cpuMs: number;
+  /** Temps entre la fin de la frame précédente et le début de celle-ci (JS au repos ou occupé ailleurs). */
+  gapMs: number;
+  /** Dernier temps GPU mesuré (ms), si le navigateur le permet. */
+  gpuMs: number | null;
   /** Sections les plus coûteuses de cette frame (ms). */
   sections: Record<string, number>;
   /** Événements survenus pendant la frame (chunk chargé, shader compilé...). */
@@ -59,6 +72,23 @@ export class PerfStats {
   private secHitches = 0;
   private readonly secSections = new Map<string, number>();
   private secTimer = 0;
+  /** Temps GPU du rendu (EXT_disjoint_timer_query_webgl2) : requêtes en attente de résultat. */
+  private readonly gl: WebGL2RenderingContext | null = null;
+  private readonly timerExt: TimerQueryExtension | null = null;
+  private readonly gpuQueries: WebGLQuery[] = [];
+  private gpuQueryOpen = false;
+  private lastGpuMs: number | null = null;
+  private secGpuSum = 0;
+  private secGpuMax = 0;
+  private secGpuCount = 0;
+  /** Tâches longues hors de la boucle de rendu (PerformanceObserver "longtask"). */
+  private readonly longTasks: Array<{ start: number; duration: number }> = [];
+  private secLongTasks = 0;
+  private secLongTaskMax = 0;
+  private lastFrameEnd = 0;
+  private lastHeap = 0;
+  private secGc = 0;
+  private lastFlushCount = 0;
   /** Informations de contexte ajoutées à chaque statistique (position, audio...). */
   extra: () => Record<string, unknown> = () => ({});
 
@@ -69,6 +99,26 @@ export class PerfStats {
     if (!PerfStats.enabled) return;
     // Cumule les compteurs de tous les rendus de la frame (un par œil sans multiview).
     renderer.info.autoReset = false;
+
+    // Temps GPU : distingue une frame lente côté GPU (upload, remplissage) d'un blocage du JS.
+    const gl = renderer.getContext();
+    if (typeof WebGL2RenderingContext !== "undefined" && gl instanceof WebGL2RenderingContext) {
+      this.gl = gl;
+      this.timerExt = gl.getExtension("EXT_disjoint_timer_query_webgl2") as TimerQueryExtension | null;
+    }
+    // Tâches longues (≥ 50 ms) du fil principal, hors frame : ramasse-miettes, réseau, décodage...
+    try {
+      new PerformanceObserver((list) => {
+        for (const entry of list.getEntries()) {
+          this.longTasks.push({ start: entry.startTime, duration: entry.duration });
+          if (this.longTasks.length > 20) this.longTasks.shift();
+          this.secLongTasks++;
+          this.secLongTaskMax = Math.max(this.secLongTaskMax, entry.duration);
+        }
+      }).observe({ type: "longtask", buffered: false });
+    } catch {
+      // Non pris en charge : les à-coups restent décrits sans cette information.
+    }
 
     this.graphCanvas = document.createElement("canvas");
     this.graphCanvas.width = 512;
@@ -95,6 +145,23 @@ export class PerfStats {
     this.frameStart = performance.now();
     this.sections.clear();
     this.events.length = 0;
+    this.pollGpu();
+    // Passage du ramasse-miettes : le tas a nettement baissé depuis la frame précédente.
+    const heap = (performance as Performance & { memory?: { usedJSHeapSize: number } }).memory?.usedJSHeapSize ?? 0;
+    if (this.lastHeap - heap > GC_DROP_BYTES) {
+      this.events.push(`GC -${Math.round((this.lastHeap - heap) / 1048576)} Mo`);
+      this.secGc++;
+    }
+    this.lastHeap = heap;
+    if (flushStats.count !== this.lastFlushCount) {
+      this.lastFlushCount = flushStats.count;
+      this.events.push(`envoi journal ${Math.round(flushStats.lastBytes / 1024)} Ko`);
+    }
+    // Tâches longues survenues depuis la fin de la frame précédente.
+    for (const task of this.longTasks) {
+      if (task.start + task.duration >= this.lastFrameEnd - 1) this.events.push(`tâche longue ${Math.round(task.duration)} ms`);
+    }
+    this.longTasks.length = 0;
     const frameMs = this.lastTimestamp > 0 ? timestamp - this.lastTimestamp : TARGET_FRAME_MS;
     this.lastTimestamp = timestamp;
     this.frameTimes[this.cursor] = frameMs;
@@ -119,6 +186,42 @@ export class PerfStats {
     this.sections.set(section, (this.sections.get(section) ?? 0) + performance.now() - start);
   }
 
+  /** Autour de `renderer.render` : mesure du temps GPU (résultat lu quelques frames plus tard). */
+  beginGpu(): void {
+    if (!this.gl || !this.timerExt || this.gpuQueryOpen || this.gpuQueries.length >= MAX_PENDING_GPU_QUERIES) return;
+    const query = this.gl.createQuery();
+    if (!query) return;
+    this.gl.beginQuery(this.timerExt.TIME_ELAPSED_EXT, query);
+    this.gpuQueries.push(query);
+    this.gpuQueryOpen = true;
+  }
+
+  endGpu(): void {
+    if (!this.gl || !this.timerExt || !this.gpuQueryOpen) return;
+    this.gl.endQuery(this.timerExt.TIME_ELAPSED_EXT);
+    this.gpuQueryOpen = false;
+  }
+
+  private pollGpu(): void {
+    const gl = this.gl;
+    if (!gl || !this.timerExt) return;
+    const disjoint = gl.getParameter(this.timerExt.GPU_DISJOINT_EXT) as boolean;
+    while (this.gpuQueries.length > 0) {
+      const query = this.gpuQueries[0]!;
+      if (this.gpuQueryOpen && this.gpuQueries.length === 1) break;
+      if (!gl.getQueryParameter(query, gl.QUERY_RESULT_AVAILABLE)) break;
+      const nanoseconds = gl.getQueryParameter(query, gl.QUERY_RESULT) as number;
+      gl.deleteQuery(query);
+      this.gpuQueries.shift();
+      if (disjoint) continue;
+      const ms = nanoseconds / 1e6;
+      this.lastGpuMs = ms;
+      this.secGpuSum += ms;
+      this.secGpuMax = Math.max(this.secGpuMax, ms);
+      this.secGpuCount++;
+    }
+  }
+
   /** Événement notable de la frame (chunk chargé, régénération...) : joint à l'à-coup éventuel. */
   event(label: string): void {
     if (PerfStats.enabled) this.events.push(label);
@@ -127,7 +230,10 @@ export class PerfStats {
   /** Fin de frame (après le rendu) : mesure CPU, détection d'à-coup, graphe. */
   endFrame(deltaSeconds: number): void {
     if (!PerfStats.enabled) return;
-    const cpuMs = performance.now() - this.frameStart;
+    const frameEnd = performance.now();
+    const cpuMs = frameEnd - this.frameStart;
+    const gapMs = this.lastFrameEnd > 0 ? this.frameStart - this.lastFrameEnd : 0;
+    this.lastFrameEnd = frameEnd;
     this.cpuTimes[this.cursor] = cpuMs;
     const frameMs = this.frameTimes[this.cursor]!;
     this.cursor = (this.cursor + 1) % HISTORY;
@@ -144,11 +250,19 @@ export class PerfStats {
         .sort((a, b) => b[1] - a[1])
         .slice(0, 4)
         .forEach(([name, ms]) => (sections[name] = Math.round(ms * 10) / 10));
-      const record: HitchRecord = { at: this.elapsed, frameMs, cpuMs, sections, events: [...this.events] };
+      const gpuMs = this.lastGpuMs === null ? null : Math.round(this.lastGpuMs * 10) / 10;
+      const record: HitchRecord = { at: this.elapsed, frameMs, cpuMs, gapMs, gpuMs, sections, events: [...this.events] };
       this.hitches.push(record);
       if (this.hitches.length > MAX_LOG) this.hitches.shift();
       this.secHitches++;
-      log("hitch", { frameMs: Math.round(frameMs * 10) / 10, cpuMs: Math.round(cpuMs * 10) / 10, sections, events: record.events });
+      log("hitch", {
+        frameMs: Math.round(frameMs * 10) / 10,
+        cpuMs: Math.round(cpuMs * 10) / 10,
+        gapMs: Math.round(gapMs * 10) / 10,
+        gpuMs,
+        sections,
+        events: record.events,
+      });
     }
 
     this.secFrames++;
@@ -184,6 +298,11 @@ export class PerfStats {
       textures: this.renderer.info.memory.textures,
       programs: this.renderer.info.programs?.length ?? 0,
       heapMB: memoryInfo ? Math.round(memoryInfo.usedJSHeapSize / 1048576) : undefined,
+      gpuAvg: this.secGpuCount ? Math.round((this.secGpuSum / this.secGpuCount) * 10) / 10 : undefined,
+      gpuMax: this.secGpuCount ? Math.round(this.secGpuMax * 10) / 10 : undefined,
+      longTasks: this.secLongTasks || undefined,
+      longTaskMax: this.secLongTasks ? Math.round(this.secLongTaskMax) : undefined,
+      gc: this.secGc || undefined,
       hitches: this.secHitches,
       ...this.extra(),
     });
@@ -194,6 +313,12 @@ export class PerfStats {
     this.secCalls = 0;
     this.secTriangles = 0;
     this.secHitches = 0;
+    this.secGpuSum = 0;
+    this.secGpuMax = 0;
+    this.secGpuCount = 0;
+    this.secLongTasks = 0;
+    this.secLongTaskMax = 0;
+    this.secGc = 0;
     this.secSections.clear();
     this.secTimer = 0;
   }

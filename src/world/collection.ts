@@ -1,12 +1,11 @@
-import { get, set } from "idb-keyval";
+import { del, get, set } from "idb-keyval";
 import type { CollectiblePlacement } from "../shared/chunkLayout";
-import { COLLECTIBLE_KINDS, type CollectibleKind } from "../shared/collectibles";
+import type { CollectibleKind } from "../shared/collectibles";
 import { LORE_FRAGMENT_COUNT } from "../i18n";
 
-const STORAGE_KEY = "backrooms-vr:collection";
+/** Anciennes clés : l'inventaire était conservé d'une run à l'autre (effacées au lancement). */
+const LEGACY_KEYS = ["backrooms-vr:collection", "backrooms-vr:manual-order"];
 const LORE_KEY = "backrooms-vr:lore-next";
-/** Présent une fois l'inventaire passé à l'ordre manuel (avant : toujours trié par date). */
-const ORDER_KEY = "backrooms-vr:manual-order";
 
 /**
  * Supports d'enregistrement : le premier rangement de l'un d'eux révèle le fragment suivant
@@ -30,45 +29,28 @@ export interface CollectionEntry {
   fragment?: number;
 }
 
-const KNOWN_KINDS = new Set<string>(COLLECTIBLE_KINDS);
-
 export type CollectionSortMode = "recent" | "rarity" | "depth" | "name";
 export const SORT_MODES: CollectionSortMode[] = ["recent", "rarity", "depth", "name"];
 
 /**
- * Inventaire persistant (fiche projet étape 6, "Persistance") : ce que le joueur a rangé
- * dans son inventaire survit entre les runs (IndexedDB via `idb-keyval`) — la progression
- * (profondeur, position) repart de zéro à chaque run. Un objet sorti de l'inventaire (en
- * main, puis posé/jeté dans le monde) n'en fait plus partie tant qu'il n'y est pas remis :
- * laissé au sol quand on change de level, il est perdu.
+ * Inventaire de la run : ce que le joueur a rangé pendant la partie en cours. Il est vidé à
+ * chaque début de partie (`clear`) — seule la progression du récit des bandes perdues est
+ * conservée d'une partie à l'autre (IndexedDB via `idb-keyval`). Un objet sorti de
+ * l'inventaire (en main, puis posé/jeté dans le monde) n'en fait plus partie tant qu'il n'y
+ * est pas remis : laissé au sol quand on change de level, il est perdu.
  */
 export class CollectionStore {
   private entries: CollectionEntry[] = [];
   private nextFragment = 0;
-  private readonly ready: Promise<void>;
   private readonly listeners = new Set<() => void>();
 
   constructor() {
-    this.ready = Promise.all([get<CollectionEntry[]>(STORAGE_KEY), get<number>(LORE_KEY), get<boolean>(ORDER_KEY)])
-      .then(([stored, nextFragment, manualOrder]) => {
-        this.nextFragment = nextFragment ?? 0;
-        // Ancienne sauvegarde (affichée triée par date) : on part de cet ordre-là.
-        if (!manualOrder && stored) {
-          stored.sort((a, b) => b.collectedAt - a.collectedAt);
-          void set(ORDER_KEY, true).catch(() => {});
-        }
-        // Anciennes versions du jeu (formes primitives "key"/"doll"...) : ignorées plutôt que de
-        // planter le chargement de modèles inexistants.
-        this.entries = (stored ?? []).filter((entry) => KNOWN_KINDS.has(entry.kind));
-        this.emit();
+    get<number>(LORE_KEY)
+      .then((nextFragment) => {
+        this.nextFragment = Math.max(this.nextFragment, nextFragment ?? 0);
       })
-      .catch(() => {
-        this.entries = [];
-      });
-  }
-
-  async whenReady(): Promise<void> {
-    await this.ready;
+      .catch(() => {});
+    for (const key of LEGACY_KEYS) void del(key).catch(() => {});
   }
 
   getAll(): readonly CollectionEntry[] {
@@ -87,6 +69,13 @@ export class CollectionStore {
     this.listeners.add(listener);
   }
 
+  /** Début de partie : inventaire vide. */
+  clear(): void {
+    if (this.entries.length === 0) return;
+    this.entries = [];
+    this.emit();
+  }
+
   /** Range un objet ; `index` : case précise où le poser (lâché sur une case), sinon en tête. */
   add(entry: CollectionEntry, index: number | null = null): void {
     if (this.has(entry.id)) return;
@@ -98,7 +87,7 @@ export class CollectionStore {
     // Par défaut en tête de l'inventaire ; lâché sur une case : à cette place.
     if (index === null) this.entries.unshift(stored);
     else this.entries.splice(Math.min(Math.max(0, index), this.entries.length), 0, stored);
-    this.persist();
+    this.emit();
   }
 
   /** Déplace l'objet d'index `from` à l'index `to` (réorganisation manuelle de l'inventaire). */
@@ -107,7 +96,7 @@ export class CollectionStore {
     const [entry] = this.entries.splice(from, 1);
     if (!entry) return;
     this.entries.splice(Math.min(Math.max(0, to), this.entries.length), 0, entry);
-    this.persist();
+    this.emit();
   }
 
   /** Trie tout l'inventaire (l'ordre obtenu reste modifiable à la main). */
@@ -120,7 +109,7 @@ export class CollectionStore {
       name: (a, b) => a.nameFr.localeCompare(b.nameFr),
     };
     this.entries.sort(compare[mode]);
-    this.persist();
+    this.emit();
   }
 
   /** Retire (sort de l'inventaire) et renvoie l'entrée, pour la reposer telle quelle si elle y revient. */
@@ -128,13 +117,8 @@ export class CollectionStore {
     const index = this.entries.findIndex((entry) => entry.id === id);
     if (index < 0) return null;
     const [entry] = this.entries.splice(index, 1);
-    this.persist();
-    return entry ?? null;
-  }
-
-  private persist(): void {
     this.emit();
-    void set(STORAGE_KEY, this.entries).catch(() => {});
+    return entry ?? null;
   }
 
   private emit(): void {

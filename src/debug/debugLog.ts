@@ -20,6 +20,8 @@ type Entry = { t: number; type: string } & Record<string, unknown>;
 const session = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 const startedAt = typeof performance !== "undefined" ? performance.now() : 0;
 const pending: Entry[] = [];
+/** Envois au serveur (nombre, taille du dernier) : PerfStats les joint aux à-coups voisins. */
+export const flushStats = { count: 0, lastBytes: 0 };
 const memory: Entry[] = [];
 let installed = false;
 
@@ -37,6 +39,8 @@ function flush(useBeacon = false): void {
   if (pending.length === 0) return;
   const batch = pending.splice(0, pending.length);
   const body = JSON.stringify({ session, entries: batch });
+  flushStats.count++;
+  flushStats.lastBytes = body.length;
   if (useBeacon && navigator.sendBeacon) {
     navigator.sendBeacon("/api/debug-log", new Blob([body], { type: "application/json" }));
     return;

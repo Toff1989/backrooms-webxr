@@ -45,6 +45,11 @@ export class Flashlight {
     camera.add(this.light, this.light.target);
   }
 
+  /** Puissance actuelle (0..1), grésillements et batterie faible compris. */
+  get strength(): number {
+    return this.intensity / ON_INTENSITY;
+  }
+
   /** Vrai si la lampe éclaire réellement (allumée et pas en micro-coupure). */
   get shining(): boolean {
     return this.intensity > ON_INTENSITY * 0.25;

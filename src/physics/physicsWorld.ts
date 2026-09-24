@@ -16,6 +16,8 @@ export const Groups = {
   DYNAMIC: 1 << 3,
   /** Objet tenu en main : cogne le décor et les autres objets, jamais le corps/les mains du joueur. */
   HELD: 1 << 4,
+  /** Le Cadreur : il bute sur les murs (contrôleur de personnage) mais ne pousse rien. */
+  CADREUR: 1 << 5,
 } as const;
 
 function interaction(membership: number, filter: number): number {
@@ -34,6 +36,8 @@ export const CollisionGroups = {
   querySight: interaction(Groups.PLAYER, Groups.STATIC | Groups.DYNAMIC),
   /** Ligne de vue à travers le labyrinthe : murs et piliers seulement (les meubles ne cachent pas). */
   queryWalls: interaction(Groups.PLAYER, Groups.STATIC),
+  /** Corps du Cadreur : aucune interaction physique (ses déplacements testent les murs via `queryWalls`). */
+  cadreur: interaction(Groups.CADREUR, 0),
 } as const;
 
 /** Pas de simulation borné : suit la cadence du casque (72/90 Hz) sans sauts, coupé en deux sur un gros à-coup. */

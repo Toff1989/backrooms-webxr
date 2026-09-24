@@ -33,6 +33,13 @@ const OBSERVE_GRACE = 0.25;
 const SIGHTING_COOLDOWN = 5;
 /** Vitesse sous les yeux du joueur (m/s) : lente, il marche vers toi. */
 const WATCHED_SPEED = 0.6;
+/** Corps (capsule) : il bute sur les murs et glisse le long, comme le joueur. */
+const BODY_RADIUS = 0.3;
+const BODY_HALF_HEIGHT = 0.6;
+const BODY_CENTER_Y = 1.2;
+/** Bloqué (coin, mur régénéré sur la trace) hors de vue : il saute en avant sur la trace. */
+const STUCK_SECONDS = 1.2;
+const STUCK_SKIP_POINTS = 4;
 
 export interface CadreurContext {
   head: THREE.Vector3;
@@ -88,6 +95,12 @@ export class Cadreur {
   private readonly steps: AudioBuffer[] = [];
   private staticBuffer: AudioBuffer | null = null;
   private readonly ray = new RAPIER.Ray({ x: 0, y: 0, z: 0 }, { x: 0, y: 0, z: 1 });
+  private readonly body: RAPIER.RigidBody;
+  private readonly collider: RAPIER.Collider;
+  private readonly controller: RAPIER.KinematicCharacterController;
+  /** Boule de la largeur du corps : "à découvert" = il peut passer, pas seulement voir. */
+  private readonly bodyBall = new RAPIER.Ball(BODY_RADIUS);
+  private stuckSeconds = 0;
   private readonly forward = new THREE.Vector3();
   private readonly cameraPosition = new THREE.Vector3();
   private readonly tmp = new THREE.Vector3();
@@ -107,6 +120,13 @@ export class Cadreur {
     this.voice.setRefDistance(1.6);
     this.voice.setRolloffFactor(1.4);
     this.caughtAudio = new THREE.Audio(listener);
+    this.body = physics.world.createRigidBody(RAPIER.RigidBodyDesc.kinematicPositionBased().setTranslation(0, -20, 0));
+    this.collider = physics.world.createCollider(
+      RAPIER.ColliderDesc.capsule(BODY_HALF_HEIGHT, BODY_RADIUS).setCollisionGroups(CollisionGroups.cadreur),
+      this.body,
+    );
+    this.controller = physics.world.createCharacterController(0.02);
+    this.controller.setSlideEnabled(true);
     queueWarmup(() => (this.motorBuffer = createTapeMotorBuffer(listener.context)));
     queueWarmup(() => (this.caughtBuffer = createCaughtBuffer(listener.context)));
     queueWarmup(() => (this.zoomBuffer = createZoomBuffer(listener.context)));
@@ -269,6 +289,7 @@ export class Cadreur {
       if (this.sight(context).seen) continue;
       this.trailIndex = i;
       this.stalking = true;
+      this.placeBody();
       this.observedGrace = 0;
       this.lastObserved = this.elapsed;
       const next = this.trail[i] ?? b;
@@ -289,6 +310,7 @@ export class Cadreur {
 
   private despawn(): void {
     this.stalking = false;
+    this.body.setTranslation({ x: 0, y: -20, z: 0 }, true);
     if (this.rig) this.rig.root.visible = false;
     if (this.motor.isPlaying) this.motor.stop();
   }
@@ -323,7 +345,52 @@ export class Cadreur {
     return this.physics.world.castRay(this.ray, length, true, undefined, CollisionGroups.queryWalls) === null;
   }
 
-  /** Avance au rythme de sa marche : le long de la trace, ou droit sur le joueur s'il est proche et à découvert. */
+  /** Recale le corps physique sur `position` (apparition, saut sur la trace). */
+  private placeBody(): void {
+    this.body.setTranslation({ x: this.position.x, y: BODY_CENTER_Y, z: this.position.z }, true);
+    this.stuckSeconds = 0;
+  }
+
+  /** Passage libre pour tout son corps (pas seulement un regard) entre deux points, à mi-hauteur. */
+  private clearPath(fromX: number, fromZ: number, toX: number, toZ: number): boolean {
+    const dx = toX - fromX;
+    const dz = toZ - fromZ;
+    const length = Math.hypot(dx, dz);
+    if (length < 0.01) return true;
+    const hit = this.physics.world.castShape(
+      { x: fromX, y: BODY_CENTER_Y, z: fromZ },
+      { x: 0, y: 0, z: 0, w: 1 },
+      { x: dx / length, y: 0, z: dz / length },
+      this.bodyBall,
+      0,
+      length,
+      true,
+      undefined,
+      CollisionGroups.queryWalls,
+    );
+    return hit === null;
+  }
+
+  /** Pendant la course directe, garde son repère sur la trace : s'il te perd de vue, il la reprend d'ici. */
+  private syncTrailIndex(): void {
+    let best = this.trailIndex;
+    let bestDistance = Infinity;
+    for (let i = this.trailIndex; i < this.trail.length; i++) {
+      const point = this.trail[i]!;
+      const distance = Math.hypot(point.x - this.position.x, point.z - this.position.z);
+      if (distance < bestDistance) {
+        bestDistance = distance;
+        best = i;
+      }
+    }
+    this.trailIndex = best;
+  }
+
+  /**
+   * Avance au rythme de sa marche : le long de la trace, ou droit sur le joueur s'il est proche
+   * et que le passage est libre pour tout son corps. Le déplacement passe par un contrôleur de
+   * personnage : il glisse le long des murs au lieu de les traverser.
+   */
   private advance(deltaSeconds: number, speed: number, watched: boolean, context: CadreurContext): void {
     const rig = this.rig!;
     const head = context.head;
@@ -331,37 +398,64 @@ export class Cadreur {
     if (step.footstep) this.play(this.steps[Math.floor(Math.random() * this.steps.length)] ?? null, watched ? 0.8 : 0.55);
     let budget = step.distance;
     if (budget <= 0) return;
-    const direct =
-      this.distanceTo(head) < DIRECT_CHASE_DISTANCE && this.clearLine(this.tmp.set(this.position.x, 1.2, this.position.z), head.x, 1.2, head.z);
+    const direct = this.distanceTo(head) < DIRECT_CHASE_DISTANCE && this.clearPath(this.position.x, this.position.z, head.x, head.z);
+    // Point visé à la fin de ce pas, en suivant la trace (ou droit sur le joueur).
+    let targetX = this.position.x;
+    let targetZ = this.position.z;
+    let index = this.trailIndex;
     let headingX = 0;
     let headingZ = 0;
     while (budget > 1e-4) {
-      const target: TrailPoint = direct || this.trailIndex >= this.trail.length ? { x: head.x, z: head.z } : this.trail[this.trailIndex]!;
-      const dx = target.x - this.position.x;
-      const dz = target.z - this.position.z;
+      const target: TrailPoint = direct || index >= this.trail.length ? { x: head.x, z: head.z } : this.trail[index]!;
+      const dx = target.x - targetX;
+      const dz = target.z - targetZ;
       const gap = Math.hypot(dx, dz);
       if (gap > 1e-4) {
         headingX = dx / gap;
         headingZ = dz / gap;
       }
       if (gap <= budget) {
-        this.position.x = target.x;
-        this.position.z = target.z;
+        targetX = target.x;
+        targetZ = target.z;
         budget -= gap;
-        if (direct || this.trailIndex >= this.trail.length) break;
-        this.trailIndex++;
+        if (direct || index >= this.trail.length) break;
+        index++;
       } else {
-        this.position.x += headingX * budget;
-        this.position.z += headingZ * budget;
+        targetX += headingX * budget;
+        targetZ += headingZ * budget;
         budget = 0;
       }
     }
-    if (direct) this.trailIndex = this.trail.length;
+
+    const current = this.collider.translation();
+    const wantedX = targetX - current.x;
+    const wantedZ = targetZ - current.z;
+    this.controller.computeColliderMovement(this.collider, { x: wantedX, y: 0, z: wantedZ }, RAPIER.QueryFilterFlags.EXCLUDE_SENSORS, CollisionGroups.queryWalls);
+    const moved = this.controller.computedMovement();
+    this.position.set(current.x + moved.x, 0, current.z + moved.z);
+    this.body.setNextKinematicTranslation({ x: this.position.x, y: BODY_CENTER_Y, z: this.position.z });
+
+    // On n'avance sur la trace que jusqu'au point réellement atteint (bloqué : il la reprend d'où il est).
+    if (!direct && Math.hypot(this.position.x - targetX, this.position.z - targetZ) < 0.2) this.trailIndex = index;
+    else this.syncTrailIndex();
+
+    // Coincé contre un mur (coin serré, couloir régénéré sur sa trace) : hors de vue, il
+    // "saute" un peu plus loin sur la trace — il ne bouge jamais ainsi quand on le regarde.
+    const wanted = Math.hypot(wantedX, wantedZ);
+    this.stuckSeconds = wanted > 1e-3 && Math.hypot(moved.x, moved.z) < wanted * 0.3 ? this.stuckSeconds + deltaSeconds : 0;
+    if (this.stuckSeconds > STUCK_SECONDS && !watched && this.trailIndex < this.trail.length) {
+      this.trailIndex = Math.min(this.trail.length - 1, this.trailIndex + STUCK_SKIP_POINTS);
+      const point = this.trail[this.trailIndex]!;
+      this.position.set(point.x, 0, point.z);
+      this.placeBody();
+      log("cadreur", { action: "unstuck" });
+    }
+
     rig.root.position.copy(this.position);
     if (headingX !== 0 || headingZ !== 0) {
       // Le corps se tourne vers où il marche (la tête-caméra, elle, reste sur le joueur).
-      const wanted = Math.atan2(headingX, headingZ);
-      const delta = THREE.MathUtils.euclideanModulo(wanted - rig.root.rotation.y + Math.PI, Math.PI * 2) - Math.PI;
+      const wantedAngle = Math.atan2(headingX, headingZ);
+      const delta = THREE.MathUtils.euclideanModulo(wantedAngle - rig.root.rotation.y + Math.PI, Math.PI * 2) - Math.PI;
       rig.root.rotation.y += delta * Math.min(1, deltaSeconds * 6);
     }
   }

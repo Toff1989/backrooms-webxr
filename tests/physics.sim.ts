@@ -158,6 +158,30 @@ squeeze = [1, 4];
 tick();
 check("A range l'objet tenu", stored.includes("sim-book") && hand.holding === null && !registry.all.has(book), `rangés=${stored.join(",")}`);
 
+// ---------- 4b. Jamais deux exemplaires d'un objet : ranger efface aussi un doublon resté au sol ----------
+{
+  squeeze = [];
+  tick();
+  const ghost = registry.createCollectible({ ...item, id: "sim-twin" }, canTemplate.clone(), canTemplate, new THREE.Vector3(7, 0.02, -1), new THREE.Quaternion());
+  const twin = registry.createCollectible({ ...item, id: "sim-twin" }, canTemplate.clone(), canTemplate, new THREE.Vector3(5, 0.02, 0), new THREE.Quaternion());
+  grip.position.set(5 + 0.035, 0.08, 0.01);
+  for (let i = 0; i < 5; i++) tick();
+  squeeze = [1];
+  tick();
+  const heldTwin = hand.holding === twin;
+  squeeze = [1, 4];
+  tick();
+  check(
+    "ranger un objet efface tout doublon du monde",
+    heldTwin && !registry.all.has(twin) && !registry.all.has(ghost) && registry.itemInWorld("sim-twin") === null,
+    `tenu=${heldTwin} restants=${[...registry.all].filter((g) => g.item?.id === "sim-twin").length}`,
+  );
+  registry.reserveItem("sim-reserved");
+  const reserved = registry.isItemAlive("sim-reserved");
+  registry.releaseItem("sim-reserved");
+  check("objet en cours de sortie d'inventaire : aucun chunk ne le recrée", reserved && !registry.isItemAlive("sim-reserved"), `réservé=${reserved}`);
+}
+
 // ---------- 5. Objet tenu poussé à travers un mur : il est bloqué, puis lâché ----------
 const brick = registry.createCollectible({ ...item, id: "sim-brick" }, canTemplate.clone(), canTemplate, new THREE.Vector3(5, 0.02, -4.5), new THREE.Quaternion());
 squeeze = [];

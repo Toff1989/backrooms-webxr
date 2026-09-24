@@ -30,7 +30,7 @@ import { LevelManager, SPAWN_LOCAL_POSITION } from "./world/levelManager";
 import { Poltergeist } from "./world/poltergeist";
 import { initMaterials } from "./world/materials";
 import { endRun, reportLevel, startRun, type RunSessionInfo } from "./world/runSession";
-import { updateVhsTime } from "./world/vhsMaterial";
+import { setFlashlightBounce, updateVhsTime } from "./world/vhsMaterial";
 
 installDebugLog();
 
@@ -59,6 +59,11 @@ renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.xr.enabled = true;
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 appRoot.appendChild(renderer.domElement);
+// Pas de bouton "Entrer en VR" proposé par le navigateur (offerSession) : il lance la session
+// sans aucun geste sur la page, et le navigateur refuse alors de démarrer le son jusqu'au
+// premier appui sur une gâchette (43 s de silence au dernier test). Avec le bouton de la page,
+// le clic sert aussi à débloquer l'audio (voir `resumeAudio`).
+if (navigator.xr && "offerSession" in navigator.xr) Object.defineProperty(navigator.xr, "offerSession", { value: undefined, configurable: true });
 document.body.appendChild(VRButton.createButton(renderer));
 
 // Textures KTX2 transcodées avant de construire le premier level (matériaux partagés).
@@ -260,17 +265,22 @@ function beginNewRun(restartLocallyOnFailure: boolean): void {
   startRun()
     .then((session) => {
       currentSession = session;
-      levelManager.restartRun(session.seed);
-      hud.resetClock();
-      respawn();
+      restartWorld(session.seed);
     })
     .catch(() => {
       currentSession = null;
-      if (!restartLocallyOnFailure) return;
-      levelManager.restartRun(`local-${Date.now()}`);
-      hud.resetClock();
-      respawn();
+      if (restartLocallyOnFailure) restartWorld(`local-${Date.now()}`);
     });
+}
+
+/** Nouvelle partie : monde neuf, inventaire vidé, rien en main. */
+function restartWorld(seed: string): void {
+  grabSystem.loseHeld();
+  collectionStore.clear();
+  levelManager.restartRun(seed);
+  hud.resetClock();
+  respawn();
+  log("run", { action: "start", seed });
 }
 
 beginNewRun(false);
@@ -289,7 +299,7 @@ function resumeAudio(reason: string): void {
     .then(() => log("audio", { action: "resume", reason, state: context.state }))
     .catch((error: unknown) => log("audio", { action: "resume-failed", reason, state: context.state, error: String(error) }));
 }
-for (const type of ["pointerdown", "keydown", "touchstart"]) document.addEventListener(type, () => resumeAudio(type), { capture: true });
+for (const type of ["pointerdown", "pointerup", "click", "keydown", "touchstart"]) document.addEventListener(type, () => resumeAudio(type), { capture: true });
 audioListener.context.addEventListener("statechange", () => log("audio", { action: "statechange", state: audioListener.context.state }));
 
 renderer.xr.addEventListener("sessionstart", () => {
@@ -352,6 +362,7 @@ const WALL_TRAP_POP_HAPTIC_DURATION_MS = 180;
 /** Charge rendue par une pile ramassée (fraction de la batterie de la lampe). */
 const BATTERY_RECHARGE = 0.45;
 const handPalms = hands.map((hand) => hand.palm);
+const bouncePosition = new THREE.Vector3();
 
 renderer.setAnimationLoop((timestamp) => {
   perfStats.beginFrame(timestamp);
@@ -444,6 +455,9 @@ renderer.setAnimationLoop((timestamp) => {
   vhsOverlay.update(elapsedSeconds, corruption.value, deltaSeconds);
   hud.update(deltaSeconds);
   flashlight.update(deltaSeconds, corruption.value);
+  // Lumière renvoyée par la lampe : centrée un mètre devant, là où tombe le faisceau.
+  bouncePosition.copy(camera.getWorldDirection(bouncePosition)).setY(0).normalize().add(player.headWorld).setY(1);
+  setFlashlightBounce(bouncePosition, flashlight.strength);
   atmosphere.update(deltaSeconds, corruption.value);
   poltergeist.update(deltaSeconds, camera, player.headWorld, levelManager.depth, darkness);
   ambientHum.update(deltaSeconds, player.headWorld, darkness, levelManager.depth, atmosphere.level * localLight);
@@ -451,7 +465,9 @@ renderer.setAnimationLoop((timestamp) => {
   runWarmupStep(renderer.xr.isPresenting);
   perfStats.end("effets");
   perfStats.begin("rendu");
+  perfStats.beginGpu();
   renderer.render(scene, camera);
+  perfStats.endGpu();
   perfStats.end("rendu");
   perfStats.endFrame(deltaSeconds);
 });

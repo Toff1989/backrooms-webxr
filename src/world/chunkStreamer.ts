@@ -114,15 +114,30 @@ export class ChunkStreamer {
     this.regenTimer = randomRegenInterval();
   }
 
-  /** Charge immédiatement les chunks autour d'une position (chargement initial, hors boucle de rendu). */
+  /**
+   * Charge immédiatement les chunks autour d'une position, tous en un seul appel : réservé au
+   * tout premier level, avant que la boucle de rendu ne tourne (rien n'est encore affiché, un
+   * temps de chargement ne se voit pas comme un à-coup). Un changement de level EN JEU doit
+   * passer par `enterArea` : ici, ~25 chunks avec leurs colliders d'un coup, c'était un blocage
+   * de 100 à 450 ms à chaque descente (mesuré : tâches longues du fil principal).
+   */
   primeArea(playerPosition: THREE.Vector3): void {
+    this.enterArea(playerPosition);
+    this.processStreaming(Infinity);
+  }
+
+  /**
+   * Prépare la zone sans tout charger d'un coup : le flux habituel (`update`, appelé chaque
+   * frame) prend le relais à son rythme normal (voir `LOADS_PER_FRAME`) — ~25 chunks à 1 par
+   * frame tiennent largement dans l'écran bleu de transition (1,4 à 2,6 s), sans à-coup.
+   */
+  enterArea(playerPosition: THREE.Vector3): void {
     const chunkX = Math.floor(playerPosition.x / CHUNK_SIZE);
     const chunkZ = Math.floor(playerPosition.z / CHUNK_SIZE);
     this.currentChunkX = chunkX;
     this.currentChunkZ = chunkZ;
     this.streamAround(chunkX, chunkZ);
     this.physics.recenter((chunkX + 0.5) * CHUNK_SIZE, (chunkZ + 0.5) * CHUNK_SIZE);
-    this.processStreaming(Infinity);
   }
 
   update(

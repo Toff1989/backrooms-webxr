@@ -148,7 +148,9 @@ export class LevelManager {
     setDepthLook(this.depth);
     this.chunkStreamer.depth = this.depth;
     this.chunkStreamer.setProfile(this.profile);
-    this.chunkStreamer.primeArea(SPAWN_LOCAL_POSITION);
+    // Changement de level en jeu : chargement étalé sur quelques frames (voir `enterArea`),
+    // caché derrière l'écran bleu de transition — jamais le blocage synchrone du premier level.
+    this.chunkStreamer.enterArea(SPAWN_LOCAL_POSITION);
 
     this.exitBeacon.dispose();
     this.scene.remove(this.exitBeacon.group);

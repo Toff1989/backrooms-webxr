@@ -5,6 +5,13 @@ import { VHS_LIGHT_FIELD_GLSL, type LightFieldParams } from "./lightField";
 
 /** Éclairage ambiant résiduel dans une zone éteinte (proche du noir : lampe torche nécessaire). */
 const DARK_ZONE_AMBIENT = 0.035;
+/**
+ * Lumière renvoyée par les surfaces éclairées par la lampe (moquette, papier peint clair) :
+ * sans elle, tout ce qui sort du cône restait d'un noir d'encre, découpé net — ça faisait
+ * "trou" plutôt que pénombre. Éclairage indirect doux autour du joueur, proportionnel à la lampe.
+ */
+const FLASHLIGHT_BOUNCE = 0.16;
+const FLASHLIGHT_BOUNCE_FALLOFF = 0.3;
 
 /**
  * Uniformes partagés par tous les matériaux VHS : un seul objet mutable référencé par
@@ -25,6 +32,9 @@ const sharedUniforms = {
   /** Coupure de courant (voir `blackout.ts`) : origine XZ, rayon du front, progression du rallumage. */
   uBlackout: { value: new THREE.Vector4() },
   uBlackoutOn: { value: 0 },
+  /** Lumière renvoyée par la lampe torche : position (tête) et intensité relative 0..1. */
+  uBouncePos: { value: new THREE.Vector3() },
+  uBounce: { value: 0 },
 };
 
 const TINT_STOPS: Array<[number, THREE.Color]> = [
@@ -66,6 +76,12 @@ export function setBlackoutUniforms(on: boolean, originX: number, originZ: numbe
   sharedUniforms.uBlackout.value.set(originX, originZ, radius, restore);
 }
 
+/** Lampe torche (0..1 de sa pleine puissance) et position de la tête : lumière renvoyée. */
+export function setFlashlightBounce(position: THREE.Vector3, strength: number): void {
+  sharedUniforms.uBouncePos.value.copy(position);
+  sharedUniforms.uBounce.value = strength * FLASHLIGHT_BOUNCE;
+}
+
 export function setLightField(params: LightFieldParams): void {
   sharedUniforms.uLightSeed.value.set(params.seedX, params.seedY);
   sharedUniforms.uDarkThreshold.value = params.threshold;
@@ -90,6 +106,36 @@ const VERTEX_PARS_GLSL = /* glsl */ `
   ${COMMON_GLSL}
   ${VHS_LIGHT_FIELD_GLSL}
   ${VHS_BLACKOUT_GLSL}
+`;
+
+/**
+ * Projection "boîte" des textures (murs, piliers, sortie) : les UV viennent de la position
+ * monde, selon l'axe dominant de la normale — une tuile de papier peint = une cellule de large
+ * sur toute la hauteur du mur, partout. Avant, chaque face de boîte recevait la texture
+ * entière : étirée sur les longs murs, écrasée sur les piliers et les chants.
+ */
+const BOX_UV_GLSL = /* glsl */ `
+  vec4 vhsBoxWorld = vec4( position, 1.0 );
+  vec3 vhsBoxNormal = normal;
+  #ifdef USE_INSTANCING
+    vhsBoxWorld = instanceMatrix * vhsBoxWorld;
+    vhsBoxNormal = mat3( instanceMatrix ) * vhsBoxNormal;
+  #endif
+  vhsBoxWorld = modelMatrix * vhsBoxWorld;
+  vhsBoxNormal = mat3( modelMatrix ) * vhsBoxNormal;
+  vec3 vhsBoxAxis = abs( vhsBoxNormal );
+  vec2 vhsBoxUv;
+  if ( vhsBoxAxis.y > vhsBoxAxis.x && vhsBoxAxis.y > vhsBoxAxis.z ) {
+    vhsBoxUv = vhsBoxWorld.xz / ${CELL_SIZE.toFixed(2)};
+  } else if ( vhsBoxAxis.x > vhsBoxAxis.z ) {
+    // Face tournée vers ±X : l'horizontale suit Z, orientée pour ne pas être en miroir.
+    vhsBoxUv = vec2( -sign( vhsBoxNormal.x ) * vhsBoxWorld.z / ${CELL_SIZE.toFixed(2)}, vhsBoxWorld.y / ${WALL_HEIGHT.toFixed(2)} );
+  } else {
+    vhsBoxUv = vec2( sign( vhsBoxNormal.z ) * vhsBoxWorld.x / ${CELL_SIZE.toFixed(2)}, vhsBoxWorld.y / ${WALL_HEIGHT.toFixed(2)} );
+  }
+  #define uv vhsBoxUv
+  #include <uv_vertex>
+  #undef uv
 `;
 
 /** Position/normale monde et éclairage de zone, par sommet (le champ de lumière varie sur ~12 m). */
@@ -118,6 +164,8 @@ const FRAGMENT_PARS_GLSL = /* glsl */ `
   uniform float uDecay;
   uniform vec3 uLevelTint;
   uniform float uDesaturate;
+  uniform vec3 uBouncePos;
+  uniform float uBounce;
 
   // Décrépitude : facteur de couleur à appliquer à l'albédo (avant l'éclairage).
   vec3 vhsDecayColor( vec3 wp, vec3 n ) {
@@ -154,7 +202,9 @@ const FRAGMENT_SETUP_GLSL = /* glsl */ `
 
 const MAP_FRAGMENT_GLSL = /* glsl */ `
   #ifdef USE_MAP
-    vec2 vhsAberration = ( vMapUv - 0.5 ) * ( 0.004 + uCorruption * 0.012 );
+    // Bavure chromatique horizontale, comme sur une bande : décalage constant (avant, il
+    // grandissait avec les coordonnées de texture — énorme sur le sol et les murs projetés).
+    vec2 vhsAberration = vec2( 0.0015 + uCorruption * 0.006, 0.0 );
     vec4 sampledDiffuseColor;
     sampledDiffuseColor.r = texture2D( map, vMapUv - vhsAberration ).r;
     sampledDiffuseColor.g = texture2D( map, vMapUv ).g;
@@ -194,14 +244,30 @@ const CEILING_EMISSIVE_GLSL = /* glsl */ `
   }
 `;
 
-/** Assombrit l'éclairage ambiant (hémisphère + ambiante) dans les zones éteintes. La lampe
- * torche (lumière directe) n'est pas touchée : c'est elle qui éclaire les zones sombres. */
-const ZONE_LIGHT_GLSL = /* glsl */ `
+/**
+ * Assombrit l'éclairage ambiant (hémisphère + ambiante) dans les zones éteintes. La lampe
+ * torche (lumière directe) n'est pas touchée : c'est elle qui éclaire les zones sombres, avec
+ * un peu de lumière renvoyée autour du joueur (voir FLASHLIGHT_BOUNCE).
+ * `zone` : expression GLSL de l'éclairage de zone (varying par sommet, ou calcul par pixel
+ * pour le sol et le plafond, dont les sommets sont espacés d'une cellule entière).
+ */
+function zoneLightGlsl(zone: string): string {
+  return /* glsl */ `
   #if defined( RE_IndirectDiffuse )
-    irradiance *= mix( ${DARK_ZONE_AMBIENT.toFixed(3)}, 1.0, vVhsZoneLight );
+    {
+      float vhsZone = ${zone};
+      irradiance *= mix( ${DARK_ZONE_AMBIENT.toFixed(3)}, 1.0, vhsZone );
+      vec3 vhsToHead = uBouncePos - vVhsWorldPos;
+      float vhsHeadDistance = length( vhsToHead );
+      float vhsFacing = 0.45 + 0.55 * max( dot( normalize( vVhsWorldNormal ), vhsToHead / max( vhsHeadDistance, 0.001 ) ), 0.0 );
+      irradiance += vec3( 1.0, 0.94, 0.82 ) * uBounce * vhsFacing / ( 1.0 + vhsHeadDistance * vhsHeadDistance * ${FLASHLIGHT_BOUNCE_FALLOFF.toFixed(2)} );
+    }
   #endif
   #include <lights_fragment_maps>
 `;
+}
+
+const ZONE_LIGHT_FRAGMENT = /* glsl */ `vhsZoneLight( vVhsWorldPos ) * vhsBlackoutLight( vVhsWorldPos.xz, vhsZoneUnstable )`;
 
 const FINAL_GLSL = /* glsl */ `
   #include <dithering_fragment>
@@ -210,11 +276,20 @@ const FINAL_GLSL = /* glsl */ `
   gl_FragColor.rgb *= uLevelTint;
   gl_FragColor.rgb = mix( gl_FragColor.rgb, vec3( dot( gl_FragColor.rgb, vec3( 0.299, 0.587, 0.114 ) ) ), uDesaturate );
 
+  // Grain : plus discret dans le noir (il grisait toute la pénombre d'un voile sale).
+  float vhsLuma = dot( gl_FragColor.rgb, vec3( 0.299, 0.587, 0.114 ) );
   float vhsGrain = ( fract( sin( dot( gl_FragCoord.xy + uTime * 60.0, vec2( 12.9898, 78.233 ) ) ) * 43758.5453123 ) - 0.5 ) * ( 0.05 + uCorruption * 0.15 );
-  gl_FragColor.rgb += vhsGrain;
+  gl_FragColor.rgb += vhsGrain * ( 0.3 + 0.7 * sqrt( vhsLuma ) );
 
-  float vhsLevels = mix( 24.0, 10.0, uCorruption );
-  gl_FragColor.rgb = floor( gl_FragColor.rgb * vhsLevels + 0.5 ) / vhsLevels;
+  // Quantification (couleurs "pauvres" de la bande) dans un espace racine carrée : paliers
+  // fins dans les ombres, grossiers dans les hautes lumières. Tramée par un bruit animé : plus
+  // de bandes ni d'aplats noirs découpés dans la pénombre (avant : 24 paliers linéaires, tout
+  // ce qui était sous 2 % tombait d'un coup au noir).
+  float vhsLevels = mix( 30.0, 12.0, uCorruption );
+  vec3 vhsRoot = sqrt( max( gl_FragColor.rgb, 0.0 ) );
+  float vhsDither = vhsHash12( gl_FragCoord.xy + fract( uTime * 7.3 ) * 131.0 ) - 0.5;
+  vhsRoot = floor( vhsRoot * vhsLevels + 0.5 + vhsDither * 0.9 ) / vhsLevels;
+  gl_FragColor.rgb = vhsRoot * vhsRoot;
 
   gl_FragColor.rgb = mix( gl_FragColor.rgb, gl_FragColor.rgb * vec3( 1.08, 1.0, 0.82 ), 0.35 );
 `;
@@ -224,6 +299,10 @@ export interface VhsEffectOptions {
   ceilingLights?: boolean;
   /** Faux pour les objets lumineux (sortie) : ils ne sont pas assombris par les zones éteintes. */
   zoneLighting?: boolean;
+  /** Éclairage de zone calculé par pixel (grandes surfaces à sommets espacés : sol, plafond). */
+  zoneLightPerPixel?: boolean;
+  /** UV tirés de la position monde (projection boîte) : densité de texture uniforme. */
+  boxProjection?: boolean;
 }
 
 /**
@@ -235,21 +314,28 @@ export interface VhsEffectOptions {
 export function applyVhsEffect(material: THREE.Material, options: VhsEffectOptions = {}): void {
   const ceilingLights = options.ceilingLights ?? false;
   const zoneLighting = options.zoneLighting ?? true;
+  const perPixel = options.zoneLightPerPixel ?? false;
+  const boxProjection = options.boxProjection ?? false;
   material.onBeforeCompile = (shader) => {
     Object.assign(shader.uniforms, sharedUniforms);
 
-    shader.vertexShader = shader.vertexShader
+    let vertex = shader.vertexShader
       .replace("#include <common>", `#include <common>\n${VERTEX_PARS_GLSL}`)
       .replace("#include <displacementmap_vertex>", VERTEX_WORLD_GLSL);
+    if (boxProjection) vertex = vertex.replace("#include <uv_vertex>", BOX_UV_GLSL);
+    shader.vertexShader = vertex;
 
     let fragment = shader.fragmentShader
       .replace("#include <common>", `#include <common>\n${FRAGMENT_PARS_GLSL}`)
       .replace("#include <map_fragment>", `${FRAGMENT_SETUP_GLSL}\n${MAP_FRAGMENT_GLSL}`)
       .replace("#include <dithering_fragment>", FINAL_GLSL);
     if (ceilingLights) fragment = fragment.replace("#include <emissivemap_fragment>", CEILING_EMISSIVE_GLSL);
-    if (zoneLighting) fragment = fragment.replace("#include <lights_fragment_maps>", ZONE_LIGHT_GLSL);
+    if (zoneLighting) {
+      const zone = perPixel ? `${ZONE_LIGHT_FRAGMENT}` : "vVhsZoneLight";
+      fragment = fragment.replace("#include <lights_fragment_maps>", `${perPixel ? "float vhsZoneUnstable;" : ""}${zoneLightGlsl(zone)}`);
+    }
     shader.fragmentShader = fragment;
   };
-  material.customProgramCacheKey = () => `vhs:${ceilingLights ? 1 : 0}${zoneLighting ? 1 : 0}`;
+  material.customProgramCacheKey = () => `vhs:${ceilingLights ? 1 : 0}${zoneLighting ? 1 : 0}${perPixel ? 1 : 0}${boxProjection ? 1 : 0}`;
   material.needsUpdate = true;
 }

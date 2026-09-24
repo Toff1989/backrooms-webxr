@@ -157,13 +157,16 @@ export class Grabbable {
 
 /**
  * Registre de tous les objets saisissables vivants : retrouve un objet depuis un collider
- * (requêtes Rapier), synchronise les meshes, et suit les objets de collection présents dans
- * le monde (pour ne jamais en faire apparaître un doublon au rechargement d'un chunk).
+ * (requêtes Rapier), synchronise les meshes, et garantit qu'un objet de collection n'existe
+ * qu'en un seul exemplaire dans le monde (jamais de doublon au rechargement d'un chunk, ni
+ * entre l'inventaire et le sol).
  */
 export class GrabbableRegistry {
   readonly all = new Set<Grabbable>();
   private readonly byCollider = new Map<number, Grabbable>();
-  private readonly aliveItemIds = new Set<string>();
+  private readonly aliveItems = new Map<string, Grabbable>();
+  /** Objets en cours de sortie de l'inventaire (modèle en chargement) : déjà "vivants". */
+  private readonly reservedItems = new Set<string>();
 
   constructor(
     private readonly scene: THREE.Scene,
@@ -175,7 +178,13 @@ export class GrabbableRegistry {
     this.scene.add(grabbable.object);
     this.all.add(grabbable);
     this.byCollider.set(grabbable.collider.handle, grabbable);
-    if (grabbable.item) this.aliveItemIds.add(grabbable.item.id);
+    if (grabbable.item) {
+      // Un seul exemplaire par objet : un ancien resté au sol disparaît au profit du nouveau.
+      const previous = this.aliveItems.get(grabbable.item.id);
+      if (previous && !previous.heldBy) this.remove(previous);
+      this.reservedItems.delete(grabbable.item.id);
+      this.aliveItems.set(grabbable.item.id, grabbable);
+    }
     return grabbable;
   }
 
@@ -204,13 +213,32 @@ export class GrabbableRegistry {
   }
 
   isItemAlive(id: string): boolean {
-    return this.aliveItemIds.has(id);
+    return this.aliveItems.has(id) || this.reservedItems.has(id);
+  }
+
+  /** Exemplaire de cet objet présent dans le monde, s'il y en a un. */
+  itemInWorld(id: string): Grabbable | null {
+    return this.aliveItems.get(id) ?? null;
+  }
+
+  /** Retire du monde tous les exemplaires non tenus d'un objet (il vient d'être rangé). */
+  removeItemCopies(id: string): void {
+    for (const grabbable of [...this.all]) if (grabbable.item?.id === id && !grabbable.heldBy) this.remove(grabbable);
+  }
+
+  /** Réserve un objet pendant sa sortie de l'inventaire (aucun chunk ne le fait réapparaître). */
+  reserveItem(id: string): void {
+    this.reservedItems.add(id);
+  }
+
+  releaseItem(id: string): void {
+    this.reservedItems.delete(id);
   }
 
   remove(grabbable: Grabbable): void {
     if (!this.all.delete(grabbable)) return;
     this.byCollider.delete(grabbable.collider.handle);
-    if (grabbable.item) this.aliveItemIds.delete(grabbable.item.id);
+    if (grabbable.item && this.aliveItems.get(grabbable.item.id) === grabbable) this.aliveItems.delete(grabbable.item.id);
     grabbable.dispose();
   }
 
