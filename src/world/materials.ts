@@ -132,7 +132,7 @@ export function getCeilingMaterial(): THREE.MeshStandardMaterial {
       emissiveMap,
       emissiveIntensity: 2.2,
     });
-    applyVhsEffect(ceilingMaterial);
+    applyVhsEffect(ceilingMaterial, { ceilingLights: true });
   }
   return ceilingMaterial;
 }

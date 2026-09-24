@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { brownNoise, createSamples, fadeEdges, lowpass, normalize, reverb, toBuffer } from "../assets/audio/synth";
 import { CollisionGroups, RAPIER, type PhysicsWorld } from "../physics/physicsWorld";
 import { WALL_HEIGHT, WALL_THICKNESS } from "../shared/constants";
 import type { WallSegment } from "../shared/chunkLayout";
@@ -205,40 +206,34 @@ export class WallTrap {
   }
 }
 
+/** Avertissement : grondement de béton qui se met à racler, montant, avec des craquements. */
 function createWarningBuffer(context: AudioContext): AudioBuffer {
-  const duration = 0.35;
   const sampleRate = context.sampleRate;
-  const length = Math.floor(sampleRate * duration);
-  const buffer = context.createBuffer(1, length, sampleRate);
-  const data = buffer.getChannelData(0);
-
-  for (let i = 0; i < length; i++) {
+  const duration = 0.45;
+  const data = brownNoise(createSamples(sampleRate, duration));
+  for (let i = 0; i < data.length; i++) {
     const t = i / sampleRate;
     const progress = t / duration;
-    const freq = 220 + progress * 900; // balayage montant : tension qui monte
-    const tone = Math.sin(2 * Math.PI * freq * t) * 0.35;
-    const crackle = (Math.random() * 2 - 1) * 0.15;
-    const envelope = Math.min(1, progress * 4) * (1 - progress * 0.3);
-    data[i] = (tone + crackle) * envelope;
+    const grind = Math.sin(2 * Math.PI * (38 + progress * 30) * t) * 0.5;
+    const crack = Math.random() < 0.004 ? (Math.random() * 2 - 1) * 3 : 0;
+    data[i] = (data[i]! * 1.5 + grind + crack) * Math.pow(progress, 1.5);
   }
-
-  return buffer;
+  lowpass(data, sampleRate, 900);
+  return toBuffer(context, fadeEdges(normalize(data, 0.8), sampleRate, 0.005));
 }
 
+/** Impact : choc sourd et massif, queue de réverbération dans les couloirs. */
 function createImpactBuffer(context: AudioContext): AudioBuffer {
-  const duration = 0.3;
   const sampleRate = context.sampleRate;
-  const length = Math.floor(sampleRate * duration);
-  const buffer = context.createBuffer(1, length, sampleRate);
-  const data = buffer.getChannelData(0);
-
-  for (let i = 0; i < length; i++) {
+  const data = createSamples(sampleRate, 1.8);
+  const rubble = brownNoise(createSamples(sampleRate, 1.8));
+  for (let i = 0; i < data.length; i++) {
     const t = i / sampleRate;
-    const progress = t / duration;
-    const thump = Math.sin(2 * Math.PI * 60 * t) * Math.exp(-progress * 10);
-    const noiseBurst = (Math.random() * 2 - 1) * Math.exp(-progress * 6);
-    data[i] = thump * 0.6 + noiseBurst * 0.5;
+    const thump = Math.sin(2 * Math.PI * 48 * t * (1 - t * 0.4)) * Math.exp(-t * 7);
+    const crack = (Math.random() * 2 - 1) * Math.exp(-t * 40) * 0.8;
+    data[i] = thump + crack + rubble[i]! * Math.exp(-t * 5) * 0.8;
   }
-
-  return buffer;
+  lowpass(data, sampleRate, 700);
+  reverb(data, sampleRate, 0.45, 1.8);
+  return toBuffer(context, fadeEdges(normalize(data, 0.9), sampleRate, 0.005));
 }

@@ -5,7 +5,10 @@ import { getExitWorldPosition } from "../shared/exit";
 import { createLevelProfile, type LevelProfile } from "../shared/levelProfile";
 import { ChunkStreamer } from "./chunkStreamer";
 import { ExitBeacon } from "./exitBeacon";
+import { flushGlitchZones, PhantomGlitches } from "./glitchZones";
 import type { GrabbableRegistry } from "./grabbable";
+import { createLightFieldParams, sampleZoneLight, type LightFieldParams } from "./lightField";
+import { setLightField } from "./vhsMaterial";
 
 /** Distance (m) sous laquelle le joueur est considéré comme ayant atteint la sortie. */
 const EXIT_REACHED_DISTANCE = 1.1;
@@ -22,6 +25,10 @@ export interface LevelUpdateResult {
   wallTrapJustWarned: boolean;
   /** Vrai la frame où un mur-piège surgit pleinement (signal haptique fort). */
   wallTrapJustPopped: boolean;
+  /** Destination (position monde, tête) si un téléporteur vient de happer le joueur. */
+  teleportDestination: THREE.Vector3 | null;
+  /** Obscurité à la position du joueur (0 = zone éclairée, 1 = néons éteints). */
+  darkness: number;
 }
 
 /**
@@ -42,6 +49,8 @@ export class LevelManager {
   private exitWorldZ: number;
   private sessionStarted = false;
   private runSeed: string;
+  private lightField: LightFieldParams;
+  private readonly phantomGlitches: PhantomGlitches;
 
   constructor(
     private readonly scene: THREE.Scene,
@@ -53,6 +62,9 @@ export class LevelManager {
   ) {
     this.runSeed = initialRunSeed;
     this.profile = createLevelProfile(this.depth, this.runSeed);
+    this.lightField = createLightFieldParams(this.profile.seed, this.depth);
+    setLightField(this.lightField);
+    this.phantomGlitches = new PhantomGlitches(scene, audioListener);
     this.chunkStreamer = new ChunkStreamer(scene, audioListener, physics, grabbables, isItemStored, this.profile);
     this.chunkStreamer.primeArea(SPAWN_LOCAL_POSITION);
 
@@ -71,10 +83,22 @@ export class LevelManager {
   }
 
   /** `playerPosition` : position XZ de la tête du joueur (pas l'origine du rig). */
-  update(playerPosition: THREE.Vector3, camera: THREE.Camera, elapsedSeconds: number, deltaSeconds: number): LevelUpdateResult {
-    const streamerResult = this.chunkStreamer.update(playerPosition, camera, elapsedSeconds, deltaSeconds);
+  update(playerPosition: THREE.Vector3, camera: THREE.Camera, elapsedSeconds: number, deltaSeconds: number, corruption: number): LevelUpdateResult {
+    const { teleportRequested, ...streamerResult } = this.chunkStreamer.update(playerPosition, camera, elapsedSeconds, deltaSeconds);
     this.exitBeacon.update(elapsedSeconds);
-    return streamerResult;
+
+    const darkness = 1 - sampleZoneLight(this.lightField, playerPosition.x, playerPosition.z);
+    this.phantomGlitches.update(deltaSeconds, playerPosition, this.depth, darkness, corruption);
+
+    let teleportDestination: THREE.Vector3 | null = null;
+    if (teleportRequested) {
+      teleportDestination = this.chunkStreamer.findTeleportDestination(playerPosition, this.exitWorldX, this.exitWorldZ);
+      // À l'arrivée, la pièce se déchire encore un instant autour du joueur.
+      if (teleportDestination) this.phantomGlitches.spawnAt(teleportDestination.x, 1.2, teleportDestination.z, 2.6, 1, 1.6);
+    }
+
+    flushGlitchZones(playerPosition);
+    return { ...streamerResult, teleportDestination, darkness };
   }
 
   hasReachedExit(playerPosition: THREE.Vector3): boolean {
@@ -104,6 +128,9 @@ export class LevelManager {
 
   private rebuild(): void {
     this.profile = createLevelProfile(this.depth, this.runSeed);
+    this.lightField = createLightFieldParams(this.profile.seed, this.depth);
+    setLightField(this.lightField);
+    this.phantomGlitches.clear();
     this.chunkStreamer.depth = this.depth;
     this.chunkStreamer.setProfile(this.profile);
     this.chunkStreamer.primeArea(SPAWN_LOCAL_POSITION);

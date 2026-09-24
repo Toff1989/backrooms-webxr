@@ -20,6 +20,11 @@ export class Atmosphere {
   private flickerSeconds = 0;
   private nextRandomFlicker = 8;
 
+  /** Niveau courant des néons (profondeur × clignotement), 0..1. */
+  get level(): number {
+    return this.lightLevel * this.flicker;
+  }
+
   constructor(
     private readonly scene: THREE.Scene,
     private readonly hemisphere: THREE.HemisphereLight,

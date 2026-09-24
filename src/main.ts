@@ -75,7 +75,7 @@ const sfx = new Sfx(audioListener);
 const comfortVignette = new ComfortVignette(camera);
 const vhsOverlay = new VhsOverlay(camera);
 const hud = new CamcorderHud(camera);
-const ambientHum = new AmbientHum(audioListener);
+const ambientHum = new AmbientHum(audioListener, scene);
 const flashlight = new Flashlight(camera);
 const atmosphere = new Atmosphere(scene, hemisphere, ambient);
 
@@ -178,6 +178,8 @@ const WALL_TRAP_WARNING_HAPTIC_INTENSITY = 0.35;
 const WALL_TRAP_WARNING_HAPTIC_DURATION_MS = 90;
 const WALL_TRAP_POP_HAPTIC_INTENSITY = 1;
 const WALL_TRAP_POP_HAPTIC_DURATION_MS = 180;
+const TELEPORT_HAPTIC_INTENSITY = 1;
+const TELEPORT_HAPTIC_DURATION_MS = 260;
 
 renderer.setAnimationLoop((timestamp) => {
   timer.update(timestamp);
@@ -210,16 +212,29 @@ renderer.setAnimationLoop((timestamp) => {
   });
   grabbables.sync();
 
-  const levelUpdate = levelManager.update(player.headWorld, camera, elapsedSeconds, deltaSeconds);
+  const levelUpdate = levelManager.update(player.headWorld, camera, elapsedSeconds, deltaSeconds, corruption.value);
   if (levelUpdate.corruptionDelta > 0) corruption.add(levelUpdate.corruptionDelta);
   if (levelUpdate.glitchTrapJustTriggered) {
     triggerHapticPulse(renderer, GLITCH_HAPTIC_INTENSITY, GLITCH_HAPTIC_DURATION_MS);
     atmosphere.triggerFlicker(0.5);
+    vhsOverlay.triggerTrackingLoss(0.35);
   }
   if (levelUpdate.wallTrapJustWarned) triggerHapticPulse(renderer, WALL_TRAP_WARNING_HAPTIC_INTENSITY, WALL_TRAP_WARNING_HAPTIC_DURATION_MS);
   if (levelUpdate.wallTrapJustPopped) {
     triggerHapticPulse(renderer, WALL_TRAP_POP_HAPTIC_INTENSITY, WALL_TRAP_POP_HAPTIC_DURATION_MS);
     atmosphere.triggerFlicker(0.4);
+  }
+
+  if (levelUpdate.teleportDestination) {
+    player.teleport(levelUpdate.teleportDestination);
+    syncHands(elapsedSeconds);
+    grabSystem.onTeleport();
+    corruption.add(0.8);
+    vhsOverlay.triggerTrackingLoss(1);
+    flashlight.cut(0.6);
+    atmosphere.triggerFlicker(1.2);
+    sfx.play("teleport", 0.8);
+    triggerHapticPulse(renderer, TELEPORT_HAPTIC_INTENSITY, TELEPORT_HAPTIC_DURATION_MS);
   }
 
   if (levelManager.hasReachedExit(player.headWorld)) {
@@ -238,10 +253,11 @@ renderer.setAnimationLoop((timestamp) => {
     items: collectionStore.count,
   };
   comfortVignette.update(player.movementIntensity, deltaSeconds);
-  vhsOverlay.update(elapsedSeconds, corruption.value);
+  vhsOverlay.update(elapsedSeconds, corruption.value, deltaSeconds);
   hud.update(deltaSeconds);
   flashlight.update(deltaSeconds, corruption.value);
   atmosphere.update(deltaSeconds, corruption.value);
+  ambientHum.update(deltaSeconds, player.headWorld, levelUpdate.darkness, levelManager.depth, atmosphere.level);
   updateVhsTime(elapsedSeconds);
   renderer.render(scene, camera);
 });

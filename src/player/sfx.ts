@@ -1,10 +1,13 @@
 import * as THREE from "three";
+import { bandpass, brownNoise, createSamples, fadeEdges, highpass, lowpass, normalize, reverb, toBuffer } from "../assets/audio/synth";
 
-type SoundName = "store" | "take" | "grab" | "click" | "denied";
+type SoundName = "store" | "take" | "grab" | "click" | "denied" | "teleport";
 
 /**
- * Petits sons d'interface générés procéduralement (pas de fichier audio) : rangement,
- * sortie d'inventaire, saisie, clic de menu, refus (objet trop lourd / non rangeable).
+ * Sons d'interaction générés procéduralement (pas de fichier audio), volontairement
+ * diégétiques et sourds plutôt que des bips : froissement de sac (rangement / sortie),
+ * contact mat (saisie), déclic mécanique (lampe, menu), cognement étouffé (refus),
+ * arrachement grave (téléporteur).
  */
 export class Sfx {
   private readonly buffers = new Map<SoundName, AudioBuffer>();
@@ -36,37 +39,80 @@ export class Sfx {
   }
 }
 
-function createBuffer(context: AudioContext, name: SoundName): AudioBuffer {
-  const duration = name === "store" ? 0.4 : name === "denied" ? 0.22 : 0.12;
+function createBuffer(context: BaseAudioContext, name: SoundName): AudioBuffer {
   const sampleRate = context.sampleRate;
-  const length = Math.floor(sampleRate * duration);
-  const buffer = context.createBuffer(1, length, sampleRate);
-  const data = buffer.getChannelData(0);
+  let data: Float32Array;
 
-  for (let i = 0; i < length; i++) {
-    const t = i / sampleRate;
-    const progress = t / duration;
-    let sample = 0;
-    switch (name) {
-      case "store": {
-        const freq = progress < 0.4 ? 784 : 1175;
-        sample = (Math.sin(2 * Math.PI * freq * t) * 0.4 + Math.sin(2 * Math.PI * freq * 2 * t) * 0.12) * Math.pow(1 - progress, 1.6);
-        break;
+  switch (name) {
+    case "store":
+    case "take": {
+      // Froissement de tissu/sac : bouffées de bruit filtré irrégulières.
+      const seconds = name === "store" ? 0.45 : 0.3;
+      data = createSamples(sampleRate, seconds);
+      let grain = 0;
+      for (let i = 0; i < data.length; i++) {
+        if (i % Math.floor(sampleRate * 0.012) === 0) grain = Math.random();
+        const p = i / data.length;
+        const envelope = name === "store" ? Math.sin(Math.PI * p) : Math.pow(1 - p, 1.5);
+        data[i] = (Math.random() * 2 - 1) * grain * envelope;
       }
-      case "take":
-        sample = Math.sin(2 * Math.PI * (500 + progress * 500) * t) * 0.35 * (1 - progress);
-        break;
-      case "grab":
-        sample = ((Math.random() * 2 - 1) * 0.25 + Math.sin(2 * Math.PI * 140 * t) * 0.35) * Math.pow(1 - progress, 3);
-        break;
-      case "click":
-        sample = Math.sin(2 * Math.PI * 1400 * t) * 0.3 * Math.pow(1 - progress, 4);
-        break;
-      case "denied":
-        sample = Math.sign(Math.sin(2 * Math.PI * 180 * t)) * 0.18 * (1 - progress);
-        break;
+      bandpass(data, sampleRate, name === "store" ? 1800 : 2600, 0.7);
+      break;
     }
-    data[i] = sample;
+    case "grab": {
+      // Contact mat de la main sur un objet.
+      data = createSamples(sampleRate, 0.14);
+      for (let i = 0; i < data.length; i++) {
+        const t = i / sampleRate;
+        data[i] = (Math.sin(2 * Math.PI * 110 * t) * 0.6 + (Math.random() * 2 - 1) * 0.4) * Math.exp(-t / 0.025);
+      }
+      lowpass(data, sampleRate, 900);
+      break;
+    }
+    case "click": {
+      // Déclic mécanique d'interrupteur (deux contacts rapprochés), pas un bip.
+      data = createSamples(sampleRate, 0.08);
+      for (const at of [0, 0.018]) {
+        const start = Math.floor(at * sampleRate);
+        for (let i = 0; start + i < data.length; i++) {
+          const t = i / sampleRate;
+          data[start + i] = data[start + i]! + ((Math.random() * 2 - 1) * 0.7 + Math.sin(2 * Math.PI * 2300 * t) * 0.3) * Math.exp(-t / 0.003) * (at === 0 ? 1 : 0.6);
+        }
+      }
+      highpass(data, sampleRate, 600);
+      break;
+    }
+    case "denied": {
+      // Cognement étouffé et bourdon bref : "ça ne rentre pas".
+      data = createSamples(sampleRate, 0.3);
+      for (let i = 0; i < data.length; i++) {
+        const t = i / sampleRate;
+        data[i] = (Math.sin(2 * Math.PI * 75 * t) + Math.tanh(Math.sin(2 * Math.PI * 150 * t) * 3) * 0.3) * Math.exp(-t / 0.07);
+      }
+      lowpass(data, sampleRate, 600);
+      break;
+    }
+    case "teleport": {
+      // Arrachement : aspiration de bruit grave qui monte, coupure nette, grésillement résiduel.
+      data = createSamples(sampleRate, 2.2);
+      const rush = brownNoise(createSamples(sampleRate, 2.2));
+      const cutAt = Math.floor(sampleRate * 0.55);
+      for (let i = 0; i < data.length; i++) {
+        const t = i / sampleRate;
+        if (i < cutAt) {
+          const p = i / cutAt;
+          data[i] = rush[i]! * p * p * 1.4 + Math.sin(2 * Math.PI * (30 + p * 40) * t) * p * 0.8;
+        } else {
+          const tail = (i - cutAt) / sampleRate;
+          const gate = Math.random() < 0.4 ? 1 : 0;
+          data[i] = (Math.random() * 2 - 1) * gate * 0.35 * Math.exp(-tail * 3) + Math.sin(2 * Math.PI * 38 * t) * Math.exp(-tail * 2) * 0.6;
+        }
+      }
+      lowpass(data, sampleRate, 1600);
+      reverb(data, sampleRate, 0.4, 1.6);
+      break;
+    }
   }
-  return buffer;
+
+  return toBuffer(context, fadeEdges(normalize(data, 0.6), sampleRate, 0.003));
 }

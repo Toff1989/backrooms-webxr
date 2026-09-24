@@ -2,9 +2,10 @@ import * as THREE from "three";
 import type { NoiseFunction2D } from "simplex-noise";
 import { CollisionGroups, RAPIER, type PhysicsWorld } from "../physics/physicsWorld";
 import { generateChunkLayout, type ChunkLayout, type WallSegment } from "../shared/chunkLayout";
-import { CHUNK_SIZE, STREAM_RADIUS_CHUNKS, WALL_HEIGHT } from "../shared/constants";
+import { CELL_SIZE, CHUNK_CELLS, CHUNK_SIZE, STREAM_RADIUS_CHUNKS, WALL_HEIGHT } from "../shared/constants";
 import type { LevelProfile } from "../shared/levelProfile";
 import { createSeededNoise2D } from "../shared/noise";
+import { coordinateHash01, stringSeedToInt } from "../shared/rng";
 import { buildChunkGroup } from "./chunkMesh";
 import { spawnCollectibleModel } from "./collectibleLoader";
 import { toCollectionEntry } from "./collection";
@@ -19,6 +20,14 @@ const REGEN_MAX_INTERVAL_SECONDS = 12;
 const REGEN_MIN_DISTANCE_CHUNKS = 2;
 /** Corruption ajoutée quand un chunk hors champ se régénère (masque discrètement le changement). */
 const REGEN_CORRUPTION_PULSE = 0.1;
+/** Part des pièges glitch qui sont des téléporteurs (croît avec la profondeur). */
+const BASE_TELEPORTER_SHARE = 0.25;
+const TELEPORTER_SHARE_PER_DEPTH = 0.03;
+const MAX_TELEPORTER_SHARE = 0.45;
+/** Destination d'un téléporteur : à au moins cette distance (m) du point de départ. */
+const TELEPORT_MIN_JUMP = 12;
+/** Marge (m) autour des obstacles pour la destination (le joueur n'apparaît jamais dans un meuble). */
+const TELEPORT_CLEARANCE = 0.6;
 /** Les objets de collection apparaissent posés, légèrement au-dessus du sol (la physique les fait retomber). */
 const COLLECTIBLE_SPAWN_HEIGHT = 0.05;
 
@@ -38,6 +47,8 @@ export interface ChunkStreamerUpdateResult {
   glitchTrapJustTriggered: boolean;
   wallTrapJustWarned: boolean;
   wallTrapJustPopped: boolean;
+  /** Vrai la frame où un téléporteur happe le joueur. */
+  teleportRequested: boolean;
 }
 
 /**
@@ -115,12 +126,14 @@ export class ChunkStreamer {
     let glitchTrapJustTriggered = false;
     let wallTrapJustWarned = false;
     let wallTrapJustPopped = false;
+    let teleportRequested = false;
 
     for (const chunk of this.loaded.values()) {
       for (const trap of chunk.glitchTraps) {
         const result = trap.update(playerPosition, elapsedSeconds, deltaSeconds);
         corruptionDelta += result.corruptionDelta;
         glitchTrapJustTriggered = glitchTrapJustTriggered || result.justTriggered;
+        teleportRequested = teleportRequested || result.teleport;
       }
       for (const trap of chunk.wallTraps) {
         const result = trap.update(playerPosition, deltaSeconds);
@@ -132,7 +145,69 @@ export class ChunkStreamer {
 
     corruptionDelta += this.updateDynamicMaze(camera, deltaSeconds);
 
-    return { corruptionDelta, glitchTrapJustTriggered, wallTrapJustWarned, wallTrapJustPopped };
+    return { corruptionDelta, glitchTrapJustTriggered, wallTrapJustWarned, wallTrapJustPopped, teleportRequested };
+  }
+
+  /**
+   * Destination d'un téléporteur : un centre de cellule libre dans les chunks chargés, loin
+   * du point de départ, et jamais plus près de la sortie (le téléporteur désoriente, il ne
+   * sert pas de raccourci — et la validation anti-triche du temps de run reste juste).
+   */
+  findTeleportDestination(from: THREE.Vector3, exitX: number, exitZ: number): THREE.Vector3 | null {
+    const currentExitDistance = Math.hypot(from.x - exitX, from.z - exitZ);
+    const blockedEdges = new Set<string>();
+    const obstacles: WallSegment[] = [];
+    const trapCells = new Set<string>();
+    for (const { layout } of this.loaded.values()) {
+      for (const wall of layout.wallSegments) blockedEdges.add(edgeKey((wall.minX + wall.maxX) / 2, (wall.minZ + wall.maxZ) / 2));
+      obstacles.push(...layout.pillarObstacles, ...layout.propObstacles);
+      for (const trap of layout.glitchTrapPositions) trapCells.add(chunkKey(Math.floor(trap.x / CELL_SIZE), Math.floor(trap.z / CELL_SIZE)));
+    }
+
+    // Parcours en largeur depuis la cellule du joueur : la destination doit être atteignable
+    // à pied (jamais enfermé dans une poche de murs), limité aux chunks chargés.
+    const minCell = (this.currentChunkX - STREAM_RADIUS_CHUNKS) * CHUNK_CELLS;
+    const maxCellX = (this.currentChunkX + STREAM_RADIUS_CHUNKS + 1) * CHUNK_CELLS - 1;
+    const minCellZ = (this.currentChunkZ - STREAM_RADIUS_CHUNKS) * CHUNK_CELLS;
+    const maxCellZ = (this.currentChunkZ + STREAM_RADIUS_CHUNKS + 1) * CHUNK_CELLS - 1;
+    const start: [number, number] = [Math.floor(from.x / CELL_SIZE), Math.floor(from.z / CELL_SIZE)];
+    const visited = new Set<string>([chunkKey(start[0], start[1])]);
+    const queue: Array<[number, number]> = [start];
+    const candidates: THREE.Vector3[] = [];
+    const steps: Array<[number, number]> = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+
+    for (let head = 0; head < queue.length; head++) {
+      const [cellX, cellZ] = queue[head]!;
+      const x = (cellX + 0.5) * CELL_SIZE;
+      const z = (cellZ + 0.5) * CELL_SIZE;
+      if (
+        Math.hypot(x - from.x, z - from.z) >= TELEPORT_MIN_JUMP &&
+        Math.hypot(x - exitX, z - exitZ) >= currentExitDistance &&
+        !trapCells.has(chunkKey(cellX, cellZ)) &&
+        !obstacles.some(
+          (box) => x > box.minX - TELEPORT_CLEARANCE && x < box.maxX + TELEPORT_CLEARANCE && z > box.minZ - TELEPORT_CLEARANCE && z < box.maxZ + TELEPORT_CLEARANCE,
+        )
+      ) {
+        candidates.push(new THREE.Vector3(x, 0, z));
+      }
+
+      for (const [stepX, stepZ] of steps) {
+        const nextX = cellX + stepX;
+        const nextZ = cellZ + stepZ;
+        if (nextX < minCell || nextX > maxCellX || nextZ < minCellZ || nextZ > maxCellZ) continue;
+        const key = chunkKey(nextX, nextZ);
+        if (visited.has(key)) continue;
+        // Milieu du bord traversé = milieu du segment de mur qui le fermerait.
+        const edgeX = stepX === 0 ? x : (Math.max(cellX, nextX)) * CELL_SIZE;
+        const edgeZ = stepZ === 0 ? z : (Math.max(cellZ, nextZ)) * CELL_SIZE;
+        if (blockedEdges.has(edgeKey(edgeX, edgeZ))) continue;
+        visited.add(key);
+        queue.push([nextX, nextZ]);
+      }
+    }
+
+    if (candidates.length === 0) return null;
+    return candidates[Math.floor(Math.random() * candidates.length)]!;
   }
 
   private streamAround(chunkX: number, chunkZ: number): void {
@@ -201,8 +276,13 @@ export class ChunkStreamer {
     for (const segment of layout.wallSegments) this.addBoxCollider(staticBody, segment);
     for (const segment of layout.pillarObstacles) this.addBoxCollider(staticBody, segment);
 
+    const seedInt = stringSeedToInt(this.profile.seed);
+    const teleporterShare = Math.min(MAX_TELEPORTER_SHARE, BASE_TELEPORTER_SHARE + this.profile.depth * TELEPORTER_SHARE_PER_DEPTH);
     const glitchTraps = layout.glitchTrapPositions.map((position) => {
-      const trap = new GlitchTrap(position.x, position.z, this.audioListener, layout.wallSegments);
+      const cellX = Math.floor(position.x / CELL_SIZE);
+      const cellZ = Math.floor(position.z / CELL_SIZE);
+      const kind = coordinateHash01(seedInt, cellX, cellZ, 313) < teleporterShare ? "teleporter" : "corruption";
+      const trap = new GlitchTrap(position.x, position.z, this.audioListener, kind);
       this.scene.add(trap.group);
       if (this.sessionStarted) trap.play();
       return trap;
@@ -288,6 +368,10 @@ function randomRegenInterval(): number {
 
 function chunkKey(chunkX: number, chunkZ: number): string {
   return `${chunkX},${chunkZ}`;
+}
+
+function edgeKey(x: number, z: number): string {
+  return `${Math.round(x * 4)},${Math.round(z * 4)}`;
 }
 
 function parseChunkKey(key: string): [number, number] {

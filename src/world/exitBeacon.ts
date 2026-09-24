@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { bandpass, createSamples, normalize, reverb, toBuffer } from "../assets/audio/synth";
 import { getVhsNoiseTexture } from "./vhsNoiseTexture";
 import { applyVhsEffect } from "./vhsMaterial";
 
@@ -14,8 +15,8 @@ const PORTAL_HEIGHT = 2.3;
 const FRAME_THICKNESS = 0.1;
 const FRAME_DEPTH = 0.1;
 
-const BEACON_TONE_HZ = 880;
-const BEACON_OVERTONE_HZ = 1320;
+const BEACON_TONE_HZ = 293;
+const BEACON_OVERTONE_HZ = 297.5;
 const BEACON_PULSE_DURATION_SECONDS = 2.2;
 const BEACON_VOLUME = 0.5;
 const BEACON_REF_DISTANCE = 2;
@@ -77,7 +78,7 @@ export class ExitBeacon {
       emissiveIntensity: BASE_EMISSIVE_INTENSITY,
       roughness: 0.4,
     });
-    applyVhsEffect(this.frameMaterial);
+    applyVhsEffect(this.frameMaterial, { zoneLighting: false });
 
     const halfWidth = PORTAL_WIDTH / 2 + FRAME_THICKNESS / 2;
     const postGeometry = new THREE.BoxGeometry(FRAME_THICKNESS, PORTAL_HEIGHT + FRAME_THICKNESS, FRAME_DEPTH);
@@ -143,18 +144,26 @@ export class ExitBeacon {
   }
 }
 
+/**
+ * Balise : une radio mal réglée quelque part — porteuse grave désaccordée, qui pleure
+ * (wow de bande), noyée dans le souffle. Reconnaissable et localisable, mais pas un carillon.
+ */
 function createBeaconBuffer(context: AudioContext): AudioBuffer {
   const sampleRate = context.sampleRate;
-  const length = Math.floor(sampleRate * BEACON_PULSE_DURATION_SECONDS);
-  const buffer = context.createBuffer(1, length, sampleRate);
-  const data = buffer.getChannelData(0);
-
-  for (let i = 0; i < length; i++) {
+  const data = createSamples(sampleRate, BEACON_PULSE_DURATION_SECONDS);
+  let phaseA = 0;
+  let phaseB = 0;
+  for (let i = 0; i < data.length; i++) {
     const t = i / sampleRate;
-    const envelope = Math.max(0, Math.sin((t / BEACON_PULSE_DURATION_SECONDS) * Math.PI));
-    const tone = Math.sin(2 * Math.PI * BEACON_TONE_HZ * t) * 0.5 + Math.sin(2 * Math.PI * BEACON_OVERTONE_HZ * t) * 0.2;
-    data[i] = tone * Math.pow(envelope, 3) * 0.6;
+    const envelope = Math.pow(Math.max(0, Math.sin((t / BEACON_PULSE_DURATION_SECONDS) * Math.PI)), 2);
+    const wow = 1 + Math.sin(2 * Math.PI * 0.9 * t) * 0.012 + Math.sin(2 * Math.PI * 5.3 * t) * 0.003;
+    phaseA += (2 * Math.PI * BEACON_TONE_HZ * wow) / sampleRate;
+    phaseB += (2 * Math.PI * BEACON_OVERTONE_HZ * wow) / sampleRate;
+    const carrier = Math.tanh((Math.sin(phaseA) + Math.sin(phaseB) * 0.7) * 1.8) * 0.5;
+    const dropout = Math.random() < 0.0015 ? 0 : 1;
+    data[i] = (carrier * dropout + (Math.random() * 2 - 1) * 0.12) * envelope;
   }
-
-  return buffer;
+  bandpass(data, sampleRate, 700, 0.9);
+  reverb(data, sampleRate, 0.35, 1.4);
+  return toBuffer(context, normalize(data, 0.7));
 }
