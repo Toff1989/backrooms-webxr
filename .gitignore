@@ -8,3 +8,7 @@ dist
 # Backend (étape 7/8) : secrets et base SQLite locale, jamais committés.
 .env
 server/data
+server/backups
+
+# Hébergement Node.js natif Plesk (Phusion Passenger, voir docs/DEPLOIEMENT-PLESK.md).
+tmp

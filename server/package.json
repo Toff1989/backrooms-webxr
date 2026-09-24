@@ -7,7 +7,9 @@
   "scripts": {
     "dev": "tsx watch src/server.ts",
     "start": "tsx src/server.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "build": "esbuild src/server.ts --bundle --platform=node --format=esm --target=node18 --packages=external --outfile=dist/server.mjs",
+    "start:prod": "node dist/server.mjs"
   },
   "dependencies": {
     "@fastify/cors": "^10.0.1",
@@ -23,6 +25,7 @@
     "@types/better-sqlite3": "^7.6.11",
     "@types/node": "^22.9.0",
     "@types/seedrandom": "^3.0.8",
+    "esbuild": "^0.28.2",
     "typescript": "^5.9.0"
   }
 }

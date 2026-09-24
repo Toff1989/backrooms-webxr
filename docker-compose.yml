@@ -1,11 +1,9 @@
 # Backrooms VR (fiche projet étape 8). Usage local / VPS générique :
 #   docker compose up -d --build
 #
-# Sur Plesk : Plesk gère déjà son propre reverse proxy + HTTPS (Let's Encrypt intégré) —
-# ne PAS ajouter Caddy/Nginx en plus ici, juste pointer le domaine (panneau Plesk, ou
-# "Additional nginx directives" en proxy_pass) vers le port exposé par ce conteneur.
-# Voir deploy/README.md pour le déploiement SSH réel (PM2, sans Docker, souvent plus
-# simple à intégrer à l'hébergement Node natif de Plesk).
+# Sur Plesk : voir docs/DEPLOIEMENT-PLESK.md — hébergement recommandé via l'extension
+# Node.js Toolkit de Plesk (Phusion Passenger), sans Docker. Ce docker-compose.yml reste
+# utile pour un VPS générique ou pour tester le build de prod en local.
 #
 # Sur un VPS sans Plesk : ajoutez un service Caddy devant celui-ci pour l'HTTPS
 # automatique (fiche projet : "Caddy ou Nginx + Let's Encrypt").

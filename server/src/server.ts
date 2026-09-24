@@ -1,3 +1,4 @@
+import "./env.js";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import Fastify from "fastify";
@@ -13,8 +14,12 @@ const HOST = process.env["HOST"] ?? "0.0.0.0";
 // simple à héberger (un seul port à exposer côté Plesk/reverse proxy) qu'un couple de
 // conteneurs front+API séparés.
 const STATIC_DIR = process.env["STATIC_DIR"] ?? join(__dirname, "../../dist");
+// Derrière Plesk (nginx) ou Docker+Caddy, un seul proxy est en coupure : sans ça, Fastify
+// voit l'IP du proxy pour tout le monde et @fastify/rate-limit partagerait un seul quota
+// entre tous les visiteurs. TRUST_PROXY=0 désactive (utile en dev direct, sans proxy).
+const TRUST_PROXY = process.env["TRUST_PROXY"] !== "0";
 
-const app = Fastify({ logger: true });
+const app = Fastify({ logger: true, trustProxy: TRUST_PROXY });
 
 await app.register(cors, { origin: true });
 await app.register(rateLimit, { max: 60, timeWindow: "1 minute" });
