@@ -68,5 +68,6 @@
   "sort.depth": "by depth",
   "sort.name": "by name",
   "inv.picked": "Item selected — trigger on another slot to place it there (same slot: cancel).",
-  "inv.moved": "Item moved."
+  "inv.moved": "Item moved.",
+  "hud.signal": "SIGNAL"
 }

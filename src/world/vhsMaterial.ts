@@ -25,6 +25,7 @@ const sharedUniforms = {
   uVhsNoise: { value: null as THREE.Texture | null },
   uLightSeed: { value: new THREE.Vector2() },
   uDarkThreshold: { value: 0 },
+  uExitCell: { value: new THREE.Vector2() },
   /** Décrépitude (0..1) : croît avec la profondeur. */
   uDecay: { value: 0 },
   /** Teinte globale du niveau (dérive du jaune vers un vert malade, puis un gris froid). */
@@ -69,6 +70,7 @@ export function setVhsCorruption(intensity: number): void {
 export function setLightField(params: LightFieldParams): void {
   sharedUniforms.uLightSeed.value.set(params.seedX, params.seedY);
   sharedUniforms.uDarkThreshold.value = params.threshold;
+  sharedUniforms.uExitCell.value.set(params.exitCellX, params.exitCellZ);
 }
 
 export interface ShaderGlitchZone {
@@ -162,11 +164,11 @@ const VERTEX_GLITCH_GLSL = /* glsl */ `
     vec4 zoneB;
     float glitch = vhsGlitchInfluence( vhsWorld.xyz, zoneA, zoneB );
     if ( glitch > 0.02 ) {
-      float jitterStep = floor( uTime * ( 7.0 + zoneB.y * 9.0 ) );
-      float jitter = vhsHash13( floor( vhsWorld.xyz * 3.0 ) + jitterStep + zoneB.y * 91.0 ) - 0.5;
-      float amount = ( zoneB.z > 0.5 && zoneB.z < 1.5 ) ? 0.14 : 0.07;
-      transformed += objectNormal * jitter * amount * glitch;
-      vhsWorld.xyz += normalize( mat3( modelMatrix ) * objectNormal ) * jitter * amount * glitch;
+      // La surface respire (ondulation lente et continue), elle ne "saute" pas par blocs.
+      float swell = vhsValueNoise( vhsWorld.xz * 1.3 + vhsWorld.y * 0.9 + uTime * 0.6 + zoneB.y * 30.0 ) - 0.5;
+      float amount = ( zoneB.z > 0.5 && zoneB.z < 1.5 ) ? 0.09 : 0.045;
+      transformed += objectNormal * swell * amount * glitch;
+      vhsWorld.xyz += normalize( mat3( modelMatrix ) * objectNormal ) * swell * amount * glitch;
     }
     vVhsWorldPos = vhsWorld.xyz;
     // Champ de lumière évalué par sommet (il varie sur ~12 m) : bien moins cher que par pixel.
@@ -220,81 +222,84 @@ const FRAGMENT_GLITCH_SETUP_GLSL = /* glsl */ `
   vec4 vhsZoneA;
   vec4 vhsZoneB;
   float vhsGlitch = vhsGlitchInfluence( vVhsWorldPos, vhsZoneA, vhsZoneB );
+  // Sorties du glitch, consommées par l'échantillonnage de la texture puis la couleur finale.
   vec2 vhsUvOffset = vec2( 0.0 );
-  float vhsAberrationBoost = 0.0;
-  float vhsReplace = 0.0;
-  vec3 vhsReplaceColor = vec3( 0.0 );
-  vec3 vhsGlow = vec3( 0.0 );
-  float vhsScan = 0.0;
-  vec3 vhsTint = vec3( 0.0 );
+  float vhsGhost = 0.0;
+  vec2 vhsGhostOffset = vec2( 0.0 );
+  float vhsDrip = 0.0;
+  vec2 vhsDripShift = vec2( 0.0 );
+  float vhsDarken = 0.0;
+  float vhsTearLine = 0.0;
+  float vhsBand = 0.0;
+  float vhsVoid = 0.0;
+  float vhsSpeck = 0.0;
   float vhsMissingTile = 0.0;
 
   if ( vhsGlitch > 0.01 ) {
     float seed = vhsZoneB.y;
     bool teleporter = vhsZoneB.z > 0.5 && vhsZoneB.z < 1.5;
     vec2 sp = vhsSurfaceCoords( vVhsWorldPos, normalize( vVhsWorldNormal ) );
-    float fast = floor( uTime * ( 10.0 + seed * 14.0 ) );
-    float slow = floor( uTime * ( 3.0 + seed * 4.0 ) );
+    // Temps saccadé à 12 images/s pour la déformation : l'effet "saute" comme une bande lue
+    // avec un mauvais tracking, au lieu de glisser comme un filtre numérique.
+    float tape = floor( uTime * 12.0 ) / 12.0;
 
-    // Bord irrégulier : l'intensité varie par bandes (pas de disque propre, pas de damier).
-    float edgeBand = floor( sp.y * 6.0 + slow );
-    float m = clamp( vhsGlitch * ( 1.2 + vhsHash12( vec2( edgeBand, seed * 31.0 ) ) * 0.8 ) - 0.15, 0.0, 1.0 );
+    // Masque organique qui respire (bruit de valeur), jamais de damier ni de disque net.
+    float breath = vhsValueNoise( sp * 1.6 + seed * 37.0 + vec2( 0.0, uTime * 0.3 ) );
+    float m = smoothstep( 0.15, 0.85, vhsGlitch * 1.35 - 0.3 + breath * 0.55 );
 
-    if ( m > 0.0 ) {
-      vec2 noiseUv = fract( sp * vec2( 0.9, 0.23 ) + vec2( fast * 0.173, slow * 0.291 ) );
-      float noiseValue = texture2D( uVhsNoise, noiseUv ).r;
+    if ( m > 0.001 ) {
+      // 1. Ondulation de balayage : la texture ondule horizontalement selon la hauteur.
+      float wobble = sin( sp.y * ( 8.0 + seed * 6.0 ) + tape * 6.0 ) * 0.6 + sin( sp.y * 31.0 - tape * 11.0 ) * 0.25;
+      vhsUvOffset.x += wobble * 0.03 * m;
 
-      // 1. Déchirure de balayage : bandes horizontales de hauteur variable, décalées
-      // latéralement, avec dérive de chrominance et saut de luminosité (tracking VHS).
-      float bandHeight = mix( 0.06, 0.35, vhsHash12( vec2( floor( sp.y * 3.0 ), slow + seed * 5.0 ) ) );
-      float band = floor( sp.y / bandHeight + fast * 0.21 );
-      float bandHash = vhsHash12( vec2( band, fast + seed * 13.0 ) );
-      float torn = step( 0.62 - m * 0.4, bandHash );
-      float shift = ( vhsHash12( vec2( band, fast * 1.7 + 3.0 ) ) - 0.5 );
-      vhsUvOffset.x += torn * shift * ( 0.15 + m * 0.5 );
-      vhsAberrationBoost = ( 0.01 + m * 0.03 ) * ( 1.0 + torn * 2.0 );
+      // 2. Glissement de tracking : par à-coups, toute la zone se décale d'un bloc.
+      float slipTime = floor( uTime * 3.0 + seed * 5.0 );
+      float slip = step( 0.72, vhsHash12( vec2( slipTime, seed * 17.0 ) ) );
+      vhsUvOffset.x += slip * ( vhsHash12( vec2( slipTime, 3.0 + seed ) ) - 0.5 ) * 0.3 * m;
 
-      // 2. Traînée de tête de lecture : dans certaines bandes, le texel se fige et s'étire
-      // horizontalement (le motif du papier peint "coule" en lignes).
-      float smear = step( 0.86 - m * 0.3, vhsHash12( vec2( band, slow * 3.1 + seed ) ) );
-      if ( smear > 0.5 ) vhsUvOffset.x += ( floor( sp.x * 1.5 ) / 1.5 - sp.x ) * 0.9;
+      // 3. Image fantôme (bavure chroma VHS) : la texture est dédoublée, décalée, rouge/cyan.
+      vhsGhost = 0.8 * m;
+      vhsGhostOffset = vec2( 0.03 + 0.06 * m, 0.0 );
 
-      // 3. Dropouts : traits fins horizontaux de neige blanche ou de noir, comme une bande abîmée.
-      vec2 dropCell = floor( sp * vec2( 1.6, 38.0 ) + vec2( fast * 0.7, 0.0 ) );
-      float dropHash = vhsHash12( dropCell + seed * 71.0 + fast * 0.13 );
-      if ( dropHash > 0.955 - m * 0.12 ) {
-        vhsReplace = 0.85;
-        vhsReplaceColor = dropHash > 0.99 ? vec3( 0.02 ) : vec3( 0.55 + noiseValue * 0.5 );
+      // 3b. Bandes de tracking qui défilent : dans chaque bande, la texture s'étire en traînées
+      // horizontales et s'éclaircit (lisible même sur une moquette uniforme).
+      for ( int k = 0; k < 2; k++ ) {
+        float fk = float( k );
+        float speed = 0.25 + vhsHash12( vec2( seed * 7.0, fk ) ) * 0.35;
+        float center = fract( uTime * speed + seed + fk * 0.5 ) * 3.2 - 0.3;
+        float thickness = 0.05 + 0.12 * vhsHash12( vec2( floor( uTime * 2.0 ), fk + seed ) );
+        float along = abs( fract( sp.y / 3.2 ) * 3.2 - center );
+        vhsBand = max( vhsBand, ( 1.0 - smoothstep( thickness * 0.6, thickness, along ) ) * m );
       }
 
-      // 4. Rares blocs arrachés : la texture est trouée, on voit la neige ou le vide derrière.
-      vec2 blockId = floor( sp * vec2( 2.2, 3.5 ) + seed * 11.0 );
-      float blockHash = vhsHash12( blockId + slow * 1.3 );
-      if ( blockHash > 0.93 - m * 0.1 ) {
-        vhsReplace = 1.0;
-        vhsReplaceColor = blockHash > 0.975 ? vec3( 0.0 ) : vec3( noiseValue ) * vec3( 0.85, 0.9, 1.0 );
+      // 4. Coulures : des colonnes fines de texture s'étirent vers le bas, comme de la cire.
+      float column = floor( sp.x / 0.04 + seed * 11.0 );
+      float columnHash = vhsHash12( vec2( column, seed * 13.0 ) );
+      if ( columnHash > 1.0 - 0.3 * m ) {
+        float flow = 0.5 + 0.5 * sin( uTime * ( 0.4 + columnHash ) + column );
+        vhsDrip = smoothstep( 0.2, 0.9, m );
+        vhsDripShift = vec2( 0.0, ( 0.1 + columnHash * 0.5 ) * flow * m );
       }
 
-      // 5. Barre de synchro qui défile + lignes de balayage + dérive de teinte par bande.
-      float roll = fract( sp.y * 0.45 - uTime * ( 0.6 + seed * 0.5 ) );
-      vhsScan = smoothstep( 0.0, 0.03, roll ) * ( 1.0 - smoothstep( 0.03, 0.08, roll ) ) * m;
-      vhsScan += ( 0.5 + 0.5 * sin( sp.y * 260.0 + uTime * 40.0 ) ) * 0.18 * m;
-      vhsTint = torn * vec3( shift * 0.25, -shift * 0.12, -shift * 0.2 ) * m;
+      // 5. Ligne de tracking : un trait fin, clair et bruité qui traverse la zone.
+      float lineHeight = fract( vhsHash12( vec2( floor( uTime * 2.0 ), seed * 29.0 ) ) + uTime * 0.25 ) * 3.0;
+      vhsTearLine = ( 1.0 - smoothstep( 0.0, 0.012, abs( fract( sp.y / 3.0 ) * 3.0 - lineHeight ) ) ) * m;
 
-      vhsGlow = vec3( noiseValue ) * 0.05 * m;
+      vhsDarken = 0.45 * m;
 
       if ( teleporter ) {
-        // Téléporteur : la surface est aspirée en spirale vers un noyau noir qui grésille.
+        // Téléporteur : la texture tourne en vortex (continu, pas saccadé) vers un noyau noir
+        // où grésillent quelques flocons de neige.
         vec2 toCenter = vVhsWorldPos.xz - vhsZoneA.xz;
         float d = length( toCenter ) / vhsZoneA.w;
-        float swirl = ( 1.0 - d ) * ( 2.2 + sin( uTime * 1.3 ) * 0.8 );
-        vhsUvOffset += vec2( cos( swirl ), sin( swirl ) ) * ( 1.0 - d ) * 0.35 * vhsGlitch;
-        vhsAberrationBoost += 0.05 * ( 1.0 - d );
-        float core = 1.0 - smoothstep( 0.12, 0.45, d );
-        float sparkle = step( 0.88, noiseValue );
-        vhsReplace = max( vhsReplace, core );
-        vhsReplaceColor = mix( vhsReplaceColor, vec3( 0.2, 0.7, 0.85 ) * sparkle * noiseValue, core );
-        vhsGlow += vec3( 0.05, 0.3, 0.38 ) * noiseValue * ( 1.0 - d ) * vhsGlitch * ( 0.6 + 0.4 * sin( uTime * 5.0 ) );
+        float twist = pow( max( 0.0, 1.0 - d ), 2.0 ) * ( 3.0 + sin( uTime * 0.7 ) );
+        float angle = twist + uTime * 0.5 * ( 1.0 - d );
+        vec2 rotated = vec2( cos( angle ) * toCenter.x - sin( angle ) * toCenter.y, sin( angle ) * toCenter.x + cos( angle ) * toCenter.y );
+        vhsUvOffset += ( rotated - toCenter ) / ${CELL_SIZE.toFixed(2)};
+        vhsVoid = 1.0 - smoothstep( 0.08, 0.42, d );
+        vec2 noiseUv = fract( sp * 0.6 + vec2( floor( uTime * 15.0 ) * 0.173, uTime * 0.21 ) );
+        vhsSpeck = step( 0.9, texture2D( uVhsNoise, noiseUv ).r ) * vhsVoid;
+        vhsGhost = max( vhsGhost, 0.7 * ( 1.0 - d ) );
       }
     }
   }
@@ -303,12 +308,23 @@ const FRAGMENT_GLITCH_SETUP_GLSL = /* glsl */ `
 const MAP_FRAGMENT_GLSL = /* glsl */ `
   #ifdef USE_MAP
     vec2 vhsUv = vMapUv + vhsUvOffset;
-    vec2 vhsAberration = ( vMapUv - 0.5 ) * ( 0.004 + uCorruption * 0.012 ) + vec2( vhsAberrationBoost, vhsAberrationBoost * 0.3 );
+    // Bande de tracking : coordonnée horizontale écrasée -> traînées étirées.
+    vhsUv.x = mix( vhsUv.x, floor( vhsUv.x * 3.0 ) / 3.0 + fract( vhsUv.x * 3.0 ) * 0.04, vhsBand );
+    vec2 vhsAberration = ( vMapUv - 0.5 ) * ( 0.004 + uCorruption * 0.012 );
     vec4 sampledDiffuseColor;
     sampledDiffuseColor.r = texture2D( map, vhsUv - vhsAberration ).r;
     sampledDiffuseColor.g = texture2D( map, vhsUv ).g;
     sampledDiffuseColor.b = texture2D( map, vhsUv + vhsAberration ).b;
     sampledDiffuseColor.a = texture2D( map, vhsUv ).a;
+    if ( vhsDrip > 0.0 ) {
+      // Coulure : le texel d'un peu plus haut est étiré vers le bas.
+      sampledDiffuseColor.rgb = mix( sampledDiffuseColor.rgb, texture2D( map, vhsUv + vhsDripShift ).rgb, vhsDrip );
+    }
+    if ( vhsGhost > 0.0 ) {
+      vec3 ghostRed = texture2D( map, vhsUv + vhsGhostOffset ).rgb * vec3( 1.0, 0.35, 0.3 );
+      vec3 ghostCyan = texture2D( map, vhsUv - vhsGhostOffset ).rgb * vec3( 0.3, 0.8, 1.0 );
+      sampledDiffuseColor.rgb = mix( sampledDiffuseColor.rgb, ( ghostRed + ghostCyan ) * 0.75, vhsGhost * 0.45 );
+    }
     diffuseColor *= sampledDiffuseColor;
   #endif
   diffuseColor.rgb *= vhsDecayColor( vVhsWorldPos, normalize( vVhsWorldNormal ) );
@@ -351,14 +367,19 @@ const FINAL_GLSL = /* glsl */ `
   gl_FragColor.rgb = mix( gl_FragColor.rgb, vec3( 0.006, 0.005, 0.004 ), vhsMissingTile );
   gl_FragColor.rgb *= uLevelTint;
   gl_FragColor.rgb = mix( gl_FragColor.rgb, vec3( dot( gl_FragColor.rgb, vec3( 0.299, 0.587, 0.114 ) ) ), uDesaturate );
-  gl_FragColor.rgb = mix( gl_FragColor.rgb, vhsReplaceColor, vhsReplace );
-  gl_FragColor.rgb += vhsGlow + vhsTint;
-  gl_FragColor.rgb = mix( gl_FragColor.rgb, gl_FragColor.rgb * 0.35 + vec3( 0.12 ), vhsScan * 0.6 );
 
-  float vhsGrain = ( fract( sin( dot( gl_FragCoord.xy + uTime * 60.0, vec2( 12.9898, 78.233 ) ) ) * 43758.5453123 ) - 0.5 ) * ( 0.05 + uCorruption * 0.15 + vhsGlitch * 0.2 );
+  // Glitch : zone assombrie et délavée, trait de tracking, noyau noir des téléporteurs.
+  float vhsLuma = dot( gl_FragColor.rgb, vec3( 0.299, 0.587, 0.114 ) );
+  gl_FragColor.rgb = mix( gl_FragColor.rgb, vec3( vhsLuma ) * 0.7, vhsDarken );
+  float vhsFrameNoise = fract( sin( dot( gl_FragCoord.xy + floor( uTime * 30.0 ), vec2( 12.9898, 78.233 ) ) ) * 43758.5453123 );
+  gl_FragColor.rgb += vhsTearLine * ( 0.25 + 0.5 * vhsFrameNoise );
+  gl_FragColor.rgb = mix( gl_FragColor.rgb, gl_FragColor.rgb * 1.35 + 0.06 + ( vhsFrameNoise - 0.5 ) * 0.12, vhsBand );
+  gl_FragColor.rgb = mix( gl_FragColor.rgb, vec3( vhsSpeck * 0.55 ), vhsVoid );
+
+  float vhsGrain = ( fract( sin( dot( gl_FragCoord.xy + uTime * 60.0, vec2( 12.9898, 78.233 ) ) ) * 43758.5453123 ) - 0.5 ) * ( 0.05 + uCorruption * 0.15 + vhsGlitch * 0.08 );
   gl_FragColor.rgb += vhsGrain;
 
-  float vhsLevels = mix( 24.0, 10.0, max( uCorruption, vhsGlitch * 0.8 ) );
+  float vhsLevels = mix( 24.0, 10.0, uCorruption );
   gl_FragColor.rgb = floor( gl_FragColor.rgb * vhsLevels + 0.5 ) / vhsLevels;
 
   gl_FragColor.rgb = mix( gl_FragColor.rgb, gl_FragColor.rgb * vec3( 1.08, 1.0, 0.82 ), 0.35 );

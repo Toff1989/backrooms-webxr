@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import type { PhysicsWorld } from "../physics/physicsWorld";
 import { CELL_SIZE } from "../shared/constants";
-import { getExitWorldPosition } from "../shared/exit";
+import { getExitLocation, getExitWorldPosition } from "../shared/exit";
 import { createLevelProfile, type LevelProfile } from "../shared/levelProfile";
 import { ChunkStreamer } from "./chunkStreamer";
 import { ExitBeacon } from "./exitBeacon";
@@ -40,6 +40,8 @@ export interface LevelUpdateResult {
   batteriesPicked: number;
   /** Obscurité à la position du joueur (0 = zone éclairée, 1 = néons éteints). */
   darkness: number;
+  /** Distance (m) à la sortie, pour l'indicateur de signal du HUD. */
+  exitDistance: number;
 }
 
 /**
@@ -78,7 +80,7 @@ export class LevelManager {
   ) {
     this.runSeed = initialRunSeed;
     this.profile = createLevelProfile(this.depth, this.runSeed);
-    this.lightField = createLightFieldParams(this.profile.seed, this.depth);
+    this.lightField = createLightFieldParams(this.profile.seed, this.depth, getExitLocation(this.profile).cellX, getExitLocation(this.profile).cellZ);
     setLightField(this.lightField);
     setDepthLook(this.depth);
     this.phantomGlitches = new PhantomGlitches(scene, audioListener);
@@ -135,7 +137,8 @@ export class LevelManager {
     if (teleportDestination) this.history.length = 0;
 
     flushGlitchZones(playerPosition);
-    return { ...streamerResult, teleportDestination, teleportKind: teleportDestination ? teleportRequested : null, darkness };
+    const exitDistance = Math.hypot(playerPosition.x - this.exitWorldX, playerPosition.z - this.exitWorldZ);
+    return { ...streamerResult, teleportDestination, teleportKind: teleportDestination ? teleportRequested : null, darkness, exitDistance };
   }
 
   /** Boucle spatiale : une position passée (≥ 8 s), assez loin, jamais plus près de la sortie. */
@@ -185,7 +188,7 @@ export class LevelManager {
 
   private rebuild(): void {
     this.profile = createLevelProfile(this.depth, this.runSeed);
-    this.lightField = createLightFieldParams(this.profile.seed, this.depth);
+    this.lightField = createLightFieldParams(this.profile.seed, this.depth, getExitLocation(this.profile).cellX, getExitLocation(this.profile).cellZ);
     setLightField(this.lightField);
     setDepthLook(this.depth);
     this.phantomGlitches.clear();

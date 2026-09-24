@@ -315,6 +315,8 @@ renderer.setAnimationLoop((timestamp) => {
     flashlight: flashlight.on,
     items: collectionStore.count,
     battery: flashlight.battery,
+    // Plein à moins de 5 m, vide au-delà de 60 m ; brouillé par la corruption.
+    signal: THREE.MathUtils.clamp(1 - (levelUpdate.exitDistance - 5) / 55, 0, 1) * (1 - corruption.value * 0.6 * Math.random()),
     debug: perfStats.readAndReset(),
   };
   perfStats.begin("effets");
@@ -326,7 +328,7 @@ renderer.setAnimationLoop((timestamp) => {
   poltergeist.update(deltaSeconds, camera, player.headWorld, levelManager.depth, levelUpdate.darkness);
   ambientHum.update(deltaSeconds, player.headWorld, levelUpdate.darkness, levelManager.depth, atmosphere.level);
   updateVhsTime(elapsedSeconds);
-  runWarmupStep();
+  runWarmupStep(renderer.xr.isPresenting);
   perfStats.end("effets");
   perfStats.begin("rendu");
   renderer.render(scene, camera);

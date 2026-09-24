@@ -151,7 +151,15 @@ export function queueWarmup(task: () => void): void {
   warmupQueue.push(task);
 }
 
-/** À appeler une fois par frame : exécute au plus une tâche de pré-génération. */
-export function runWarmupStep(): void {
-  warmupQueue.shift()?.();
+/**
+ * À appeler une fois par frame. Hors VR (aperçu écran), exécute une tâche de pré-génération
+ * par frame. À l'entrée en VR, tout ce qui reste est terminé d'un coup (pendant la transition
+ * du casque) : une tâche coûte 50 à 85 ms sur PC, un à-coup énorme une fois en jeu.
+ */
+export function runWarmupStep(inXr: boolean): void {
+  if (!inXr) {
+    warmupQueue.shift()?.();
+    return;
+  }
+  while (warmupQueue.length > 0) warmupQueue.shift()!();
 }

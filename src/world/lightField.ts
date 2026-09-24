@@ -25,14 +25,22 @@ export interface LightFieldParams {
   seedY: number;
   /** Bruit sous ce seuil = cellule éteinte. Monte avec la profondeur (plus de zones sombres). */
   threshold: number;
+  /** Cellule de la sortie : son voisinage reste toujours éclairé (on la repère de loin). */
+  exitCellX: number;
+  exitCellZ: number;
 }
 
-export function createLightFieldParams(levelSeed: string, depth: number): LightFieldParams {
+/** Rayon (en cellules) toujours éclairé autour de la sortie. */
+export const EXIT_LIT_RADIUS_CELLS = 2.5;
+
+export function createLightFieldParams(levelSeed: string, depth: number, exitCellX: number, exitCellZ: number): LightFieldParams {
   const seedInt = stringSeedToInt(`${levelSeed}:lights`) >>> 0;
   return {
     seedX: (seedInt % 997) + 0.37,
     seedY: (Math.floor(seedInt / 997) % 991) + 0.71,
     threshold: Math.min(MAX_DARK_THRESHOLD, BASE_DARK_THRESHOLD + depth * DARK_THRESHOLD_PER_DEPTH),
+    exitCellX,
+    exitCellZ,
   };
 }
 
@@ -71,7 +79,8 @@ export function lightNoise(params: LightFieldParams, cellX: number, cellZ: numbe
   const px = cellX * LIGHT_FIELD_FREQUENCY + params.seedX;
   const py = cellZ * LIGHT_FIELD_FREQUENCY + params.seedY;
   const spawnBoost = 0.45 * (1 - smoothstep(SPAWN_LIT_RADIUS_CELLS * 0.5, SPAWN_LIT_RADIUS_CELLS, Math.hypot(cellX, cellZ)));
-  return valueNoise(px, py) * 0.65 + valueNoise(px * 2.3 + 17, py * 2.3 + 17) * 0.35 + spawnBoost;
+  const exitBoost = 0.6 * (1 - smoothstep(EXIT_LIT_RADIUS_CELLS * 0.5, EXIT_LIT_RADIUS_CELLS, Math.hypot(cellX - params.exitCellX, cellZ - params.exitCellZ)));
+  return valueNoise(px, py) * 0.65 + valueNoise(px * 2.3 + 17, py * 2.3 + 17) * 0.35 + spawnBoost + exitBoost;
 }
 
 /** Éclairage ambiant [0..1] à une position monde (0 = zone éteinte). */
@@ -89,6 +98,7 @@ function smoothstep(edge0: number, edge1: number, x: number): number {
 export const VHS_LIGHT_FIELD_GLSL = /* glsl */ `
   uniform vec2 uLightSeed;
   uniform float uDarkThreshold;
+  uniform vec2 uExitCell;
 
   float vhsValueNoise( vec2 p ) {
     vec2 i = floor( p );
@@ -104,7 +114,8 @@ export const VHS_LIGHT_FIELD_GLSL = /* glsl */ `
   float vhsLightNoise( vec2 cellCoord ) {
     vec2 p = cellCoord * ${LIGHT_FIELD_FREQUENCY.toFixed(4)} + uLightSeed;
     float spawnBoost = 0.45 * ( 1.0 - smoothstep( ${(SPAWN_LIT_RADIUS_CELLS * 0.5).toFixed(2)}, ${SPAWN_LIT_RADIUS_CELLS.toFixed(2)}, length( cellCoord ) ) );
-    return vhsValueNoise( p ) * 0.65 + vhsValueNoise( p * 2.3 + 17.0 ) * 0.35 + spawnBoost;
+    float exitBoost = 0.6 * ( 1.0 - smoothstep( ${(EXIT_LIT_RADIUS_CELLS * 0.5).toFixed(2)}, ${EXIT_LIT_RADIUS_CELLS.toFixed(2)}, length( cellCoord - uExitCell ) ) );
+    return vhsValueNoise( p ) * 0.65 + vhsValueNoise( p * 2.3 + 17.0 ) * 0.35 + spawnBoost + exitBoost;
   }
 
   float vhsZoneLight( vec3 worldPos ) {

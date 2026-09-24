@@ -68,5 +68,6 @@
   "sort.depth": "par profondeur",
   "sort.name": "par nom",
   "inv.picked": "Objet sélectionné — gâchette sur une autre case pour l'y placer (même case : annuler).",
-  "inv.moved": "Objet déplacé."
+  "inv.moved": "Objet déplacé.",
+  "hud.signal": "SIGNAL"
 }

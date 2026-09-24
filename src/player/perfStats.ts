@@ -65,7 +65,7 @@ export class PerfStats {
       new THREE.PlaneGeometry(0.2, 0.05),
       new THREE.MeshBasicMaterial({ map: this.graphTexture, transparent: true, depthTest: false, depthWrite: false, fog: false }),
     );
-    panel.position.set(0, 0.07, -0.5);
+    panel.position.set(-0.13, -0.11, -0.5);
     panel.renderOrder = 997;
     panel.frustumCulled = false;
     camera.add(panel);

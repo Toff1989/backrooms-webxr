@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { brownNoise, createSamples, fadeEdges, lowpass, normalize, reverb, toBuffer } from "../assets/audio/synth";
+import { bandpass, brownNoise, createSamples, fadeEdges, lowpass, normalize, reverb, toBuffer } from "../assets/audio/synth";
 import { CollisionGroups, RAPIER, type PhysicsWorld } from "../physics/physicsWorld";
 import { WALL_HEIGHT, WALL_THICKNESS } from "../shared/constants";
 import type { WallSegment } from "../shared/chunkLayout";
@@ -212,34 +212,61 @@ export class WallTrap {
 let warningBuffer: AudioBuffer | null = null;
 let impactBuffer: AudioBuffer | null = null;
 
-/** Avertissement : grondement de béton qui se met à racler, montant, avec des craquements. */
+/**
+ * Avertissement : rien de tonal. Un grondement grave qui enfle (on le sent plus qu'on ne
+ * l'entend), des craquements secs de plâtre sous tension et un filet de poussière qui tombe.
+ */
 function createWarningBuffer(context: AudioContext): AudioBuffer {
   const sampleRate = context.sampleRate;
-  const duration = 0.45;
-  const data = brownNoise(createSamples(sampleRate, duration));
+  const duration = 0.5;
+  const rumble = lowpass(brownNoise(createSamples(sampleRate, duration)), sampleRate, 140);
+  const dust = createSamples(sampleRate, duration);
+  for (let i = 0; i < dust.length; i++) dust[i] = Math.random() < 0.02 ? (Math.random() * 2 - 1) : 0;
+  bandpass(dust, sampleRate, 4500, 0.8);
+  const data = createSamples(sampleRate, duration);
   for (let i = 0; i < data.length; i++) {
-    const t = i / sampleRate;
-    const progress = t / duration;
-    const grind = Math.sin(2 * Math.PI * (38 + progress * 30) * t) * 0.5;
-    const crack = Math.random() < 0.004 ? (Math.random() * 2 - 1) * 3 : 0;
-    data[i] = (data[i]! * 1.5 + grind + crack) * Math.pow(progress, 1.5);
+    const progress = i / data.length;
+    data[i] = rumble[i]! * 3 * Math.pow(progress, 1.3) + dust[i]! * 0.5 * progress;
   }
-  lowpass(data, sampleRate, 900);
-  return toBuffer(context, fadeEdges(normalize(data, 0.8), sampleRate, 0.005));
+  // Craquements : 3 à 5 claquements secs et courts, de plus en plus rapprochés.
+  const cracks = 3 + Math.floor(Math.random() * 3);
+  for (let k = 0; k < cracks; k++) {
+    const start = Math.floor(sampleRate * duration * (0.25 + 0.7 * Math.pow(k / cracks, 0.7)));
+    const crack = createSamples(sampleRate, 0.03);
+    for (let i = 0; i < crack.length; i++) crack[i] = (Math.random() * 2 - 1) * Math.exp(-i / (sampleRate * 0.004));
+    bandpass(crack, sampleRate, 1800 + Math.random() * 1500, 1.5);
+    for (let i = 0; i < crack.length && start + i < data.length; i++) data[start + i] = data[start + i]! + crack[i]! * 1.4;
+  }
+  return toBuffer(context, fadeEdges(normalize(data, 0.8), sampleRate, 0.01));
 }
 
-/** Impact : choc sourd et massif, queue de réverbération dans les couloirs. */
+/**
+ * Impact : un claquement sourd de béton (bruit filtré, pas de sinus qui "rebondit"), le
+ * souffle d'air déplacé, puis quelques débris qui retombent, dans la réverbération de la pièce.
+ */
 function createImpactBuffer(context: AudioContext): AudioBuffer {
   const sampleRate = context.sampleRate;
-  const data = createSamples(sampleRate, 1.8);
-  const rubble = brownNoise(createSamples(sampleRate, 1.8));
-  for (let i = 0; i < data.length; i++) {
+  const seconds = 2;
+  const data = createSamples(sampleRate, seconds);
+  // Corps du choc : bruit rose/brun très grave, attaque instantanée, extinction rapide.
+  const slam = lowpass(brownNoise(createSamples(sampleRate, 0.4)), sampleRate, 220);
+  const body = bandpass(brownNoise(createSamples(sampleRate, 0.4)), sampleRate, 85, 2.5);
+  for (let i = 0; i < slam.length; i++) {
     const t = i / sampleRate;
-    const thump = Math.sin(2 * Math.PI * 48 * t * (1 - t * 0.4)) * Math.exp(-t * 7);
-    const crack = (Math.random() * 2 - 1) * Math.exp(-t * 40) * 0.8;
-    data[i] = thump + crack + rubble[i]! * Math.exp(-t * 5) * 0.8;
+    data[i] = (slam[i]! * 4 + body[i]! * 6) * Math.exp(-t * 14);
   }
-  lowpass(data, sampleRate, 700);
-  reverb(data, sampleRate, 0.45, 1.8);
+  // Claquement initial : transitoire courte, médium.
+  const snap = bandpass(createSamples(sampleRate, 0.02).map(() => Math.random() * 2 - 1), sampleRate, 900, 0.8);
+  for (let i = 0; i < snap.length; i++) data[i] = data[i]! + snap[i]! * Math.exp(-i / (sampleRate * 0.003)) * 1.5;
+  // Débris : petits impacts épars après le choc.
+  for (let k = 0; k < 7; k++) {
+    const start = Math.floor(sampleRate * (0.08 + Math.random() * 0.6));
+    const size = Math.random();
+    const debris = bandpass(createSamples(sampleRate, 0.05).map(() => Math.random() * 2 - 1), sampleRate, 1200 + size * 2500, 1.2);
+    for (let i = 0; i < debris.length && start + i < data.length; i++) {
+      data[start + i] = data[start + i]! + debris[i]! * Math.exp(-i / (sampleRate * 0.008)) * (0.2 + size * 0.3);
+    }
+  }
+  reverb(data, sampleRate, 0.4, 1.9);
   return toBuffer(context, fadeEdges(normalize(data, 0.9), sampleRate, 0.005));
 }

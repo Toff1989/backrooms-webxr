@@ -20,6 +20,8 @@ export interface HudStatus {
   items: number;
   /** Batterie de la lampe torche (0..1). */
   battery: number;
+  /** Force du "signal" de la sortie (0..1) : monte en s'en approchant. */
+  signal: number;
   /** Ligne de mesures de perfs (`?debug=1`), sinon null. */
   debug: string | null;
 }
@@ -30,7 +32,7 @@ export interface HudStatus {
  * boutons soient toujours visibles.
  */
 export class CamcorderHud {
-  status: HudStatus = { depth: 0, crouching: false, sprinting: false, flashlight: false, items: 0, battery: 1, debug: null };
+  status: HudStatus = { depth: 0, crouching: false, sprinting: false, flashlight: false, items: 0, battery: 1, signal: 0, debug: null };
 
   private readonly ctx: CanvasRenderingContext2D;
   private readonly texture: THREE.CanvasTexture;
@@ -114,6 +116,9 @@ export class CamcorderHud {
     ctx.font = "bold 34px monospace";
     this.text(`${t("hud.level")} ${this.status.depth}`, 20, 120, "left", "#ffe89a");
     this.text(`${t("hud.bag")} ${this.status.items}`, 200, 120, "left");
+    // Signal de la sortie (façon réception du caméscope) : 5 barres, de plus en plus pleines.
+    const bars = Math.round(this.status.signal * 5);
+    this.text(`${t("hud.signal")} ${"▮".repeat(bars)}${"▯".repeat(5 - bars)}`, 380, 120, "left", bars >= 4 ? "#9fe39f" : "#f4f1e8");
     const flags = [this.status.crouching ? t("hud.crouch") : "", this.status.sprinting ? t("hud.sprint") : "", this.status.flashlight ? t("hud.flashlight") : ""].filter(Boolean).join("  ");
     this.text(flags, CANVAS_WIDTH - 20, 120, "right", "#b9e0ff");
 

@@ -23,9 +23,10 @@ const TRIGGER_DEPTH = 0.45;
 const BEACON_TONE_HZ = 293;
 const BEACON_OVERTONE_HZ = 297.5;
 const BEACON_PULSE_DURATION_SECONDS = 2.2;
-const BEACON_VOLUME = 0.5;
-const BEACON_REF_DISTANCE = 2;
-const BEACON_MAX_DISTANCE = 20;
+const BEACON_VOLUME = 0.6;
+const BEACON_REF_DISTANCE = 3;
+/** Audible de loin : c'est le principal moyen de trouver la sortie. */
+const BEACON_MAX_DISTANCE = 40;
 /** Faux écho de la balise (corruption forte) : distance à laquelle il est joué. */
 const DECOY_DISTANCE = 12;
 
@@ -65,6 +66,7 @@ export class ExitBeacon {
   readonly triggerPosition: THREE.Vector3;
 
   private readonly doorMaterial: THREE.MeshStandardMaterial;
+  private readonly signMaterial: THREE.MeshStandardMaterial;
   private readonly voidMaterial: THREE.ShaderMaterial;
   private readonly leaf: THREE.Object3D;
   private readonly sound: THREE.PositionalAudio;
@@ -140,6 +142,21 @@ export class ExitBeacon {
     this.leaf.rotation.y = LEAF_OPEN_ANGLE;
     this.group.add(this.leaf);
 
+    // Vieux panneau de sortie de secours au-dessus de la porte : vert, fatigué, qui grésille.
+    // Visible de loin dans l'enfilade des pièces (fiche : "lumière différente").
+    const signTexture = createExitSignTexture();
+    this.signMaterial = new THREE.MeshStandardMaterial({
+      map: signTexture,
+      emissive: 0xffffff,
+      emissiveMap: signTexture,
+      emissiveIntensity: 1.6,
+      roughness: 0.6,
+    });
+    applyVhsEffect(this.signMaterial, { zoneLighting: false });
+    const sign = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.16, 0.05), this.signMaterial);
+    sign.position.set(0, DOOR_HEIGHT + 0.3, 0.03);
+    this.group.add(sign);
+
     // Intérieur noir (faces intérieures d'une boîte) : ce qu'on voit par l'entrebâillement.
     this.voidMaterial = new THREE.ShaderMaterial({
       uniforms: { uTime: { value: 0 }, uPulse: { value: 0 }, uNoiseMap: { value: getVhsNoiseTexture() } },
@@ -176,6 +193,8 @@ export class ExitBeacon {
    */
   update(elapsedSeconds: number, deltaSeconds: number, corruption: number, listenerPosition: THREE.Vector3, scene: THREE.Scene): void {
     const pulse = 0.5 + 0.5 * Math.sin(elapsedSeconds * 2.4);
+    // Tube fatigué : quelques micro-coupures, jamais éteint longtemps.
+    this.signMaterial.emissiveIntensity = Math.random() < 0.04 ? 0.25 : 1.6;
     this.voidMaterial.uniforms["uTime"]!.value = elapsedSeconds;
     this.voidMaterial.uniforms["uPulse"]!.value = pulse;
     // Le battant frémit à peine, comme poussé par un courant d'air venu du noir.
@@ -206,12 +225,51 @@ export class ExitBeacon {
     if (this.decoy.isPlaying) this.decoy.stop();
     this.decoy.removeFromParent();
     this.doorMaterial.dispose();
+    this.signMaterial.map?.dispose();
+    this.signMaterial.dispose();
     this.voidMaterial.dispose();
     this.physics.world.removeRigidBody(this.body);
     this.group.traverse((object) => {
       if (object instanceof THREE.Mesh) object.geometry.dispose();
     });
   }
+}
+
+/** Panneau "EXIT" pictogramme (bonhomme qui court vers une porte), vert sur fond clair. */
+function createExitSignTexture(): THREE.CanvasTexture {
+  const canvas = document.createElement("canvas");
+  canvas.width = 256;
+  canvas.height = 96;
+  const ctx = canvas.getContext("2d")!;
+  ctx.fillStyle = "#0f8a3c";
+  ctx.fillRect(0, 0, 256, 96);
+  ctx.fillStyle = "#e8fff0";
+  ctx.font = "bold 46px sans-serif";
+  ctx.textAlign = "left";
+  ctx.textBaseline = "middle";
+  ctx.fillText("EXIT", 104, 50);
+  // Bonhomme stylisé qui court (tête, corps, jambes, bras) + porte.
+  ctx.strokeStyle = "#e8fff0";
+  ctx.lineWidth = 7;
+  ctx.lineCap = "round";
+  ctx.beginPath();
+  ctx.arc(52, 22, 8, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.moveTo(48, 34);
+  ctx.lineTo(40, 58);
+  ctx.moveTo(40, 58);
+  ctx.lineTo(56, 78);
+  ctx.moveTo(40, 58);
+  ctx.lineTo(24, 76);
+  ctx.moveTo(46, 40);
+  ctx.lineTo(64, 48);
+  ctx.moveTo(46, 40);
+  ctx.lineTo(30, 44);
+  ctx.stroke();
+  ctx.strokeRect(70, 14, 22, 68);
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  return texture;
 }
 
 function createBeaconVoice(listener: THREE.AudioListener, buffer: AudioBuffer, volume: number): THREE.PositionalAudio {
