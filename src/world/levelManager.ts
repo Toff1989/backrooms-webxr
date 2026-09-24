@@ -9,10 +9,10 @@ import { FloorCeiling } from "./floorCeiling";
 import { flushGlitchZones, PhantomGlitches } from "./glitchZones";
 import type { GrabbableRegistry } from "./grabbable";
 import { createLightFieldParams, sampleZoneLight, type LightFieldParams } from "./lightField";
-import { setLightField } from "./vhsMaterial";
+import { setDepthLook, setLightField } from "./vhsMaterial";
 
 /** Distance (m) sous laquelle le joueur est considéré comme ayant atteint la sortie. */
-const EXIT_REACHED_DISTANCE = 1.1;
+const EXIT_REACHED_DISTANCE = 0.55;
 
 /** Chaque level repart d'une grille locale : le spawn est toujours au centre de la cellule (0,0). */
 export const SPAWN_LOCAL_POSITION = new THREE.Vector3(CELL_SIZE / 2, 0, CELL_SIZE / 2);
@@ -57,7 +57,7 @@ export class LevelManager {
   constructor(
     private readonly scene: THREE.Scene,
     private readonly audioListener: THREE.AudioListener,
-    physics: PhysicsWorld,
+    private readonly physics: PhysicsWorld,
     grabbables: GrabbableRegistry,
     isItemStored: (id: string) => boolean,
     initialRunSeed: string,
@@ -66,6 +66,7 @@ export class LevelManager {
     this.profile = createLevelProfile(this.depth, this.runSeed);
     this.lightField = createLightFieldParams(this.profile.seed, this.depth);
     setLightField(this.lightField);
+    setDepthLook(this.depth);
     this.phantomGlitches = new PhantomGlitches(scene, audioListener);
     this.floorCeiling = new FloorCeiling(scene);
     this.floorCeiling.update(SPAWN_LOCAL_POSITION);
@@ -75,7 +76,7 @@ export class LevelManager {
     const exitPosition = getExitWorldPosition(this.profile);
     this.exitWorldX = exitPosition.x;
     this.exitWorldZ = exitPosition.z;
-    this.exitBeacon = new ExitBeacon(this.exitWorldX, this.exitWorldZ, audioListener);
+    this.exitBeacon = this.createExitBeacon();
     this.scene.add(this.exitBeacon.group);
   }
 
@@ -89,7 +90,7 @@ export class LevelManager {
   /** `playerPosition` : position XZ de la tête du joueur (pas l'origine du rig). */
   update(playerPosition: THREE.Vector3, camera: THREE.Camera, elapsedSeconds: number, deltaSeconds: number, corruption: number): LevelUpdateResult {
     const { teleportRequested, ...streamerResult } = this.chunkStreamer.update(playerPosition, camera, elapsedSeconds, deltaSeconds);
-    this.exitBeacon.update(elapsedSeconds);
+    this.exitBeacon.update(elapsedSeconds, deltaSeconds, corruption, playerPosition, this.scene);
     this.floorCeiling.update(playerPosition);
 
     const darkness = 1 - sampleZoneLight(this.lightField, playerPosition.x, playerPosition.z);
@@ -107,9 +108,8 @@ export class LevelManager {
   }
 
   hasReachedExit(playerPosition: THREE.Vector3): boolean {
-    const dx = playerPosition.x - this.exitWorldX;
-    const dz = playerPosition.z - this.exitWorldZ;
-    return Math.hypot(dx, dz) < EXIT_REACHED_DISTANCE;
+    const trigger = this.exitBeacon.triggerPosition;
+    return Math.hypot(playerPosition.x - trigger.x, playerPosition.z - trigger.z) < EXIT_REACHED_DISTANCE;
   }
 
   /** Passage au level suivant : nouveau profil (même seed de run, difficulté accrue), monde reconstruit. */
@@ -131,10 +131,17 @@ export class LevelManager {
     return SPAWN_LOCAL_POSITION.clone();
   }
 
+  /** Porte de sortie, façade tournée vers le spawn (d'où arrive le couloir garanti). */
+  private createExitBeacon(): ExitBeacon {
+    const facing = Math.atan2(SPAWN_LOCAL_POSITION.x - this.exitWorldX, SPAWN_LOCAL_POSITION.z - this.exitWorldZ);
+    return new ExitBeacon(this.exitWorldX, this.exitWorldZ, this.audioListener, this.physics, facing);
+  }
+
   private rebuild(): void {
     this.profile = createLevelProfile(this.depth, this.runSeed);
     this.lightField = createLightFieldParams(this.profile.seed, this.depth);
     setLightField(this.lightField);
+    setDepthLook(this.depth);
     this.phantomGlitches.clear();
     this.chunkStreamer.depth = this.depth;
     this.chunkStreamer.setProfile(this.profile);
@@ -146,7 +153,7 @@ export class LevelManager {
     const exitPosition = getExitWorldPosition(this.profile);
     this.exitWorldX = exitPosition.x;
     this.exitWorldZ = exitPosition.z;
-    this.exitBeacon = new ExitBeacon(this.exitWorldX, this.exitWorldZ, this.audioListener);
+    this.exitBeacon = this.createExitBeacon();
     this.scene.add(this.exitBeacon.group);
     if (this.sessionStarted) this.exitBeacon.play();
   }

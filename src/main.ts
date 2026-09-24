@@ -22,6 +22,7 @@ import { CollectionStore } from "./world/collection";
 import { corruption } from "./world/corruption";
 import { GrabbableRegistry } from "./world/grabbable";
 import { LevelManager, SPAWN_LOCAL_POSITION } from "./world/levelManager";
+import { Poltergeist } from "./world/poltergeist";
 import { initMaterials } from "./world/materials";
 import { endRun, reportLevel, startRun, type RunSessionInfo } from "./world/runSession";
 import { updateVhsTime } from "./world/vhsMaterial";
@@ -90,6 +91,7 @@ const ambientHum = new AmbientHum(audioListener, scene);
 const flashlight = new Flashlight(camera);
 const perfStats = new PerfStats(renderer);
 const atmosphere = new Atmosphere(scene, hemisphere, ambient);
+const poltergeist = new Poltergeist(scene, audioListener, grabbables);
 
 let currentSession: RunSessionInfo | null = null;
 
@@ -242,6 +244,7 @@ renderer.setAnimationLoop((timestamp) => {
     grabSystem.onTeleport();
     corruption.add(0.8);
     vhsOverlay.triggerTrackingLoss(1);
+    vhsOverlay.signalLoss(0.35);
     flashlight.cut(0.6);
     atmosphere.triggerFlicker(1.2);
     sfx.play("teleport", 0.8);
@@ -251,6 +254,7 @@ renderer.setAnimationLoop((timestamp) => {
   if (levelManager.hasReachedExit(player.headWorld)) {
     levelManager.descend();
     respawn();
+    vhsOverlay.blueScreen(1.4, [`NIV ${levelManager.depth}`]);
     corruption.add(1);
     if (currentSession) reportLevel(currentSession, levelManager.depth);
   }
@@ -270,10 +274,12 @@ renderer.setAnimationLoop((timestamp) => {
   hud.update(deltaSeconds);
   flashlight.update(deltaSeconds, corruption.value);
   atmosphere.update(deltaSeconds, corruption.value);
+  poltergeist.update(deltaSeconds, camera, player.headWorld, levelManager.depth, levelUpdate.darkness);
   ambientHum.update(deltaSeconds, player.headWorld, levelUpdate.darkness, levelManager.depth, atmosphere.level);
   updateVhsTime(elapsedSeconds);
   runWarmupStep();
   perfStats.beginFrame(deltaSeconds);
   renderer.render(scene, camera);
 });
+
 

@@ -14,7 +14,10 @@ const FRAGMENT_SHADER = /* glsl */ `
   uniform float uTime;
   uniform float uCorruption;
   uniform float uTracking;
+  uniform float uSnow;
+  uniform float uBlue;
   uniform sampler2D uNoiseMap;
+  uniform sampler2D uOsd;
 
   float hash( vec2 p ) {
     vec3 p3 = fract( vec3( p.xyx ) * 0.1031 );
@@ -48,6 +51,24 @@ const FRAGMENT_SHADER = /* glsl */ `
       alpha = max(alpha, max(bandOn * (0.35 + snow * 0.5), syncBar * 0.5));
       alpha = max(alpha, uTracking * 0.35);
     }
+
+    // Perte de signal complète : neige plein écran (téléportation, corruption extrême).
+    if (uSnow > 0.001) {
+      float snow = texture2D(uNoiseMap, fract(vUv * vec2(2.3, 1.7) + vec2(hash(vec2(floor(uTime * 30.0), 1.0)), uTime * 0.9))).r;
+      color = mix(color, vec3(snow * 0.9), uSnow);
+      alpha = max(alpha, uSnow * 0.94);
+    }
+
+    // Écran bleu du magnétoscope avec texte OSD ("▶ PLAY", niveau) : changement de niveau.
+    if (uBlue > 0.001) {
+      vec2 osdUv = (vUv - 0.36) / 0.28;
+      float osd = 0.0;
+      if (osdUv.x > 0.0 && osdUv.x < 1.0 && osdUv.y > 0.0 && osdUv.y < 1.0) osd = texture2D(uOsd, osdUv).a;
+      float wobble = step(0.97, hash(vec2(floor(vUv.y * 60.0), floor(uTime * 20.0)))) * 0.15;
+      vec3 blue = vec3(0.02, 0.09, 0.62) + wobble;
+      color = mix(color, mix(blue, vec3(0.95), osd), uBlue);
+      alpha = max(alpha, uBlue);
+    }
     gl_FragColor = vec4(color, alpha);
   }
 `;
@@ -60,10 +81,20 @@ const FRAGMENT_SHADER = /* glsl */ `
  */
 export class VhsOverlay {
   private readonly material: THREE.ShaderMaterial;
+  private readonly osdCanvas: HTMLCanvasElement;
+  private readonly osdTexture: THREE.CanvasTexture;
   private tracking = 0;
+  private snowSeconds = 0;
+  private blueSeconds = 0;
+  private blueDuration = 1;
 
   constructor(camera: THREE.Camera) {
     const noiseTexture = getVhsNoiseTexture();
+
+    this.osdCanvas = document.createElement("canvas");
+    this.osdCanvas.width = 512;
+    this.osdCanvas.height = 512;
+    this.osdTexture = new THREE.CanvasTexture(this.osdCanvas);
 
     const geometry = new THREE.PlaneGeometry(4, 4);
     this.material = new THREE.ShaderMaterial({
@@ -71,7 +102,10 @@ export class VhsOverlay {
         uTime: { value: 0 },
         uCorruption: { value: 0 },
         uTracking: { value: 0 },
+        uSnow: { value: 0 },
+        uBlue: { value: 0 },
         uNoiseMap: { value: noiseTexture },
+        uOsd: { value: this.osdTexture },
       },
       vertexShader: VERTEX_SHADER,
       fragmentShader: FRAGMENT_SHADER,
@@ -93,10 +127,40 @@ export class VhsOverlay {
     this.tracking = Math.max(this.tracking, Math.min(1, strength));
   }
 
+  /** Perte de signal complète (neige plein champ), brève. */
+  signalLoss(seconds: number): void {
+    this.snowSeconds = Math.max(this.snowSeconds, seconds);
+  }
+
+  /** Écran bleu du magnétoscope avec texte OSD (lignes centrées sous "▶ PLAY"). */
+  blueScreen(seconds: number, lines: string[]): void {
+    const ctx = this.osdCanvas.getContext("2d");
+    if (!ctx) return;
+    ctx.clearRect(0, 0, 512, 512);
+    ctx.fillStyle = "#fff";
+    ctx.textBaseline = "middle";
+    ctx.font = "bold 44px monospace";
+    ctx.textAlign = "left";
+    ctx.fillText("\u25B6 PLAY", 20, 60);
+    ctx.textAlign = "center";
+    ctx.font = "bold 60px monospace";
+    lines.forEach((line, index) => ctx.fillText(line, 256, 250 + index * 80));
+    this.osdTexture.needsUpdate = true;
+    this.blueSeconds = seconds;
+    this.blueDuration = seconds;
+  }
+
   update(elapsedSeconds: number, corruption: number, deltaSeconds: number): void {
-    // Une corruption forte fait aussi décrocher le signal par moments.
+    // Une corruption forte fait aussi décrocher le signal par moments, jusqu'à la neige complète.
     if (corruption > 0.5 && Math.random() < deltaSeconds * corruption * 0.6) this.triggerTrackingLoss(0.25 + Math.random() * 0.3);
+    if (corruption > 0.75 && Math.random() < deltaSeconds * 0.08) this.signalLoss(0.15 + Math.random() * 0.2);
     this.tracking = THREE.MathUtils.damp(this.tracking, 0, 2.5, deltaSeconds);
+    this.snowSeconds = Math.max(0, this.snowSeconds - deltaSeconds);
+    this.blueSeconds = Math.max(0, this.blueSeconds - deltaSeconds);
+    // Bleu plein pendant l'essentiel de la durée, coupure franche sur la fin (neige brève).
+    const blueProgress = 1 - this.blueSeconds / this.blueDuration;
+    this.material.uniforms["uBlue"]!.value = this.blueSeconds > 0 ? (blueProgress < 0.85 ? 1 : 0) : 0;
+    this.material.uniforms["uSnow"]!.value = this.snowSeconds > 0 || (this.blueSeconds > 0 && blueProgress >= 0.85) ? 1 : 0;
     this.material.uniforms["uTime"]!.value = elapsedSeconds;
     this.material.uniforms["uCorruption"]!.value = corruption;
     this.material.uniforms["uTracking"]!.value = this.tracking;

@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { CELL_SIZE } from "../shared/constants";
+import { CELL_SIZE, WALL_HEIGHT } from "../shared/constants";
 import { VHS_LIGHT_FIELD_GLSL, type LightFieldParams } from "./lightField";
 import { getVhsNoiseTexture } from "./vhsNoiseTexture";
 
@@ -25,7 +25,38 @@ const sharedUniforms = {
   uVhsNoise: { value: null as THREE.Texture | null },
   uLightSeed: { value: new THREE.Vector2() },
   uDarkThreshold: { value: 0 },
+  /** Décrépitude (0..1) : croît avec la profondeur. */
+  uDecay: { value: 0 },
+  /** Teinte globale du niveau (dérive du jaune vers un vert malade, puis un gris froid). */
+  uLevelTint: { value: new THREE.Color(1, 1, 1) },
+  uDesaturate: { value: 0 },
 };
+
+const TINT_STOPS: Array<[number, THREE.Color]> = [
+  [0, new THREE.Color(1, 1, 1)],
+  [4, new THREE.Color(0.9, 1.0, 0.8)],
+  [8, new THREE.Color(0.82, 0.9, 0.9)],
+  [14, new THREE.Color(0.72, 0.78, 0.86)],
+];
+
+/**
+ * Apparence du niveau selon la profondeur : plus on descend, plus c'est sale (auréoles,
+ * remontées d'humidité, dalles de plafond manquantes) et plus la lumière tourne au malsain.
+ */
+export function setDepthLook(depth: number): void {
+  sharedUniforms.uDecay.value = Math.min(1, depth / 8);
+  sharedUniforms.uDesaturate.value = Math.min(0.4, Math.max(0, depth - 5) * 0.05);
+  const tint = sharedUniforms.uLevelTint.value;
+  for (let i = TINT_STOPS.length - 1; i >= 0; i--) {
+    const [stopDepth, color] = TINT_STOPS[i]!;
+    if (depth >= stopDepth) {
+      const next = TINT_STOPS[i + 1];
+      if (!next) tint.copy(color);
+      else tint.copy(color).lerp(next[1], (depth - stopDepth) / (next[0] - stopDepth));
+      break;
+    }
+  }
+}
 
 export function updateVhsTime(elapsedSeconds: number): void {
   sharedUniforms.uTime.value = elapsedSeconds;
@@ -148,6 +179,37 @@ const FRAGMENT_PARS_GLSL = /* glsl */ `
   ${COMMON_GLSL}
   ${VHS_LIGHT_FIELD_GLSL}
   uniform sampler2D uVhsNoise;
+  uniform float uDecay;
+  uniform vec3 uLevelTint;
+  uniform float uDesaturate;
+
+  // Décrépitude : facteur de couleur à appliquer à l'albédo (avant l'éclairage).
+  vec3 vhsDecayColor( vec3 wp, vec3 n ) {
+    if ( uDecay < 0.001 ) return vec3( 1.0 );
+    vec3 stainColor = vec3( 0.52, 0.47, 0.3 );
+    float stain = 0.0;
+    float edge = 0.0;
+    if ( abs( n.y ) < 0.5 ) {
+      // Mur : remontée d'humidité depuis la plinthe, bord irrégulier plus sombre (ligne de marée),
+      // et quelques coulures qui descendent du plafond.
+      float along = abs( n.z ) > abs( n.x ) ? wp.x : wp.z;
+      float height = ( 0.1 + vhsValueNoise( vec2( along * 0.8, 3.1 ) ) * 0.8 ) * uDecay * 1.4;
+      stain = 1.0 - smoothstep( height - 0.15, height, wp.y );
+      edge = smoothstep( height - 0.09, height - 0.03, wp.y ) * ( 1.0 - smoothstep( height - 0.03, height, wp.y ) );
+      float column = floor( along * 6.0 );
+      float dripLength = 0.4 + vhsHash12( vec2( column, 9.0 ) ) * 1.4 * uDecay;
+      float drip = step( 1.0 - uDecay * 0.12, vhsHash12( vec2( column, 7.0 ) ) ) * smoothstep( ${WALL_HEIGHT.toFixed(2)} - dripLength, ${WALL_HEIGHT.toFixed(2)} - dripLength * 0.3, wp.y );
+      stain = max( stain, drip * 0.7 );
+    } else {
+      // Sol / plafond : grandes auréoles.
+      float blot = vhsValueNoise( wp.xz * 0.4 + 11.0 ) * 0.7 + vhsValueNoise( wp.xz * 1.6 ) * 0.3;
+      float threshold = 0.74 - uDecay * 0.28;
+      stain = smoothstep( threshold, threshold + 0.06, blot );
+      edge = smoothstep( threshold - 0.015, threshold + 0.01, blot ) * ( 1.0 - smoothstep( threshold + 0.01, threshold + 0.04, blot ) );
+    }
+    vec3 factor = mix( vec3( 1.0 ), stainColor, stain * ( 0.3 + uDecay * 0.45 ) );
+    return factor * ( 1.0 - edge * 0.35 * uDecay );
+  }
 `;
 
 /**
@@ -165,6 +227,7 @@ const FRAGMENT_GLITCH_SETUP_GLSL = /* glsl */ `
   vec3 vhsGlow = vec3( 0.0 );
   float vhsScan = 0.0;
   vec3 vhsTint = vec3( 0.0 );
+  float vhsMissingTile = 0.0;
 
   if ( vhsGlitch > 0.01 ) {
     float seed = vhsZoneB.y;
@@ -248,6 +311,7 @@ const MAP_FRAGMENT_GLSL = /* glsl */ `
     sampledDiffuseColor.a = texture2D( map, vhsUv ).a;
     diffuseColor *= sampledDiffuseColor;
   #endif
+  diffuseColor.rgb *= vhsDecayColor( vVhsWorldPos, normalize( vVhsWorldNormal ) );
 `;
 
 /** Néons du plafond : chaque cellule est allumée, morte ou agonisante selon le champ de lumière. */
@@ -265,7 +329,10 @@ const CEILING_EMISSIVE_GLSL = /* glsl */ `
       float flick = vhsHash12( vec2( floor( uTime * ( 6.0 + cellHash * 10.0 ) ), cell.x * 7.0 + cell.y ) );
       lamp *= step( 0.3, flick ) * ( 0.5 + 0.5 * flick );
     }
-    totalEmissiveRadiance *= lamp;
+    // Décrépitude : dalles de plafond tombées (trou noir, plus de néon dessous).
+    vec2 tile = floor( vVhsWorldPos.xz / ${(CELL_SIZE / 4).toFixed(4)} );
+    vhsMissingTile = step( 1.0 - uDecay * 0.16, vhsHash12( tile * 1.37 + uLightSeed ) );
+    totalEmissiveRadiance *= lamp * ( 1.0 - vhsMissingTile );
   }
 `;
 
@@ -281,6 +348,9 @@ const ZONE_LIGHT_GLSL = /* glsl */ `
 const FINAL_GLSL = /* glsl */ `
   #include <dithering_fragment>
 
+  gl_FragColor.rgb = mix( gl_FragColor.rgb, vec3( 0.006, 0.005, 0.004 ), vhsMissingTile );
+  gl_FragColor.rgb *= uLevelTint;
+  gl_FragColor.rgb = mix( gl_FragColor.rgb, vec3( dot( gl_FragColor.rgb, vec3( 0.299, 0.587, 0.114 ) ) ), uDesaturate );
   gl_FragColor.rgb = mix( gl_FragColor.rgb, vhsReplaceColor, vhsReplace );
   gl_FragColor.rgb += vhsGlow + vhsTint;
   gl_FragColor.rgb = mix( gl_FragColor.rgb, gl_FragColor.rgb * 0.35 + vec3( 0.12 ), vhsScan * 0.6 );

@@ -1,19 +1,24 @@
 import * as THREE from "three";
 import { bandpass, createSamples, normalize, reverb, toBuffer } from "../assets/audio/synth";
+import { CollisionGroups, RAPIER, type PhysicsWorld } from "../physics/physicsWorld";
+import { WALL_HEIGHT } from "../shared/constants";
+import { getWallMaterial } from "./materials";
 import { getVhsNoiseTexture } from "./vhsNoiseTexture";
 import { applyVhsEffect } from "./vhsMaterial";
 
-const BEACON_COLOR = 0x36e8ff;
-const BEACON_COLOR_VEC = new THREE.Color(BEACON_COLOR);
-const BASE_EMISSIVE_INTENSITY = 1.4;
-const PULSE_AMPLITUDE = 0.6;
-const PULSE_SPEED = 2.4;
-
-/** Dimensions du chambranle (porte, pas un simple anneau flottant) : le joueur marche à travers. */
-const PORTAL_WIDTH = 1.1;
-const PORTAL_HEIGHT = 2.3;
-const FRAME_THICKNESS = 0.1;
-const FRAME_DEPTH = 0.1;
+/** Ouverture de la porte (le joueur marche à travers). */
+const DOOR_WIDTH = 0.92;
+const DOOR_HEIGHT = 2.08;
+const FRAME_THICKNESS = 0.07;
+const FRAME_DEPTH = 0.16;
+/** Bloc de mur dans lequel la porte est encastrée (profondeur derrière la façade). */
+const BLOCK_WIDTH = 1.6;
+const BLOCK_DEPTH = 1.15;
+const BLOCK_WALL = 0.2;
+/** Angle d'entrebâillement du battant (vers l'intérieur). */
+const LEAF_OPEN_ANGLE = 1.0;
+/** Point de déclenchement : juste passé le seuil, dans le noir. */
+const TRIGGER_DEPTH = 0.45;
 
 const BEACON_TONE_HZ = 293;
 const BEACON_OVERTONE_HZ = 297.5;
@@ -21,8 +26,10 @@ const BEACON_PULSE_DURATION_SECONDS = 2.2;
 const BEACON_VOLUME = 0.5;
 const BEACON_REF_DISTANCE = 2;
 const BEACON_MAX_DISTANCE = 20;
+/** Faux écho de la balise (corruption forte) : distance à laquelle il est joué. */
+const DECOY_DISTANCE = 12;
 
-const PORTAL_VERTEX_SHADER = /* glsl */ `
+const VOID_VERTEX_SHADER = /* glsl */ `
   varying vec2 vUv;
   void main() {
     vUv = uv;
@@ -30,92 +37,130 @@ const PORTAL_VERTEX_SHADER = /* glsl */ `
   }
 `;
 
-const PORTAL_FRAGMENT_SHADER = /* glsl */ `
+/** Intérieur du bloc : noir total, avec de rares flocons de neige VHS qui grésillent. */
+const VOID_FRAGMENT_SHADER = /* glsl */ `
   varying vec2 vUv;
   uniform float uTime;
   uniform float uPulse;
-  uniform vec3 uColor;
   uniform sampler2D uNoiseMap;
 
   void main() {
-    vec2 centered = vUv - 0.5;
-    float radius = length(centered);
-    float angle = atan(centered.y, centered.x);
-    float swirl = angle + radius * 6.0 - uTime * 1.2;
-    vec2 swirlUv = vec2(cos(swirl), sin(swirl)) * radius + 0.5;
-    vec2 noiseUv = fract(swirlUv * 1.6 + vec2(uTime * 0.05, uTime * 0.03));
+    vec2 noiseUv = fract(vUv * vec2(1.7, 2.3) + vec2(floor(uTime * 18.0) * 0.137, uTime * 0.21));
     float noise = texture2D(uNoiseMap, noiseUv).r;
-
-    float vignette = smoothstep(0.62, 0.1, radius);
-    float brightness = noise * vignette * uPulse;
-    gl_FragColor = vec4(uColor * (0.4 + brightness * 1.6), vignette);
+    float speck = step(0.93 - uPulse * 0.05, noise) * noise;
+    gl_FragColor = vec4(vec3(speck * 0.45), 1.0);
   }
 `;
 
 /**
- * Marqueur de sortie du level : un vrai chambranle de porte (pas un simple anneau
- * flottant) rempli d'un tourbillon de bruit VHS (même texture que l'overlay caméscope,
- * voir `vhsNoiseTexture.ts`) dans la couleur du signal — le joueur marche à travers,
- * cohérent avec la direction artistique VHS. + balise sonore positionnelle — "sortie...
- * signalée par des indices (son, lumière différente)" (fiche projet).
+ * Sortie du level : une porte de bureau banale, entrouverte, encastrée dans un bloc de mur
+ * (même papier peint que le reste). Derrière le battant, le noir complet où grésillent quelques
+ * flocons de neige — rien de lumineux, rien de "magique" : on la trouve surtout à l'oreille,
+ * grâce à la balise (une radio mal réglée). Le joueur passe le seuil pour descendre.
+ * La façade est tournée vers le spawn. Le bloc a de vraies collisions.
  */
 export class ExitBeacon {
   readonly group: THREE.Group;
+  /** Point à atteindre (juste derrière le seuil), en coordonnées monde. */
+  readonly triggerPosition: THREE.Vector3;
 
-  private readonly frameMaterial: THREE.MeshStandardMaterial;
-  private readonly portalMaterial: THREE.ShaderMaterial;
+  private readonly doorMaterial: THREE.MeshStandardMaterial;
+  private readonly voidMaterial: THREE.ShaderMaterial;
+  private readonly leaf: THREE.Object3D;
   private readonly sound: THREE.PositionalAudio;
+  private readonly decoy: THREE.PositionalAudio;
+  private readonly body: RAPIER.RigidBody;
   private playRequested = false;
+  private dropoutSeconds = 0;
+  private decoyTimer = 10;
 
-  constructor(worldX: number, worldZ: number, listener: THREE.AudioListener) {
+  constructor(
+    worldX: number,
+    worldZ: number,
+    listener: THREE.AudioListener,
+    private readonly physics: PhysicsWorld,
+    /** Rotation Y de la façade (la porte regarde vers +Z local). */
+    facing: number,
+  ) {
     this.group = new THREE.Group();
     this.group.name = "exit-beacon";
     this.group.position.set(worldX, 0, worldZ);
+    this.group.rotation.y = facing;
 
-    this.frameMaterial = new THREE.MeshStandardMaterial({
-      color: BEACON_COLOR,
-      emissive: BEACON_COLOR,
-      emissiveIntensity: BASE_EMISSIVE_INTENSITY,
-      roughness: 0.4,
+    const wallMaterial = getWallMaterial();
+    this.doorMaterial = new THREE.MeshStandardMaterial({ color: 0x7c7462, roughness: 0.75, metalness: 0.1 });
+    applyVhsEffect(this.doorMaterial);
+
+    // Bloc : deux joues, fond, et linteau au-dessus de la porte, en papier peint des murs.
+    const sideWidth = (BLOCK_WIDTH - DOOR_WIDTH) / 2;
+    const pieces: Array<[number, number, number, number, number, number]> = [
+      // largeur, hauteur, profondeur, x, y, z (z négatif = derrière la façade)
+      [sideWidth, WALL_HEIGHT, BLOCK_DEPTH, -(DOOR_WIDTH + sideWidth) / 2, WALL_HEIGHT / 2, -BLOCK_DEPTH / 2],
+      [sideWidth, WALL_HEIGHT, BLOCK_DEPTH, (DOOR_WIDTH + sideWidth) / 2, WALL_HEIGHT / 2, -BLOCK_DEPTH / 2],
+      [DOOR_WIDTH, WALL_HEIGHT, BLOCK_WALL, 0, WALL_HEIGHT / 2, -BLOCK_DEPTH + BLOCK_WALL / 2],
+      [DOOR_WIDTH, WALL_HEIGHT - DOOR_HEIGHT, BLOCK_WALL, 0, DOOR_HEIGHT + (WALL_HEIGHT - DOOR_HEIGHT) / 2, -BLOCK_WALL / 2],
+    ];
+    this.body = physics.world.createRigidBody(RAPIER.RigidBodyDesc.fixed());
+    const cos = Math.cos(facing);
+    const sin = Math.sin(facing);
+    for (const [width, height, depth, x, y, z] of pieces) {
+      const mesh = new THREE.Mesh(new THREE.BoxGeometry(width, height, depth), wallMaterial);
+      mesh.position.set(x, y, z);
+      this.group.add(mesh);
+      physics.world.createCollider(
+        RAPIER.ColliderDesc.cuboid(width / 2, height / 2, depth / 2)
+          .setTranslation(worldX + x * cos + z * sin, y, worldZ - x * sin + z * cos)
+          .setRotation(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), facing))
+          .setCollisionGroups(CollisionGroups.static),
+        this.body,
+      );
+    }
+
+    // Chambranle.
+    const halfOpening = DOOR_WIDTH / 2;
+    const post = new THREE.BoxGeometry(FRAME_THICKNESS, DOOR_HEIGHT + FRAME_THICKNESS, FRAME_DEPTH);
+    const left = new THREE.Mesh(post, this.doorMaterial);
+    left.position.set(-halfOpening + FRAME_THICKNESS / 2, (DOOR_HEIGHT + FRAME_THICKNESS) / 2, 0.02);
+    const right = new THREE.Mesh(post, this.doorMaterial);
+    right.position.set(halfOpening - FRAME_THICKNESS / 2, (DOOR_HEIGHT + FRAME_THICKNESS) / 2, 0.02);
+    const top = new THREE.Mesh(new THREE.BoxGeometry(DOOR_WIDTH, FRAME_THICKNESS, FRAME_DEPTH), this.doorMaterial);
+    top.position.set(0, DOOR_HEIGHT + FRAME_THICKNESS / 2, 0.02);
+    this.group.add(left, right, top);
+
+    // Battant entrouvert vers l'intérieur, charnière à gauche, avec sa poignée.
+    const leafWidth = DOOR_WIDTH - FRAME_THICKNESS * 2;
+    this.leaf = new THREE.Group();
+    this.leaf.position.set(-halfOpening + FRAME_THICKNESS, 0, -0.03);
+    const panel = new THREE.Mesh(new THREE.BoxGeometry(leafWidth, DOOR_HEIGHT - 0.02, 0.04), this.doorMaterial);
+    panel.position.set(leafWidth / 2, DOOR_HEIGHT / 2, 0);
+    const handle = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.018, 0.12, 8), this.doorMaterial);
+    handle.rotation.z = Math.PI / 2;
+    handle.position.set(leafWidth - 0.1, 1.0, 0.05);
+    this.leaf.add(panel, handle);
+    this.leaf.rotation.y = LEAF_OPEN_ANGLE;
+    this.group.add(this.leaf);
+
+    // Intérieur noir (faces intérieures d'une boîte) : ce qu'on voit par l'entrebâillement.
+    this.voidMaterial = new THREE.ShaderMaterial({
+      uniforms: { uTime: { value: 0 }, uPulse: { value: 0 }, uNoiseMap: { value: getVhsNoiseTexture() } },
+      vertexShader: VOID_VERTEX_SHADER,
+      fragmentShader: VOID_FRAGMENT_SHADER,
+      side: THREE.BackSide,
     });
-    applyVhsEffect(this.frameMaterial, { zoneLighting: false });
+    const innerDepth = BLOCK_DEPTH - BLOCK_WALL;
+    const inside = new THREE.Mesh(new THREE.BoxGeometry(DOOR_WIDTH - 0.01, DOOR_HEIGHT - 0.01, innerDepth), this.voidMaterial);
+    inside.position.set(0, DOOR_HEIGHT / 2, -innerDepth / 2 - 0.001);
+    this.group.add(inside);
 
-    const halfWidth = PORTAL_WIDTH / 2 + FRAME_THICKNESS / 2;
-    const postGeometry = new THREE.BoxGeometry(FRAME_THICKNESS, PORTAL_HEIGHT + FRAME_THICKNESS, FRAME_DEPTH);
-    const leftPost = new THREE.Mesh(postGeometry, this.frameMaterial);
-    leftPost.position.set(-halfWidth, PORTAL_HEIGHT / 2, 0);
-    const rightPost = new THREE.Mesh(postGeometry, this.frameMaterial);
-    rightPost.position.set(halfWidth, PORTAL_HEIGHT / 2, 0);
-    const lintel = new THREE.Mesh(new THREE.BoxGeometry(PORTAL_WIDTH + FRAME_THICKNESS * 2, FRAME_THICKNESS, FRAME_DEPTH), this.frameMaterial);
-    lintel.position.set(0, PORTAL_HEIGHT, 0);
-    this.group.add(leftPost, rightPost, lintel);
+    this.triggerPosition = new THREE.Vector3(worldX - sin * TRIGGER_DEPTH, 0, worldZ - cos * TRIGGER_DEPTH);
 
-    this.portalMaterial = new THREE.ShaderMaterial({
-      uniforms: {
-        uTime: { value: 0 },
-        uPulse: { value: 1 },
-        uColor: { value: BEACON_COLOR_VEC },
-        uNoiseMap: { value: getVhsNoiseTexture() },
-      },
-      vertexShader: PORTAL_VERTEX_SHADER,
-      fragmentShader: PORTAL_FRAGMENT_SHADER,
-      transparent: true,
-      side: THREE.DoubleSide,
-      depthWrite: false,
-    });
-    const portalPlane = new THREE.Mesh(new THREE.PlaneGeometry(PORTAL_WIDTH, PORTAL_HEIGHT), this.portalMaterial);
-    portalPlane.position.set(0, PORTAL_HEIGHT / 2, 0);
-    this.group.add(portalPlane);
-
-    this.sound = new THREE.PositionalAudio(listener);
     beaconBuffer ??= createBeaconBuffer(listener.context);
-    this.sound.setBuffer(beaconBuffer);
-    this.sound.setLoop(true);
-    this.sound.setRefDistance(BEACON_REF_DISTANCE);
-    this.sound.setMaxDistance(BEACON_MAX_DISTANCE);
-    this.sound.setVolume(BEACON_VOLUME);
-    this.sound.position.y = PORTAL_HEIGHT / 2;
+    this.sound = createBeaconVoice(listener, beaconBuffer, BEACON_VOLUME);
+    this.sound.position.set(0, DOOR_HEIGHT / 2, -0.5);
     this.group.add(this.sound);
+    // Faux écho : même balise, jouée d'une mauvaise direction quand la corruption est forte.
+    this.decoy = createBeaconVoice(listener, beaconBuffer, 0);
+    this.decoy.setLoop(false);
   }
 
   /** À appeler une fois la session XR démarrée (politique d'autoplay des navigateurs). */
@@ -125,24 +170,58 @@ export class ExitBeacon {
     if (this.sound.context.state === "running") this.sound.play();
   }
 
-  update(elapsedSeconds: number): void {
-    const pulse = BASE_EMISSIVE_INTENSITY + Math.sin(elapsedSeconds * PULSE_SPEED) * PULSE_AMPLITUDE;
-    this.frameMaterial.emissiveIntensity = pulse;
-    this.portalMaterial.uniforms["uTime"]!.value = elapsedSeconds;
-    this.portalMaterial.uniforms["uPulse"]!.value = pulse / BASE_EMISSIVE_INTENSITY;
+  /**
+   * Balise brouillée par la corruption : décrochages, désaccord (vitesse de lecture qui
+   * dérive) et, au-delà de 0,6, un faux écho qui joue d'une autre direction.
+   */
+  update(elapsedSeconds: number, deltaSeconds: number, corruption: number, listenerPosition: THREE.Vector3, scene: THREE.Scene): void {
+    const pulse = 0.5 + 0.5 * Math.sin(elapsedSeconds * 2.4);
+    this.voidMaterial.uniforms["uTime"]!.value = elapsedSeconds;
+    this.voidMaterial.uniforms["uPulse"]!.value = pulse;
+    // Le battant frémit à peine, comme poussé par un courant d'air venu du noir.
+    this.leaf.rotation.y = LEAF_OPEN_ANGLE + Math.sin(elapsedSeconds * 0.7) * 0.015 + Math.sin(elapsedSeconds * 2.3) * 0.005;
+
     if (this.playRequested && !this.sound.isPlaying && this.sound.context.state === "running") {
       this.sound.play();
+    }
+
+    this.dropoutSeconds = Math.max(0, this.dropoutSeconds - deltaSeconds);
+    if (corruption > 0.3 && Math.random() < deltaSeconds * corruption * 1.5) this.dropoutSeconds = 0.2 + Math.random() * 0.8 * corruption;
+    this.sound.setVolume(this.dropoutSeconds > 0 ? 0 : BEACON_VOLUME);
+    if (this.sound.source) this.sound.setPlaybackRate(1 + Math.sin(elapsedSeconds * 1.7) * 0.06 * corruption);
+
+    this.decoyTimer -= deltaSeconds;
+    if (corruption > 0.6 && this.decoyTimer <= 0 && this.decoy.context.state === "running" && !this.decoy.isPlaying) {
+      this.decoyTimer = 6 + Math.random() * 8;
+      const angle = Math.random() * Math.PI * 2;
+      if (!this.decoy.parent) scene.add(this.decoy);
+      this.decoy.position.set(listenerPosition.x + Math.cos(angle) * DECOY_DISTANCE, 1, listenerPosition.z + Math.sin(angle) * DECOY_DISTANCE);
+      this.decoy.setVolume(BEACON_VOLUME * 0.8);
+      this.decoy.play();
     }
   }
 
   dispose(): void {
     this.sound.stop();
-    this.frameMaterial.dispose();
-    this.portalMaterial.dispose();
+    if (this.decoy.isPlaying) this.decoy.stop();
+    this.decoy.removeFromParent();
+    this.doorMaterial.dispose();
+    this.voidMaterial.dispose();
+    this.physics.world.removeRigidBody(this.body);
     this.group.traverse((object) => {
       if (object instanceof THREE.Mesh) object.geometry.dispose();
     });
   }
+}
+
+function createBeaconVoice(listener: THREE.AudioListener, buffer: AudioBuffer, volume: number): THREE.PositionalAudio {
+  const voice = new THREE.PositionalAudio(listener);
+  voice.setBuffer(buffer);
+  voice.setLoop(true);
+  voice.setRefDistance(BEACON_REF_DISTANCE);
+  voice.setMaxDistance(BEACON_MAX_DISTANCE);
+  voice.setVolume(volume);
+  return voice;
 }
 
 let beaconBuffer: AudioBuffer | null = null;
