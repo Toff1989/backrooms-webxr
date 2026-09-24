@@ -142,7 +142,7 @@ const pointer = new UiPointer(hands, scene, [inventoryMenu, endRunScreen]);
 grabSystem = new GrabSystem(physics, grabbables, hands, sfx, {
   isOverInventory: (hand) => inventoryMenu.visible && (inventoryMenu.containsPoint(hand.palm) || pointer.frame(hand).target === inventoryMenu),
   store: (item) => collectionStore.add(item),
-});
+}, scene);
 
 /** Place le joueur au spawn du level courant (changement de level, nouvelle run). */
 function respawn(): void {

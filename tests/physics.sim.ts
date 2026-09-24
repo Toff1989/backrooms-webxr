@@ -134,14 +134,15 @@ const landed = can.body.translation();
 check("la canette ne traverse pas le mur", landed.z > -6 + 0.075 - 0.01, `z=${landed.z.toFixed(2)} (mur à z=-6)`);
 check("la canette retombe au sol sans le traverser", landed.y > -0.01 && landed.y < 0.3, `y=${landed.y.toFixed(3)}`);
 
-// ---------- 3. Saisie à distance : viser + grip, l'objet vient dans la main ----------
+// ---------- 3. Saisie à distance : gâchette (rayon) + grip, l'objet vient dans la main ----------
 const book = registry.createCollectible({ ...item, id: "sim-book" }, canTemplate.clone(), canTemplate, new THREE.Vector3(5, 0.02, -1), new THREE.Quaternion());
 grip.position.set(5, 1.2, 1);
 rightInput.targetRay.position.copy(grip.position);
 // lookAt oriente +Z vers la cible ; le rayon de visée suit -Z : on regarde le point opposé.
 rightInput.targetRay.lookAt(grip.position.clone().multiplyScalar(2).sub(new THREE.Vector3(5, 0.08, -1)));
+squeeze = [0];
 for (let i = 0; i < 5; i++) tick();
-squeeze = [1];
+squeeze = [0, 1];
 for (let i = 0; i < 72; i++) tick();
 check("saisie à distance", hand.holding === book, `holding=${hand.holding === book ? "objet visé" : hand.holding ? "autre" : "rien"}`);
 
@@ -169,7 +170,7 @@ for (let i = 0; i < 72; i++) {
 check("objet tenu bloqué par le mur", grabbedBrick && minBrickZ > -5.93 - 0.02, `z min=${minBrickZ.toFixed(2)} (face du mur -5.93)`);
 check("lâché quand la main passe trop loin derrière le mur", hand.holding === null, `holding=${hand.holding ? "encore" : "lâché"}`);
 
-// ---------- 6. Meuble trop lourd : on ne peut que le pousser ----------
+// ---------- 6. Meuble trop lourd : d'une main, on le traîne mais on ne le soulève pas ----------
 squeeze = [];
 tick();
 const cabinetTemplate = boxTemplate(0.9, 1.8, 0.5);
@@ -178,7 +179,66 @@ grip.position.set(-3 + 0.035, 1.0, 3 + 0.3);
 for (let i = 0; i < 5; i++) tick();
 squeeze = [1];
 tick();
-check("armoire (45 kg) non soulevable", hand.holding !== cabinet && !cabinet.liftable, `holding=${hand.holding === cabinet ? "armoire" : "rien"}`);
+const cabinetGrabbed = hand.holding === cabinet;
+let maxCabinetY = 0;
+for (let i = 0; i < 72; i++) {
+  grip.position.y = Math.min(1.8, grip.position.y + 0.02);
+  tick();
+  maxCabinetY = Math.max(maxCabinetY, cabinet.body.translation().y);
+}
+check("armoire (45 kg) saisie mais pas soulevée d'une main", cabinetGrabbed && !cabinet.liftable && maxCabinetY < 0.15, `y max=${maxCabinetY.toFixed(2)}`);
+
+// ---------- 6b. À deux mains, la même armoire se soulève ----------
+squeeze = [];
+tick();
+{
+  const leftInput = new HandInput("left");
+  const leftGrip = new THREE.Group();
+  scene.add(leftGrip);
+  leftInput.grip = leftGrip as unknown as THREE.XRGripSpace;
+  leftInput.targetRay = new THREE.Group() as unknown as THREE.XRTargetRaySpace;
+  let leftSqueeze: number[] = [];
+  leftInput.inputSource = { get gamepad() { return pad([0, 0, 0, 0], leftSqueeze); }, handedness: "left" } as unknown as XRInputSource;
+  const leftHand = new Hand(leftInput, physics);
+  const twoHands = new GrabSystem(physics, registry, [hand, leftHand], sfx, { isOverInventory: () => false, store: () => {} });
+  const lifted = registry.createProp("cabinet", cabinetTemplate.clone(), cabinetTemplate, 10, 10, 0);
+  const tick2 = (): void => {
+    time += DT;
+    rightInput.update();
+    leftInput.update();
+    scene.updateMatrixWorld(true);
+    hand.update(time);
+    leftHand.update(time);
+    twoHands.update(time, pointer);
+    physics.step(DT, (stepSeconds) => {
+      hand.applyKinematicTarget();
+      leftHand.applyKinematicTarget();
+      twoHands.step(stepSeconds);
+    });
+    registry.sync(new THREE.Vector3());
+  };
+  grip.position.set(10 + 0.5, 1.0, 10);
+  leftGrip.position.set(10 - 0.5, 1.0, 10);
+  for (let i = 0; i < 5; i++) tick2();
+  squeeze = [1];
+  leftSqueeze = [1];
+  tick2();
+  const bothHold = hand.holding === lifted && leftHand.holding === lifted;
+  let maxY = 0;
+  for (let i = 0; i < 90; i++) {
+    grip.position.y = Math.min(1.5, grip.position.y + 0.01);
+    leftGrip.position.y = grip.position.y;
+    tick2();
+    maxY = Math.max(maxY, lifted.body.translation().y);
+  }
+  check("armoire soulevée à deux mains", bothHold && maxY > 0.3, `deux mains=${bothHold} y max=${maxY.toFixed(2)}`);
+  // Changement de main : la main gauche lâche, la droite garde l'objet.
+  leftSqueeze = [];
+  tick2();
+  check("lâcher d'une main : l'autre garde l'objet", hand.holding === lifted && leftHand.holding === null, `droite=${hand.holding === lifted}`);
+  squeeze = [];
+  tick2();
+}
 
 // ---------- 7. Le joueur ne traverse pas un mur, même en se penchant physiquement ----------
 squeeze = [];

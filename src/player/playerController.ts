@@ -7,7 +7,10 @@ import type { XrInput } from "./xrInput";
 const STANDING_EYE_HEIGHT = 1.62;
 /** En dessous (hauteur réelle mesurée), on considère le joueur assis. */
 const SEATED_THRESHOLD = 1.35;
-const CROUCH_DEPTH = 0.62;
+/** Accroupi : assez bas pour ramasser un objet au sol sans se baisser physiquement. */
+const CROUCH_DEPTH = 0.85;
+/** Stick droit poussé vers le bas / le haut au-delà : s'accroupir / se relever. */
+const CROUCH_STICK_THRESHOLD = 0.7;
 const MIN_EYE_HEIGHT = 0.35;
 const HEIGHT_LAMBDA = 10;
 const CALIBRATION_DELAY_SECONDS = 0.6;
@@ -28,7 +31,8 @@ const UP = new THREE.Vector3(0, 1, 0);
 /**
  * Corps du joueur (contrôles type The Walking Dead: Saints & Sinners) :
  * - stick gauche : déplacement relatif au regard, clic : sprint (bascule) ;
- * - stick droit : rotation par crans autour de la tête, clic : s'accroupir (bascule) ;
+ * - stick droit : rotation par crans autour de la tête ; bas : s'accroupir, haut : se
+ *   relever, clic : bascule (on peut aussi se baisser physiquement) ;
  * - capsule cinématique Rapier suivant la *tête* (pas l'origine du rig) : on ne traverse
  *   ni les murs ni les objets, même en se penchant physiquement, et on bouscule les objets
  *   dynamiques en marchant dedans (impulsions du contrôleur de personnage) ;
@@ -53,6 +57,7 @@ export class PlayerController {
   private presentingSeconds = 0;
   private wasPresenting = false;
   private snapTurnReady = true;
+  private crouchStickReady = true;
 
   private readonly capsuleBody: RAPIER.RigidBody;
   private readonly capsule: RAPIER.Collider;
@@ -121,6 +126,18 @@ export class PlayerController {
     if (presenting && !this.calibrated && this.presentingSeconds > CALIBRATION_DELAY_SECONDS) this.recalibrate();
 
     if (input.right.stick.justPressed) this.crouching = !this.crouching;
+    // Stick droit bas/haut (fronts) : plus fiable que le clic, facile à rater en jeu.
+    const stickY = input.right.stickY;
+    const vertical = Math.abs(stickY) > Math.abs(input.right.stickX);
+    if (this.crouchStickReady && vertical && stickY > CROUCH_STICK_THRESHOLD) {
+      this.crouching = true;
+      this.crouchStickReady = false;
+    } else if (this.crouchStickReady && vertical && stickY < -CROUCH_STICK_THRESHOLD) {
+      this.crouching = false;
+      this.crouchStickReady = false;
+    } else if (Math.abs(stickY) < SNAP_TURN_RESET_DEADZONE) {
+      this.crouchStickReady = true;
+    }
     this.updateHeight(deltaSeconds);
 
     if (presenting && !this.wasPresenting) {
@@ -130,7 +147,7 @@ export class PlayerController {
     }
     this.wasPresenting = presenting;
 
-    this.applySnapTurn(input.right.stickX);
+    this.applySnapTurn(input.right.stickX, input.right.stickY);
     this.movementIntensity = this.applyLocomotion(deltaSeconds, input);
   }
 
@@ -146,8 +163,9 @@ export class PlayerController {
     this.camera.getWorldPosition(this.headWorld);
   }
 
-  private applySnapTurn(stickX: number): void {
-    if (this.snapTurnReady && Math.abs(stickX) > SNAP_TURN_DEADZONE) {
+  private applySnapTurn(stickX: number, stickY: number): void {
+    // Axe dominant seulement : pousser vers le bas pour s'accroupir ne fait pas tourner.
+    if (this.snapTurnReady && Math.abs(stickX) > SNAP_TURN_DEADZONE && Math.abs(stickX) > Math.abs(stickY)) {
       this.updateHeadWorld();
       const angle = -Math.sign(stickX) * SNAP_TURN_ANGLE;
       // Pivot sur la tête : on tourne sur place, même décentré dans son espace de jeu.

@@ -12,6 +12,9 @@ const HAND_COLLIDER_RADIUS = 0.045;
 const SWIPE_SPEED = 1.1;
 const TELEPORT_JUMP = 0.35;
 const HISTORY_SECONDS = 0.09;
+/** Flexion des doigts au repos (main posée sur la manette, sans appuyer). */
+const REST_GRIP = 0.45;
+const REST_INDEX = 0.25;
 
 interface PoseSample {
   time: number;
@@ -103,10 +106,12 @@ export class Hand {
     }
 
     if (model) {
+      // Au repos, la main enserre déjà la manette (doigts à demi repliés) : une main grande
+      // ouverte, doigts tendus, paraissait tordue alors qu'on tient physiquement la manette.
       const holding = this.holding !== null;
-      const grip = holding ? 1 : this.input.squeeze.value;
-      const index = holding ? 1 : this.input.trigger.value;
-      const thumb = holding ? 0.9 : Math.max(this.input.thumbDown ? 0.85 : 0.25, grip * 0.6);
+      const grip = holding ? 1 : REST_GRIP + (1 - REST_GRIP) * this.input.squeeze.value;
+      const index = holding ? 1 : REST_INDEX + (1 - REST_INDEX) * this.input.trigger.value;
+      const thumb = holding ? 0.9 : Math.max(this.input.thumbDown ? 0.85 : 0.45, grip * 0.6);
       model.setPose(index, grip, thumb);
     }
 

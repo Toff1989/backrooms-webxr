@@ -28,9 +28,10 @@ main, menus sans quitter le jeu) :
 |---|---|
 | Se déplacer | Stick gauche (clic : sprint, bascule) |
 | Tourner | Stick droit gauche/droite (crans de 45°, pivot sur la tête) |
-| S'accroupir | Clic du stick droit (bascule) |
-| Attraper / tenir | Grip près d'un objet (il s'illumine) |
-| Attraper à distance | Viser un objet (jusqu'à 4 m, il s'illumine plus faiblement) + grip : il vole jusqu'à la main |
+| S'accroupir / se relever | Stick droit vers le bas / le haut (ou clic du stick droit, ou se baisser physiquement) |
+| Attraper / tenir | Grip au contact d'un objet (il s'illumine) |
+| Attraper à distance | Maintenir la gâchette : un rayon s'affiche (jusqu'à 4 m, l'objet visé s'illumine) + grip : il vole jusqu'à la main |
+| Deux mains / changer de main | Saisir le même objet avec l'autre main (on le porte à deux, un meuble lourd se soulève) ; lâcher la première main pour changer de main. D'une seule main, un meuble lourd se traîne |
 | Lâcher / lancer | Relâcher le grip (l'objet part avec la vitesse de la main) |
 | Ranger l'objet tenu | A / X, ou le relâcher sur le menu d'inventaire ouvert |
 | Pousser / frapper | Poing fermé (grip sans objet) ou geste vif |
