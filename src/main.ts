@@ -48,7 +48,10 @@ scene.fog = new THREE.FogExp2(BACKGROUND_COLOR, 0.035);
 
 const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.03, 60);
 
-const renderer = new THREE.WebGLRenderer({ antialias: true });
+// Pas d'antialiasing : en XR, three.js le traduit en MSAA ×4 sur le rendu du casque (coût
+// GPU/bande passante réel sur la puce mobile du Quest), pour un gain quasi invisible — le
+// grain VHS et la quantification des couleurs masquent déjà les crénelages.
+const renderer = new THREE.WebGLRenderer({ antialias: false });
 // Le pixel ratio ne concerne que l'aperçu écran : en XR, la résolution vient du casque
 // (framebufferScaleFactor). Rendu fovéal au maximum : périphérie moins détaillée, gros
 // gain GPU sur Quest, invisible avec le grain VHS.

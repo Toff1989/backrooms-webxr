@@ -402,6 +402,8 @@ function parseChunkKey(key: string): [number, number] {
 function disposeGroup(group: THREE.Group): void {
   group.traverse((object) => {
     if (object.parent?.name === "battery") return;
+    // Géométrie des piliers : partagée par tous les chunks (voir `chunkMesh.ts`), jamais à eux seuls.
+    if (object.name === "pillars") return;
     if (object instanceof THREE.Mesh || object instanceof THREE.InstancedMesh) {
       object.geometry.dispose();
     }

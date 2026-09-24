@@ -120,7 +120,11 @@ export function getFloorMaterial(): THREE.MeshStandardMaterial {
   if (!floorMaterial) {
     // Un seul plan de sol pour toute la zone chargée : repeat = nombre de cellules par côté.
     floorMaterial = new THREE.MeshStandardMaterial(surface(floorBaseColorUrl, floorNormalUrl, floorOrmUrl, SURFACE_CELLS, false));
-    applyVhsEffect(floorMaterial, { zoneLightPerPixel: true });
+    // Éclairage de zone par sommet (pas par pixel) : sur une grande surface au ras du sol, le
+    // calcul par pixel (deux bruits + coupure évalués sur chaque fragment) coûtait cher pour un
+    // gain surtout visible de près ; la couture au sommet de cellule est atténuée par la
+    // subdivision plus fine de la géométrie (voir `floorCeiling.ts`).
+    applyVhsEffect(floorMaterial);
   }
   return floorMaterial;
 }
@@ -136,7 +140,7 @@ export function getCeilingMaterial(): THREE.MeshStandardMaterial {
       emissive: new THREE.Color(0xffffff),
       emissiveIntensity: 2.2,
     });
-    applyVhsEffect(ceilingMaterial, { ceilingLights: true, zoneLightPerPixel: true });
+    applyVhsEffect(ceilingMaterial, { ceilingLights: true });
   }
   return ceilingMaterial;
 }

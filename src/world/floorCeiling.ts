@@ -10,9 +10,13 @@ const SURFACE_SIZE = SURFACE_CHUNKS * CHUNK_SIZE;
  * chunk. Le plan se déplace toujours d'un nombre entier de cellules : les tuiles de texture
  * (une par cellule, néons compris) restent donc fixes dans le monde, sans couture visible.
  *
- * Un sommet par coin de cellule : pas de displacement (relief invisible à cette échelle),
- * juste assez pour le tremblement des sommets dans les zones de glitch.
+ * Pas de displacement (relief invisible à cette échelle), juste assez de sommets pour le
+ * tremblement des sommets dans les zones de glitch et pour que l'éclairage de zone (calculé
+ * par sommet, pas par pixel — trop coûteux sur une aussi grande surface) reste raisonnablement
+ * doux à la limite d'une cellule : 2 sommets par cellule plutôt qu'un seul coin.
  */
+const SURFACE_SEGMENTS = SURFACE_CELLS * 2;
+
 export class FloorCeiling {
   private readonly floor: THREE.Mesh;
   private readonly ceiling: THREE.Mesh;
@@ -20,7 +24,7 @@ export class FloorCeiling {
   private chunkZ = Number.NaN;
 
   constructor(scene: THREE.Scene) {
-    const geometry = new THREE.PlaneGeometry(SURFACE_SIZE, SURFACE_SIZE, SURFACE_CELLS, SURFACE_CELLS);
+    const geometry = new THREE.PlaneGeometry(SURFACE_SIZE, SURFACE_SIZE, SURFACE_SEGMENTS, SURFACE_SEGMENTS);
     this.floor = new THREE.Mesh(geometry, getFloorMaterial());
     this.floor.rotation.x = -Math.PI / 2;
     this.ceiling = new THREE.Mesh(geometry, getCeilingMaterial());

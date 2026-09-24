@@ -24,10 +24,13 @@ export function buildChunkGroup(layout: ChunkLayout): THREE.Group {
 }
 
 // Segments des murs/piliers : sans subdivision, le displacementMap (voir materials.ts) ne
-// déplace que les sommets des coins et gondole tout le quad au lieu de créer un relief.
-const WALL_SEGMENTS_LENGTH = 8;
-const WALL_SEGMENTS_HEIGHT = 5;
-const PILLAR_SEGMENTS = 4;
+// déplace que les sommets des coins et gondole tout le quad au lieu de créer un relief. Le
+// relief (échelle 0,035 m) reste net avec une grille modeste — inutile de payer plus de
+// sommets par mur : leur géométrie est reconstruite à chaque chargement de chunk (voir
+// `buildWalls`), en plein milieu de la boucle de jeu.
+const WALL_SEGMENTS_LENGTH = 5;
+const WALL_SEGMENTS_HEIGHT = 3;
+const PILLAR_SEGMENTS = 3;
 
 /** Boîte modèle d'un mur (1 m de long), partagée : ses sommets sont recopiés transformés. */
 let wallTemplate: THREE.BoxGeometry | null = null;
@@ -90,11 +93,17 @@ function buildWalls(layout: ChunkLayout): THREE.Mesh | null {
   return new THREE.Mesh(geometry, getWallMaterial());
 }
 
+/** Tous les piliers ont la même forme : une seule géométrie partagée par tous les chunks (au
+ * lieu d'en reconstruire une, identique, à chaque chargement) — jamais disposée par chunk, voir
+ * l'exclusion sur le nom "pillars" dans `disposeGroup` (chunkStreamer.ts). */
+let pillarTemplate: THREE.BoxGeometry | null = null;
+
 function buildPillars(layout: ChunkLayout): THREE.InstancedMesh | null {
   if (layout.pillarPositions.length === 0) return null;
 
-  const geometry = new THREE.BoxGeometry(PILLAR_SIZE, WALL_HEIGHT, PILLAR_SIZE, PILLAR_SEGMENTS, WALL_SEGMENTS_HEIGHT, PILLAR_SEGMENTS);
-  const mesh = new THREE.InstancedMesh(geometry, getPillarMaterial(), layout.pillarPositions.length);
+  pillarTemplate ??= new THREE.BoxGeometry(PILLAR_SIZE, WALL_HEIGHT, PILLAR_SIZE, PILLAR_SEGMENTS, WALL_SEGMENTS_HEIGHT, PILLAR_SEGMENTS);
+  const mesh = new THREE.InstancedMesh(pillarTemplate, getPillarMaterial(), layout.pillarPositions.length);
+  mesh.name = "pillars";
   const matrix = new THREE.Matrix4();
 
   layout.pillarPositions.forEach((position, index) => {

@@ -281,15 +281,13 @@ const FINAL_GLSL = /* glsl */ `
   float vhsGrain = ( fract( sin( dot( gl_FragCoord.xy + uTime * 60.0, vec2( 12.9898, 78.233 ) ) ) * 43758.5453123 ) - 0.5 ) * ( 0.05 + uCorruption * 0.15 );
   gl_FragColor.rgb += vhsGrain * ( 0.3 + 0.7 * sqrt( vhsLuma ) );
 
-  // Quantification (couleurs "pauvres" de la bande) dans un espace racine carrée : paliers
-  // fins dans les ombres, grossiers dans les hautes lumières. Tramée par un bruit animé : plus
-  // de bandes ni d'aplats noirs découpés dans la pénombre (avant : 24 paliers linéaires, tout
-  // ce qui était sous 2 % tombait d'un coup au noir).
+  // Quantification (couleurs "pauvres" de la bande), tramée par un bruit animé : plus de
+  // bandes ni d'aplats noirs découpés dans la pénombre (avant : 24 paliers linéaires, tout ce
+  // qui était sous 2 % tombait d'un coup au noir). Dither en espace linéaire (pas de racine
+  // carrée/carré : coûteux sur mobile pour un gain à peine visible une fois le bruit ajouté).
   float vhsLevels = mix( 30.0, 12.0, uCorruption );
-  vec3 vhsRoot = sqrt( max( gl_FragColor.rgb, 0.0 ) );
   float vhsDither = vhsHash12( gl_FragCoord.xy + fract( uTime * 7.3 ) * 131.0 ) - 0.5;
-  vhsRoot = floor( vhsRoot * vhsLevels + 0.5 + vhsDither * 0.9 ) / vhsLevels;
-  gl_FragColor.rgb = vhsRoot * vhsRoot;
+  gl_FragColor.rgb = floor( gl_FragColor.rgb * vhsLevels + 0.5 + vhsDither * 0.9 ) / vhsLevels;
 
   gl_FragColor.rgb = mix( gl_FragColor.rgb, gl_FragColor.rgb * vec3( 1.08, 1.0, 0.82 ), 0.35 );
 `;
