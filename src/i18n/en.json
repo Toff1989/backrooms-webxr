@@ -175,5 +175,36 @@
     "Seq. 14 — corridor, lights, tracking",
     "Wrap: before dawn"
   ],
-  "tv.play": "▶ PLAY"
+  "tv.play": "▶ PLAY",
+  "intro.opening": "The night before delivery. It's late. Only reel 4 is left.",
+  "intro.grab": "Pick up something on the desk: squeeze the grip on contact.",
+  "intro.store": "Put it in the case: A/X button, or drop it over your shoulder.",
+  "intro.read": "A note lies on the desk. Pick it up to read it.",
+  "intro.journal": "Open your journal: grip, hand at your belt.",
+  "intro.lamp": "The light is failing. Turn on your lamp: B button.",
+  "intro.crouch": "Something moved under the desk. Crouch: right stick down.",
+  "intro.monitor": "Turn on the monitor: touch it with your fingertip.",
+  "intro.wall": "The wall behind the monitor is crackling. Walk through it.",
+  "inv.skipIntro": "SKIP INTRO",
+  "ending.aveuTitle": "■ THE END — CONFESSION",
+  "ending.boucleTitle": "■ THE END — THE LOOP",
+  "ending.aveu": [
+    "The door opens onto the editing room. The monitor is on.",
+    "Reel 4, shot 14. All of it, this time.",
+    "I watch Julien film until the end.",
+    "I cut it in. No cuts.",
+    "Someone finally saw."
+  ],
+  "ending.boucle": [
+    "CUT. Last take.",
+    "The editing room. On the monitor, someone is filming from behind.",
+    "It's me.",
+    "Someone has to keep rolling.",
+    "TAKE {take}."
+  ],
+  "intro.poster": [
+    "CORRIDORS",
+    "a Hexa Films picture",
+    "Coming soon"
+  ]
 }

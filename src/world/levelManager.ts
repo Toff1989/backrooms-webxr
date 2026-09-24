@@ -118,6 +118,12 @@ export class LevelManager {
     this.pinnedLoreFragment = fragment;
   }
 
+  /** Rétablit l'éclairage de zone et la teinte du level (après la salle de montage). */
+  applyLook(): void {
+    setLightField(this.lightField);
+    setDepthLook(this.depth);
+  }
+
   /** Seed du level courant (objets cachés dans les meubles : un par meuble et par level). */
   get levelSeed(): string {
     return this.profile.seed;

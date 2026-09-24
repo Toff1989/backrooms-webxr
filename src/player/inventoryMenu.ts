@@ -66,6 +66,10 @@ export interface InventoryMenuActions {
   stopRec(): void;
   /** Ouvre le journal des bandes perdues (il flotte devant le joueur). */
   openJournal(): void;
+  /** Salle de montage (intro) en cours : STOP REC devient « passer l'intro » (après la première fois). */
+  introActive?(): boolean;
+  canSkipIntro?(): boolean;
+  skipIntro?(): void;
   /** Vignette de confort : état courant, et bascule (renvoie le nouvel état). */
   vignetteEnabled(): boolean;
   toggleVignette(): boolean;
@@ -236,6 +240,12 @@ export class InventoryMenu extends UiPanel {
         this.showStatus(this.actions.toggleVignette() ? t("inv.vignetteOnStatus") : t("inv.vignetteOffStatus"));
         break;
       case "stop":
+        if (this.actions.introActive?.()) {
+          if (!this.actions.canSkipIntro?.()) return;
+          this.close();
+          this.actions.skipIntro?.();
+          return;
+        }
         if (this.stopArmedUntil) {
           this.stopArmedUntil = 0;
           this.close();
@@ -456,7 +466,9 @@ export class InventoryMenu extends UiPanel {
     drawPlate(ctx, BUTTONS.height, t("inv.height"), { hovered: hoveredButtons.has("height") });
     drawPlate(ctx, BUTTONS.lang, t("inv.lang"), { hovered: hoveredButtons.has("lang") });
     drawPlate(ctx, BUTTONS.vignette, this.actions.vignetteEnabled() ? t("inv.vignetteOn") : t("inv.vignetteOff"), { hovered: hoveredButtons.has("vignette") });
-    drawPlate(ctx, BUTTONS.stop, this.stopArmedUntil ? t("inv.confirm") : t("inv.stop"), { hovered: hoveredButtons.has("stop"), accent: "#d23b2f" });
+    if (this.actions.introActive?.()) {
+      drawPlate(ctx, BUTTONS.stop, t("inv.skipIntro"), { hovered: hoveredButtons.has("stop"), accent: "#4f93c9", disabled: !this.actions.canSkipIntro?.() });
+    } else drawPlate(ctx, BUTTONS.stop, this.stopArmedUntil ? t("inv.confirm") : t("inv.stop"), { hovered: hoveredButtons.has("stop"), accent: "#d23b2f" });
     drawPlate(ctx, BUTTONS.journal, t("inv.journal"), { hovered: hoveredButtons.has("journal"), accent: "#e3b12a" });
     drawPlate(ctx, BUTTONS.close, t("inv.close"), { hovered: hoveredButtons.has("close") });
     if (DEBUG_ENABLED) {

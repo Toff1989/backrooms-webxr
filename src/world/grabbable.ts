@@ -100,6 +100,8 @@ export interface GrabbableInit {
   onDispose?: () => void;
   /** Type de meuble (le type d'un objet de collection vient de `item`). */
   propKind?: PropKind;
+  /** Objet de la salle de montage (intro) : survit aux changements de level, retiré à part. */
+  persistent?: boolean;
 }
 
 /** Page de bande perdue posée dans le monde : identifiant unique par level, fragment de récit porté. */
@@ -123,6 +125,7 @@ export class Grabbable {
   readonly lorePage: LorePageData | null;
   /** Type de meuble ou d'objet de collection (null : page de bande perdue). */
   readonly kind: string | null;
+  readonly persistent: boolean;
   /** Centre de la boîte englobante, en espace local du corps (échelle comprise). */
   readonly localCenter: THREE.Vector3;
   /** Main qui tient l'objet (opaque ici, voir `GrabSystem`). */
@@ -140,6 +143,7 @@ export class Grabbable {
     this.item = init.item;
     this.lorePage = init.lorePage ?? null;
     this.kind = init.item?.kind ?? init.propKind ?? null;
+    this.persistent = init.persistent ?? false;
     this.onDispose = init.onDispose;
     // Meuble : endormi, fortement amorti. Petit objet (collection, page) : libre, il roule.
     const furniture = init.item === null && this.lorePage === null;
@@ -263,7 +267,7 @@ export class GrabbableRegistry {
   }
 
   /** Meuble posé au sol (ou à `y` : caisse empilée, objet sur un bureau), ou renversé (il retombe). */
-  createProp(kind: PropKind, model: THREE.Object3D, template: THREE.Object3D, x: number, z: number, rotationY: number, y = 0, tipped = false): Grabbable {
+  createProp(kind: PropKind, model: THREE.Object3D, template: THREE.Object3D, x: number, z: number, rotationY: number, y = 0, tipped = false, persistent = false): Grabbable {
     const quaternion = new THREE.Quaternion().setFromAxisAngle(Y_AXIS, rotationY);
     if (tipped) quaternion.multiply(new THREE.Quaternion().setFromAxisAngle(X_AXIS, Math.PI / 2));
     return this.create({
@@ -277,6 +281,7 @@ export class GrabbableRegistry {
       boxCollider: BOX_COLLIDER_PROPS.has(kind),
       awake: tipped,
       propKind: kind,
+      persistent,
     });
   }
 
@@ -334,7 +339,7 @@ export class GrabbableRegistry {
 
   /** Changement de level : tout ce qui n'est pas en main disparaît avec l'ancien monde. */
   removeAllNotHeld(): void {
-    for (const grabbable of [...this.all]) if (!grabbable.heldBy) this.remove(grabbable);
+    for (const grabbable of [...this.all]) if (!grabbable.heldBy && !grabbable.persistent) this.remove(grabbable);
   }
 
   sync(viewer: THREE.Vector3): void {

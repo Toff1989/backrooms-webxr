@@ -19,6 +19,12 @@ const POLAROID_LENGTH = 0.107;
 const POLAROID_THICKNESS = 0.0025;
 const POLAROID_CANVAS_W = 352;
 const POLAROID_CANVAS_H = Math.round((POLAROID_CANVAS_W * POLAROID_LENGTH) / POLAROID_WIDTH);
+/**
+ * Épaisseur minimale de la forme de collision : la coque est calculée sur des sommets fusionnés
+ * au demi-centimètre (voir `modelShape`) — une feuille de 3 mm y devenait plate (4 points
+ * coplanaires), une coque dégénérée qui faisait s'enfoncer les objets posés à côté.
+ */
+const COLLISION_THICKNESS = 0.01;
 /** Durée (s) du développement d'un polaroid, de la chimie brune à l'image. */
 const DEVELOP_SECONDS = 7;
 
@@ -108,13 +114,16 @@ function card(width: number, length: number, thickness: number, front: THREE.Mat
   verso.rotation.z = Math.PI;
   verso.position.y = -thickness / 2 - 0.0004;
   model.add(recto, verso);
-  // Forme physique : la boîte fine seule.
+  // Forme physique : une boîte d'au moins 1 cm d'épaisseur (le visuel reste une feuille fine).
   const template = new THREE.Group();
-  template.add(new THREE.Mesh(edgeGeometry, edge));
+  template.add(new THREE.Mesh(new THREE.BoxGeometry(width, Math.max(thickness, COLLISION_THICKNESS), length), edge));
   return { model, template };
 }
 
-function disposeModel(model: THREE.Object3D): void {
+function disposeModel(model: THREE.Object3D, template?: THREE.Object3D): void {
+  template?.traverse((child) => {
+    if (child instanceof THREE.Mesh) child.geometry.dispose();
+  });
   model.traverse((child) => {
     if (!(child instanceof THREE.Mesh)) return;
     child.geometry.dispose();
@@ -148,11 +157,11 @@ function createSheet(fragment: number): LoreObject {
     model,
     template,
     mass: 0.1,
-    restHeight: PAGE_THICKNESS / 2 + 0.004,
+    restHeight: COLLISION_THICKNESS / 2 + 0.004,
     onRead: () => {},
     dispose: () => {
       liveObjects.delete(page);
-      disposeModel(model);
+      disposeModel(model, template);
     },
   };
 }
@@ -182,7 +191,7 @@ function createPolaroid(fragment: number): LoreObject {
     model,
     template,
     mass: 0.02,
-    restHeight: POLAROID_THICKNESS / 2 + 0.004,
+    restHeight: COLLISION_THICKNESS / 2 + 0.004,
     onRead: () => {
       if (state.progress > 0 || developing.has(state)) return;
       const shot = services?.capturePhoto() ?? null;
@@ -194,7 +203,7 @@ function createPolaroid(fragment: number): LoreObject {
     dispose: () => {
       liveObjects.delete(state);
       developing.delete(state);
-      disposeModel(model);
+      disposeModel(model, template);
     },
   };
 }

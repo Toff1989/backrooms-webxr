@@ -226,6 +226,18 @@ tests/physics.sim.ts         Simulation physique sans rendu (`npm run test:physi
   toutes les 10 s que les journaux arrivent, et à l'arrêt (Ctrl+C) exporte la session dans
   `server/logs/export-….jsonl` — à déposer dans la page d'analyse (Artifact « Banc de test
   Backrooms ») puis « Envoyer à Claude », ou directement dans la conversation.
+- **Intro : la salle de montage** (`world/editingRoom.ts`, modèles CC0 dans
+  `assets/models/intro/`) : tard le soir, la veille du rendu. Un tutoriel en jouant (prendre
+  un objet, le ranger dans la mallette, lire la première bande, ouvrir le journal, allumer la
+  lampe quand le néon faiblit, s'accroupir, allumer le moniteur du doigt), puis le mur derrière
+  le moniteur perd sa collision et grésille : on le traverse (noclip) et on tombe dans le
+  niveau 0. Jouée à chaque lancement ; une fois vue, « PASSER INTRO » dans le menu (Y), et
+  `?intro=0` la saute. La pièce est construite loin de la grille des Backrooms (z = 3000 m),
+  rien n'y est streamé et les menaces y sont suspendues.
+- **Deux fins** : avec les 16 bandes, la sortie suivante ouvre sur la salle de montage — la
+  bobine 4 passe en entier sur le moniteur (**l'aveu**). Sans elles, rattrapé une dernière fois
+  au-delà du niveau 10 : retour à la salle, le moniteur montre le joueur filmé de dos (**la
+  boucle**). Puis écran de fin et classement.
 - **Récit : le Monteur.** La veille du rendu, un monteur retire du film les rushes de la nuit du
   14, ceux de l'accident où Julien, le cadreur, est mort en continuant de filmer. Le Cadreur,
   c'est lui : il filme pour que quelqu'un voie enfin.
