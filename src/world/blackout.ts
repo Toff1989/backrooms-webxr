@@ -54,8 +54,9 @@ export class Blackout {
   private readonly deaths: AudioBuffer[] = [];
   private readonly starts: AudioBuffer[] = [];
   private readonly tmp = new THREE.Vector3();
-  /** Délai du premier déclenchement (debug `?force=coupure` : quelques secondes). */
-  forced = false;
+  /** Déclenchée à la main (menu debug) : ignore la profondeur minimale. */
+  private manual = false;
+  private depth = 0;
 
   constructor(scene: THREE.Scene, listener: THREE.AudioListener) {
     this.breakerVoice = new THREE.PositionalAudio(listener);
@@ -95,8 +96,21 @@ export class Blackout {
     this.phase = "idle";
     this.state.on = false;
     this.playerDark = false;
-    this.nextEvent = this.forced ? 12 : 100 + Math.random() * 90 - Math.min(40, depth * 5);
+    this.manual = false;
+    this.depth = depth;
+    this.nextEvent = 100 + Math.random() * 90 - Math.min(40, depth * 5);
     this.apply();
+  }
+
+  /** Menu debug : lance une coupure tout de suite (avertissement compris), ou arrête celle en cours. */
+  toggle(): void {
+    if (this.phase !== "idle") {
+      log("blackout", { action: "stop" });
+      this.reset(this.depth);
+      return;
+    }
+    this.manual = true;
+    this.enter("warning");
   }
 
   /** Lumière [0..1] à une position (1 hors coupure). */
@@ -106,7 +120,7 @@ export class Blackout {
 
   update(deltaSeconds: number, player: THREE.Vector3, depth: number): BlackoutEvents {
     const events: BlackoutEvents = { reachedPlayer: false, started: false };
-    if (depth < BLACKOUT_MIN_DEPTH && !this.forced) return events;
+    if (depth < BLACKOUT_MIN_DEPTH && !this.manual) return events;
     this.phaseSeconds += deltaSeconds;
 
     switch (this.phase) {

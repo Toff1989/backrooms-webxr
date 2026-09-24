@@ -91,8 +91,8 @@ export class Cadreur {
   private readonly forward = new THREE.Vector3();
   private readonly cameraPosition = new THREE.Vector3();
   private readonly tmp = new THREE.Vector3();
-  /** Debug (`?force=cadreur`) : apparaît dès le niveau 0, après quelques secondes. */
-  forced = false;
+  /** Appelé à la main (menu debug) : ignore la profondeur minimale, apparaît plus près. */
+  private manual = false;
 
   constructor(
     scene: THREE.Scene,
@@ -135,7 +135,21 @@ export class Cadreur {
   reset(depth: number): void {
     this.despawn();
     this.trail.length = 0;
-    this.timer = this.forced ? 8 : Math.max(35, 70 + Math.random() * 50 - depth * 4);
+    this.manual = false;
+    this.timer = Math.max(35, 70 + Math.random() * 50 - depth * 4);
+  }
+
+  /** Menu debug : le fait venir tout de suite (sur la trace, ≥ 6 m derrière), ou le renvoie. */
+  toggle(): void {
+    if (this.stalking) {
+      log("cadreur", { action: "dismissed" });
+      this.despawn();
+      this.manual = false;
+      this.timer = 60;
+      return;
+    }
+    this.manual = true;
+    this.timer = 0;
   }
 
   /** La coupure l'appelle : s'il n'est pas déjà là, il arrive avec le noir. */
@@ -147,7 +161,7 @@ export class Cadreur {
     const events: CadreurEvents = { caught: false, sighted: false };
     this.elapsed += deltaSeconds;
     this.recordTrail(context.head);
-    if (!this.rig || (context.depth < CADREUR_MIN_DEPTH && !this.forced)) return events;
+    if (!this.rig || (context.depth < CADREUR_MIN_DEPTH && !this.manual)) return events;
 
     if (!this.stalking) {
       this.timer -= deltaSeconds;
@@ -241,7 +255,8 @@ export class Cadreur {
   private trySpawn(context: CadreurContext): void {
     context.camera.getWorldDirection(this.forward);
     context.camera.getWorldPosition(this.cameraPosition);
-    const wanted = SPAWN_MIN_BEHIND + Math.random() * (SPAWN_MAX_BEHIND - SPAWN_MIN_BEHIND);
+    const minBehind = this.manual ? 6 : SPAWN_MIN_BEHIND;
+    const wanted = minBehind + Math.random() * (SPAWN_MAX_BEHIND - minBehind);
     let length = 0;
     for (let i = this.trail.length - 1; i > 0; i--) {
       const a = this.trail[i]!;

@@ -74,5 +74,17 @@
   "inv.vignetteOn": "VIGNETTE: ON",
   "inv.vignetteOff": "VIGNETTE: OFF",
   "inv.vignetteOnStatus": "Comfort vignette on (edges darken while moving).",
-  "inv.vignetteOffStatus": "Comfort vignette off."
+  "inv.vignetteOffStatus": "Comfort vignette off.",
+  "debug.blackoutStart": "▶ BLACKOUT",
+  "debug.blackoutStop": "■ BLACKOUT",
+  "debug.cadreurStart": "▶ CAMERAMAN",
+  "debug.cadreurStop": "■ CAMERAMAN",
+  "debug.level": "LEVEL +1",
+  "debug.battery": "FULL BATTERY",
+  "debug.blackoutStarted": "Blackout started (warning, then wave).",
+  "debug.blackoutStopped": "Blackout stopped, lights restored.",
+  "debug.cadreurCalled": "Cameraman summoned: he comes along your trail (walk a few meters if he doesn't show up).",
+  "debug.cadreurDismissed": "Cameraman dismissed.",
+  "debug.levelDone": "Next level.",
+  "debug.batteryDone": "Flashlight battery recharged."
 }

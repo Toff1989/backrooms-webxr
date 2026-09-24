@@ -74,5 +74,17 @@
   "inv.vignetteOn": "VIGNETTE : OUI",
   "inv.vignetteOff": "VIGNETTE : NON",
   "inv.vignetteOnStatus": "Vignette de confort activée (bords assombris en mouvement).",
-  "inv.vignetteOffStatus": "Vignette de confort désactivée."
+  "inv.vignetteOffStatus": "Vignette de confort désactivée.",
+  "debug.blackoutStart": "▶ COUPURE",
+  "debug.blackoutStop": "■ COUPURE",
+  "debug.cadreurStart": "▶ CADREUR",
+  "debug.cadreurStop": "■ CADREUR",
+  "debug.level": "NIVEAU +1",
+  "debug.battery": "PILE 100 %",
+  "debug.blackoutStarted": "Coupure lancée (avertissement, puis vague).",
+  "debug.blackoutStopped": "Coupure arrêtée, lumière rétablie.",
+  "debug.cadreurCalled": "Cadreur appelé : il arrive sur ta trace (marche quelques mètres s'il n'apparaît pas).",
+  "debug.cadreurDismissed": "Cadreur renvoyé.",
+  "debug.levelDone": "Niveau suivant.",
+  "debug.batteryDone": "Batterie de la lampe rechargée."
 }

@@ -140,12 +140,6 @@ const poltergeist = new Poltergeist(scene, audioListener, grabbables);
 /** Menaces : la Coupure (néons qui meurent en vague) et le Cadreur (il bouge quand on ne le voit pas). */
 const blackout = new Blackout(scene, audioListener);
 const cadreur = new Cadreur(scene, audioListener, physics);
-// Test : `?force=coupure,cadreur` déclenche les menaces au bout de quelques secondes, dès le niveau 0.
-const forcedThreats = new URLSearchParams(window.location.search).get("force")?.split(",") ?? [];
-blackout.forced = forcedThreats.includes("coupure");
-cadreur.forced = forcedThreats.includes("cadreur");
-blackout.reset(0);
-cadreur.reset(0);
 
 /** Bonus de collection : recalculés à chaque rangement/sortie d'objet. */
 function applyPerks(): void {
@@ -178,6 +172,38 @@ const inventoryMenu = new InventoryMenu(
       setVignette(!comfortVignette.enabled);
       return comfortVignette.enabled;
     },
+    // Mode debug : tester les menaces et effets sans attendre (rangée bleue du menu).
+    debug: [
+      {
+        label: () => (blackout.active ? t("debug.blackoutStop") : t("debug.blackoutStart")),
+        run: () => {
+          blackout.toggle();
+          return blackout.active ? t("debug.blackoutStarted") : t("debug.blackoutStopped");
+        },
+      },
+      {
+        label: () => (cadreur.present ? t("debug.cadreurStop") : t("debug.cadreurStart")),
+        run: () => {
+          const wasPresent = cadreur.present;
+          cadreur.toggle();
+          return wasPresent ? t("debug.cadreurDismissed") : t("debug.cadreurCalled");
+        },
+      },
+      {
+        label: () => t("debug.level"),
+        run: () => {
+          goDeeper(false);
+          return t("debug.levelDone");
+        },
+      },
+      {
+        label: () => t("debug.battery"),
+        run: () => {
+          flashlight.recharge(1);
+          return t("debug.batteryDone");
+        },
+      },
+    ],
   },
   sfx,
 );
@@ -211,6 +237,19 @@ function respawn(): void {
   atmosphere.triggerFlicker(0.8);
   blackout.reset(levelManager.depth);
   cadreur.reset(levelManager.depth);
+}
+
+/** Niveau suivant : sortie atteinte, rattrapé par le Cadreur (réveil les mains vides), ou menu debug. */
+function goDeeper(caught: boolean): void {
+  if (caught) grabSystem.loseHeld();
+  levelManager.descend();
+  log("level", { action: caught ? "caught" : "descend", depth: levelManager.depth });
+  respawn();
+  const lines = [t("blue.level", { n: levelManager.depth })];
+  if (caught) lines.unshift(t("blue.lost"));
+  vhsOverlay.blueScreen(caught ? 2.6 : 1.4, lines);
+  corruption.add(1);
+  if (currentSession) reportLevel(currentSession, levelManager.depth);
 }
 
 /**
@@ -386,19 +425,7 @@ renderer.setAnimationLoop((timestamp) => {
   if (cadreurEvents.sighted) vhsOverlay.triggerTrackingLoss(0.35);
   perfStats.end("menaces");
 
-  const caught = cadreurEvents.caught;
-  if (caught || levelManager.hasReachedExit(player.headWorld)) {
-    // Rattrapé par le Cadreur : réveil un niveau plus bas, les mains vides.
-    if (caught) grabSystem.loseHeld();
-    levelManager.descend();
-    log("level", { action: caught ? "caught" : "descend", depth: levelManager.depth });
-    respawn();
-    const lines = [t("blue.level", { n: levelManager.depth })];
-    if (caught) lines.unshift(t("blue.lost"));
-    vhsOverlay.blueScreen(caught ? 2.6 : 1.4, lines);
-    corruption.add(1);
-    if (currentSession) reportLevel(currentSession, levelManager.depth);
-  }
+  if (cadreurEvents.caught || levelManager.hasReachedExit(player.headWorld)) goDeeper(cadreurEvents.caught);
   corruption.update(deltaSeconds);
 
   hud.status = {

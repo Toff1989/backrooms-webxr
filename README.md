@@ -212,8 +212,9 @@ tests/physics.sim.ts         Simulation physique sans rendu (`npm run test:physi
   lentement ; hors de vue (dos tourné, mur, noir) il accélère ; pris dans le faisceau de la
   lampe, il se fige et sa caméra grésille. S'il te rattrape : « SIGNAL PERDU », réveil un
   niveau plus bas, ce que tu tenais est perdu. La Coupure l'appelle s'il n'est pas déjà là.
-- **Tester les menaces** : `?force=coupure,cadreur` (cumulable avec `?debug=1`) les déclenche
-  au bout de quelques secondes, dès le niveau 0.
+- **Tester les menaces** : en mode debug (`?debug=1`), le menu d'inventaire (Y) a une rangée
+  bleue de boutons de test : lancer/arrêter la Coupure, appeler/renvoyer le Cadreur (même au
+  niveau 0), passer au niveau suivant, recharger la lampe.
 - **Labyrinthe dynamique** (`chunkStreamer.ts`) : toutes les 6 à 12 secondes, un chunk chargé mais
   hors du champ de vision de la caméra (frustum) et à au moins 2 chunks du joueur est régénéré
   avec un agencement différent (même sortie, même couloir garanti). Déclenche un petit pic de

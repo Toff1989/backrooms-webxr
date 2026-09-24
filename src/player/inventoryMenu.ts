@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { DEBUG_ENABLED } from "../debug/debugLog";
 import { getLanguage, loreFragment, onLanguageChange, setLanguage, t } from "../i18n";
 import { getModelShape } from "../physics/modelShape";
 import { drawButton, drawPanelBackground, inRect, UiPanel, wrapText, type PressButton, type Rect } from "../ui/uiPanel";
@@ -9,7 +10,9 @@ import type { Hand } from "./hand";
 import type { Sfx } from "./sfx";
 
 const WIDTH = 0.64;
-const HEIGHT = 0.49;
+/** Mode debug (`?debug=1`) : une rangée de boutons de test en plus. */
+const DEBUG_ROW = DEBUG_ENABLED ? 72 : 0;
+const HEIGHT = 0.49 + DEBUG_ROW / 1600;
 const PX_PER_M = 1600;
 
 const COLUMNS = 5;
@@ -62,6 +65,20 @@ export interface InventoryMenuActions {
   /** Vignette de confort : état courant, et bascule (renvoie le nouvel état). */
   vignetteEnabled(): boolean;
   toggleVignette(): boolean;
+  /** Boutons de test (mode debug seulement) : libellé courant, action (renvoie un message). */
+  debug?: DebugAction[];
+}
+
+export interface DebugAction {
+  label(): string;
+  run(): string;
+}
+
+const DEBUG_Y = 708;
+function debugRect(index: number, count: number): Rect {
+  const gap = 10;
+  const w = (944 - gap * (count - 1)) / count;
+  return { x: 40 + index * (w + gap), y: DEBUG_Y, w, h: 60 };
 }
 
 /**
@@ -73,7 +90,7 @@ export interface InventoryMenuActions {
 export class InventoryMenu extends UiPanel {
   private page = 0;
   private readonly hoverSlot = new Map<Hand, number | null>();
-  private readonly hoverButton = new Map<Hand, ButtonId | null>();
+  private readonly hoverButton = new Map<Hand, ButtonId | number | null>();
   private readonly miniatures = new Map<number, Miniature>();
   private stopArmedUntil = 0;
   /** Objet sélectionné pour être déplacé (index global dans l'inventaire), ou null. */
@@ -160,7 +177,7 @@ export class InventoryMenu extends UiPanel {
     const slot = px === null || py === null ? null : this.slotAt(px, py);
     const button = px === null || py === null ? null : this.buttonAt(px, py);
     if (this.hoverSlot.get(hand) !== slot || this.hoverButton.get(hand) !== button) {
-      if (button && this.hoverButton.get(hand) !== button) hand.pulse(0.08, 10);
+      if (button !== null && this.hoverButton.get(hand) !== button) hand.pulse(0.08, 10);
       this.hoverSlot.set(hand, slot);
       this.hoverButton.set(hand, button);
       this.invalidate();
@@ -175,7 +192,10 @@ export class InventoryMenu extends UiPanel {
       return true;
     }
     const id = this.buttonAt(px, py);
-    if (id && button === "trigger") this.activate(id);
+    if (id !== null && button === "trigger") {
+      if (typeof id === "number") this.runDebug(id);
+      else this.activate(id);
+    }
     return true;
   }
 
@@ -224,6 +244,14 @@ export class InventoryMenu extends UiPanel {
         this.close();
         return;
     }
+    this.invalidate();
+  }
+
+  private runDebug(index: number): void {
+    const action = this.actions.debug?.[index];
+    if (!action) return;
+    this.sfx.play("click", 0.4);
+    this.showStatus(action.run());
     this.invalidate();
   }
 
@@ -296,8 +324,11 @@ export class InventoryMenu extends UiPanel {
     return null;
   }
 
-  private buttonAt(px: number, py: number): ButtonId | null {
+  /** Bouton sous le pointeur : identifiant, ou index d'un bouton de debug. */
+  private buttonAt(px: number, py: number): ButtonId | number | null {
     for (const [id, rect] of Object.entries(BUTTONS) as Array<[ButtonId, Rect]>) if (inRect(rect, px, py)) return id;
+    const debug = DEBUG_ENABLED ? (this.actions.debug ?? []) : [];
+    for (let i = 0; i < debug.length; i++) if (inRect(debugRect(i, debug.length), px, py)) return i;
     return null;
   }
 
@@ -422,6 +453,10 @@ export class InventoryMenu extends UiPanel {
       accent: "#ff6b5a",
     });
     drawButton(ctx, BUTTONS.close, t("inv.close"), { hovered: hoveredButtons.has("close") });
+    if (DEBUG_ENABLED) {
+      const debug = this.actions.debug ?? [];
+      debug.forEach((action, i) => drawButton(ctx, debugRect(i, debug.length), action.label(), { hovered: hoveredButtons.has(i), accent: "#7fc4e8" }));
+    }
 
     ctx.textAlign = "center";
     ctx.font = "20px monospace";
@@ -434,12 +469,12 @@ export class InventoryMenu extends UiPanel {
         ? t("perks.none")
         : t("perks.line", { battery, decay, compass: perks.beaconSteadiness > 0 ? t("perks.compass") : "" }),
       width / 2,
-      720,
+      720 + DEBUG_ROW,
     );
     ctx.fillStyle = "#7d7563";
-    ctx.fillText(t("inv.footer"), width / 2, 752);
+    ctx.fillText(t("inv.footer"), width / 2, 752 + DEBUG_ROW);
     ctx.textAlign = "right";
     ctx.font = "15px monospace";
-    ctx.fillText(`build ${__BUILD_ID__}`, width - 20, 774);
+    ctx.fillText(`build ${__BUILD_ID__}`, width - 20, 774 + DEBUG_ROW);
   }
 }
