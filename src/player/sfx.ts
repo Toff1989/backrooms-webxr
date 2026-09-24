@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import { bandpass, brownNoise, createSamples, fadeEdges, highpass, lowpass, normalize, queueWarmup, reverb, toBuffer } from "../assets/audio/synth";
 
-const SOUND_NAMES = ["store", "take", "grab", "click", "denied", "teleport"] as const;
+const SOUND_NAMES = ["store", "take", "grab", "click", "denied", "teleport", "battery"] as const;
 type SoundName = (typeof SOUND_NAMES)[number];
 
 /**
@@ -97,6 +97,19 @@ function createBuffer(context: BaseAudioContext, name: SoundName): AudioBuffer {
         data[i] = (Math.sin(2 * Math.PI * 75 * t) + Math.tanh(Math.sin(2 * Math.PI * 150 * t) * 3) * 0.3) * Math.exp(-t / 0.07);
       }
       lowpass(data, sampleRate, 600);
+      break;
+    }
+    case "battery": {
+      // Pile qu'on glisse dans la lampe : cliquetis métallique puis ressort qui se referme.
+      data = createSamples(sampleRate, 0.35);
+      for (const [at, gain, freq] of [[0, 0.8, 3200], [0.07, 0.5, 2600], [0.2, 1, 1800]] as const) {
+        const start = Math.floor(at * sampleRate);
+        for (let i = 0; start + i < data.length; i++) {
+          const t = i / sampleRate;
+          data[start + i] = data[start + i]! + ((Math.random() * 2 - 1) * 0.6 + Math.sin(2 * Math.PI * freq * t) * 0.4) * Math.exp(-t / 0.006) * gain;
+        }
+      }
+      highpass(data, sampleRate, 500);
       break;
     }
     case "teleport": {

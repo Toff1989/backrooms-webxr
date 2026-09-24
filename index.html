@@ -55,10 +55,17 @@
   <body>
     <div id="app"></div>
     <div id="options-panel">
-      <h1>Options</h1>
+      <h1 data-i18n="options.title">Options</h1>
       <label>
         <input type="checkbox" id="vignette-toggle" checked />
-        Vignette de confort
+        <span data-i18n="options.vignette">Vignette de confort</span>
+      </label>
+      <label>
+        <span data-i18n="options.language">Langue</span>
+        <select id="language-select">
+          <option value="fr">Français</option>
+          <option value="en">English</option>
+        </select>
       </label>
     </div>
     <script type="module" src="/src/main.ts"></script>

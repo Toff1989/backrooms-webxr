@@ -44,6 +44,8 @@ export interface ChunkLayout {
   propObstacles: WallSegment[];
   /** Objets de collection (fiche projet étape 6) : pas de collision, ramassage au grip. */
   collectiblePlacements: CollectiblePlacement[];
+  /** Piles pour la lampe torche : ramassées au passage (id stable pour ne pas réapparaître). */
+  batteryPlacements: Array<{ id: string; x: number; z: number; rotationY: number }>;
 }
 
 export interface PropPlacement {
@@ -100,6 +102,7 @@ export function generateChunkLayout(
   const propPlacements: PropPlacement[] = [];
   const propObstacles: WallSegment[] = [];
   const collectiblePlacements: CollectiblePlacement[] = [];
+  const batteryPlacements: ChunkLayout["batteryPlacements"] = [];
   const baseCellX = chunkX * CHUNK_CELLS;
   const baseCellZ = chunkZ * CHUNK_CELLS;
   const halfThickness = WALL_THICKNESS / 2;
@@ -157,6 +160,14 @@ export function generateChunkLayout(
         generatePropCluster(seedInt, cellX, cellZ, originX, originZ, propPlacements, propObstacles);
       } else if (!inClearance && coordinateHash01(seedInt, cellX, cellZ, 201) < profile.collectibleProbability) {
         generateCollectiblePlacement(profile, seedInt, chunkX, chunkZ, epoch, cellX, cellZ, originX, originZ, collectiblePlacements);
+      } else if (!inClearance && coordinateHash01(seedInt, cellX, cellZ, 223) < profile.batteryProbability) {
+        // Posée près d'un coin de la cellule, pas au centre : il faut la chercher du regard.
+        batteryPlacements.push({
+          id: `${profile.seed}:bat:${cellX}:${cellZ}:${epoch}`,
+          x: originX + 0.4 + coordinateHash01(seedInt, cellX, cellZ, 224) * (CELL_SIZE - 0.8),
+          z: originZ + 0.4 + coordinateHash01(seedInt, cellX, cellZ, 225) * (CELL_SIZE - 0.8),
+          rotationY: coordinateHash01(seedInt, cellX, cellZ, 226) * Math.PI * 2,
+        });
       }
     }
   }
@@ -172,6 +183,7 @@ export function generateChunkLayout(
     propPlacements,
     propObstacles,
     collectiblePlacements,
+    batteryPlacements,
   };
 }
 

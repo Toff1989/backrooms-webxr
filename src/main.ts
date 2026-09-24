@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import { VRButton } from "three/addons/webxr/VRButton.js";
 import { AmbientHum } from "./assets/audio/ambientHum";
+import { getLanguage, onLanguageChange, setLanguage, t, type Language } from "./i18n";
 import { runWarmupStep } from "./assets/audio/synth";
 import { PhysicsWorld } from "./physics/physicsWorld";
 import { CamcorderHud } from "./player/camcorderHud";
@@ -19,6 +20,7 @@ import { XrInput } from "./player/xrInput";
 import { UiPointer } from "./ui/uiPointer";
 import { Atmosphere } from "./world/atmosphere";
 import { CollectionStore } from "./world/collection";
+import { computePerks } from "./world/collectionPerks";
 import { corruption } from "./world/corruption";
 import { GrabbableRegistry } from "./world/grabbable";
 import { LevelManager, SPAWN_LOCAL_POSITION } from "./world/levelManager";
@@ -92,6 +94,16 @@ const flashlight = new Flashlight(camera);
 const perfStats = new PerfStats(renderer);
 const atmosphere = new Atmosphere(scene, hemisphere, ambient);
 const poltergeist = new Poltergeist(scene, audioListener, grabbables);
+
+/** Bonus de collection : recalculés à chaque rangement/sortie d'objet. */
+function applyPerks(): void {
+  const perks = computePerks(collectionStore.getAll());
+  flashlight.capacity = perks.batteryCapacity;
+  corruption.decayMultiplier = perks.corruptionDecay;
+  levelManager.beaconSteadiness = perks.beaconSteadiness;
+}
+collectionStore.onChange(applyPerks);
+applyPerks();
 
 let currentSession: RunSessionInfo | null = null;
 
@@ -168,6 +180,21 @@ renderer.xr.addEventListener("sessionstart", () => {
   levelManager.onSessionStart();
 });
 
+/** Panneau d'options HTML (aperçu écran, avant d'entrer en VR) : textes traduits + choix de langue. */
+function translateOptions(): void {
+  document.documentElement.lang = getLanguage();
+  document.querySelectorAll<HTMLElement>("[data-i18n]").forEach((element) => {
+    element.textContent = t(element.dataset["i18n"] as Parameters<typeof t>[0]);
+  });
+  const select = document.querySelector<HTMLSelectElement>("#language-select");
+  if (select) select.value = getLanguage();
+}
+document.querySelector<HTMLSelectElement>("#language-select")?.addEventListener("change", (event) => {
+  setLanguage((event.target as HTMLSelectElement).value as Language);
+});
+onLanguageChange(translateOptions);
+translateOptions();
+
 const vignetteToggle = document.querySelector<HTMLInputElement>("#vignette-toggle");
 vignetteToggle?.addEventListener("change", () => {
   comfortVignette.enabled = vignetteToggle.checked;
@@ -192,6 +219,9 @@ const WALL_TRAP_WARNING_HAPTIC_INTENSITY = 0.35;
 const WALL_TRAP_WARNING_HAPTIC_DURATION_MS = 90;
 const WALL_TRAP_POP_HAPTIC_INTENSITY = 1;
 const WALL_TRAP_POP_HAPTIC_DURATION_MS = 180;
+/** Charge rendue par une pile ramassée (fraction de la batterie de la lampe). */
+const BATTERY_RECHARGE = 0.45;
+const handPalms = hands.map((hand) => hand.palm);
 const TELEPORT_HAPTIC_INTENSITY = 1;
 const TELEPORT_HAPTIC_DURATION_MS = 260;
 
@@ -225,7 +255,11 @@ renderer.setAnimationLoop((timestamp) => {
   });
   grabbables.sync(player.headWorld);
 
-  const levelUpdate = levelManager.update(player.headWorld, camera, elapsedSeconds, deltaSeconds, corruption.value);
+  const levelUpdate = levelManager.update(player.headWorld, handPalms, camera, elapsedSeconds, deltaSeconds, corruption.value);
+  if (levelUpdate.batteriesPicked > 0) {
+    flashlight.recharge(BATTERY_RECHARGE * levelUpdate.batteriesPicked);
+    sfx.play("battery", 0.6);
+  }
   if (levelUpdate.corruptionDelta > 0) corruption.add(levelUpdate.corruptionDelta);
   if (levelUpdate.glitchTrapJustTriggered) {
     triggerHapticPulse(renderer, GLITCH_HAPTIC_INTENSITY, GLITCH_HAPTIC_DURATION_MS);
@@ -242,19 +276,25 @@ renderer.setAnimationLoop((timestamp) => {
     player.teleport(levelUpdate.teleportDestination);
     syncHands(elapsedSeconds);
     grabSystem.onTeleport();
-    corruption.add(0.8);
-    vhsOverlay.triggerTrackingLoss(1);
-    vhsOverlay.signalLoss(0.35);
-    flashlight.cut(0.6);
-    atmosphere.triggerFlicker(1.2);
-    sfx.play("teleport", 0.8);
-    triggerHapticPulse(renderer, TELEPORT_HAPTIC_INTENSITY, TELEPORT_HAPTIC_DURATION_MS);
+    if (levelUpdate.teleportKind === "loop") {
+      // Boucle : presque rien, un simple accroc de bande — le joueur doit reconnaître l'endroit.
+      vhsOverlay.triggerTrackingLoss(0.45);
+      corruption.add(0.15);
+    } else {
+      corruption.add(0.8);
+      vhsOverlay.triggerTrackingLoss(1);
+      vhsOverlay.signalLoss(0.35);
+      flashlight.cut(0.6);
+      atmosphere.triggerFlicker(1.2);
+      sfx.play("teleport", 0.8);
+      triggerHapticPulse(renderer, TELEPORT_HAPTIC_INTENSITY, TELEPORT_HAPTIC_DURATION_MS);
+    }
   }
 
   if (levelManager.hasReachedExit(player.headWorld)) {
     levelManager.descend();
     respawn();
-    vhsOverlay.blueScreen(1.4, [`NIV ${levelManager.depth}`]);
+    vhsOverlay.blueScreen(1.4, [t("blue.level", { n: levelManager.depth })]);
     corruption.add(1);
     if (currentSession) reportLevel(currentSession, levelManager.depth);
   }
@@ -281,5 +321,6 @@ renderer.setAnimationLoop((timestamp) => {
   perfStats.beginFrame(deltaSeconds);
   renderer.render(scene, camera);
 });
+
 
 

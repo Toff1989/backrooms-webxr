@@ -13,6 +13,12 @@ import { setDepthLook, setLightField } from "./vhsMaterial";
 
 /** Distance (m) sous laquelle le joueur est considéré comme ayant atteint la sortie. */
 const EXIT_REACHED_DISTANCE = 0.55;
+/** Historique de positions pour la boucle spatiale : un point toutes les 0,5 s sur 20 s. */
+const HISTORY_INTERVAL = 0.5;
+const HISTORY_LENGTH = 40;
+/** La boucle renvoie à une position vieille d'au moins ce délai (s) et à au moins cette distance (m). */
+const LOOP_MIN_AGE = 8;
+const LOOP_MIN_JUMP = 6;
 
 /** Chaque level repart d'une grille locale : le spawn est toujours au centre de la cellule (0,0). */
 export const SPAWN_LOCAL_POSITION = new THREE.Vector3(CELL_SIZE / 2, 0, CELL_SIZE / 2);
@@ -26,8 +32,12 @@ export interface LevelUpdateResult {
   wallTrapJustWarned: boolean;
   /** Vrai la frame où un mur-piège surgit pleinement (signal haptique fort). */
   wallTrapJustPopped: boolean;
-  /** Destination (position monde, tête) si un téléporteur vient de happer le joueur. */
+  /** Destination (position monde, tête) si un téléporteur ou une boucle vient de happer le joueur. */
   teleportDestination: THREE.Vector3 | null;
+  /** Nature du déplacement forcé (la boucle est volontairement discrète). */
+  teleportKind: "random" | "loop" | null;
+  /** Nombre de piles ramassées cette frame. */
+  batteriesPicked: number;
   /** Obscurité à la position du joueur (0 = zone éclairée, 1 = néons éteints). */
   darkness: number;
 }
@@ -50,9 +60,13 @@ export class LevelManager {
   private exitWorldZ: number;
   private sessionStarted = false;
   private runSeed: string;
+  /** Part du brouillage de la balise annulée (bonus boussole). */
+  beaconSteadiness = 0;
   private lightField: LightFieldParams;
   private readonly phantomGlitches: PhantomGlitches;
   private readonly floorCeiling: FloorCeiling;
+  private readonly history: THREE.Vector3[] = [];
+  private historyTimer = 0;
 
   constructor(
     private readonly scene: THREE.Scene,
@@ -88,23 +102,55 @@ export class LevelManager {
   }
 
   /** `playerPosition` : position XZ de la tête du joueur (pas l'origine du rig). */
-  update(playerPosition: THREE.Vector3, camera: THREE.Camera, elapsedSeconds: number, deltaSeconds: number, corruption: number): LevelUpdateResult {
-    const { teleportRequested, ...streamerResult } = this.chunkStreamer.update(playerPosition, camera, elapsedSeconds, deltaSeconds);
-    this.exitBeacon.update(elapsedSeconds, deltaSeconds, corruption, playerPosition, this.scene);
+  update(
+    playerPosition: THREE.Vector3,
+    hands: readonly THREE.Vector3[],
+    camera: THREE.Camera,
+    elapsedSeconds: number,
+    deltaSeconds: number,
+    corruption: number,
+  ): LevelUpdateResult {
+    const { teleportRequested, ...streamerResult } = this.chunkStreamer.update(playerPosition, hands, camera, elapsedSeconds, deltaSeconds);
+    this.exitBeacon.update(elapsedSeconds, deltaSeconds, corruption * (1 - this.beaconSteadiness), playerPosition, this.scene);
     this.floorCeiling.update(playerPosition);
 
     const darkness = 1 - sampleZoneLight(this.lightField, playerPosition.x, playerPosition.z);
     this.phantomGlitches.update(deltaSeconds, playerPosition, this.depth, darkness, corruption);
 
+    this.historyTimer -= deltaSeconds;
+    if (this.historyTimer <= 0) {
+      this.historyTimer = HISTORY_INTERVAL;
+      this.history.push(playerPosition.clone());
+      if (this.history.length > HISTORY_LENGTH) this.history.shift();
+    }
+
     let teleportDestination: THREE.Vector3 | null = null;
-    if (teleportRequested) {
+    if (teleportRequested === "random") {
       teleportDestination = this.chunkStreamer.findTeleportDestination(playerPosition, this.exitWorldX, this.exitWorldZ);
       // À l'arrivée, la pièce se déchire encore un instant autour du joueur.
       if (teleportDestination) this.phantomGlitches.spawnAt(teleportDestination.x, 1.2, teleportDestination.z, 2.6, 1, 1.6);
+    } else if (teleportRequested === "loop") {
+      teleportDestination = this.findLoopDestination(playerPosition);
     }
+    if (teleportDestination) this.history.length = 0;
 
     flushGlitchZones(playerPosition);
-    return { ...streamerResult, teleportDestination, darkness };
+    return { ...streamerResult, teleportDestination, teleportKind: teleportDestination ? teleportRequested : null, darkness };
+  }
+
+  /** Boucle spatiale : une position passée (≥ 8 s), assez loin, jamais plus près de la sortie. */
+  private findLoopDestination(playerPosition: THREE.Vector3): THREE.Vector3 | null {
+    const exitDistance = Math.hypot(playerPosition.x - this.exitWorldX, playerPosition.z - this.exitWorldZ);
+    const newestAllowed = this.history.length - Math.ceil(LOOP_MIN_AGE / HISTORY_INTERVAL);
+    for (let i = newestAllowed; i >= 0; i--) {
+      const past = this.history[i]!;
+      if (Math.hypot(past.x - playerPosition.x, past.z - playerPosition.z) < LOOP_MIN_JUMP) continue;
+      if (Math.hypot(past.x - this.exitWorldX, past.z - this.exitWorldZ) < exitDistance) continue;
+      // Le labyrinthe a pu changer depuis : jamais de retour dans un mur apparu entre-temps.
+      if (!this.chunkStreamer.isPositionFree(past.x, past.z, 0.35)) continue;
+      return past.clone();
+    }
+    return null;
   }
 
   hasReachedExit(playerPosition: THREE.Vector3): boolean {
@@ -143,6 +189,7 @@ export class LevelManager {
     setLightField(this.lightField);
     setDepthLook(this.depth);
     this.phantomGlitches.clear();
+    this.history.length = 0;
     this.chunkStreamer.depth = this.depth;
     this.chunkStreamer.setProfile(this.profile);
     this.chunkStreamer.primeArea(SPAWN_LOCAL_POSITION);

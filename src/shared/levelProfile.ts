@@ -25,6 +25,8 @@ export interface LevelProfile {
   propClusterProbability: number;
   /** Probabilité [0..1] qu'une cellule porte un objet de collection. */
   collectibleProbability: number;
+  /** Probabilité [0..1] qu'une cellule porte une pile pour la lampe torche. */
+  batteryProbability: number;
 }
 
 const BASE_WALL_DENSITY = 0.24;
@@ -54,6 +56,11 @@ const PROP_CLUSTER_PROBABILITY = 0.05;
  * un ramassage systématique — combiné à l'espacement minimal (voir `chunkLayout.ts`). */
 const COLLECTIBLE_PROBABILITY = 0.012;
 
+/** Piles : un peu plus fréquentes en profondeur, où les zones sombres s'étendent. */
+const BASE_BATTERY_PROBABILITY = 0.01;
+const BATTERY_PROBABILITY_PER_DEPTH = 0.0015;
+const MAX_BATTERY_PROBABILITY = 0.022;
+
 /**
  * Construit le profil du level à une profondeur donnée : seed dérivée + difficulté
  * croissante. `runSeed` vient du serveur (`POST /run/start`, étape 7) — signée et
@@ -73,5 +80,6 @@ export function createLevelProfile(depth: number, runSeed: string): LevelProfile
     wallTrapProbability: Math.min(MAX_WALL_TRAP_PROBABILITY, BASE_WALL_TRAP_PROBABILITY + depth * WALL_TRAP_PROBABILITY_PER_DEPTH),
     propClusterProbability: PROP_CLUSTER_PROBABILITY,
     collectibleProbability: COLLECTIBLE_PROBABILITY,
+    batteryProbability: Math.min(MAX_BATTERY_PROBABILITY, BASE_BATTERY_PROBABILITY + depth * BATTERY_PROBABILITY_PER_DEPTH),
   };
 }

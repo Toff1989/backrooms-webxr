@@ -35,7 +35,7 @@ main, menus sans quitter le jeu) :
 | Ranger l'objet tenu | A / X, ou le relâcher sur le menu d'inventaire ouvert |
 | Pousser / frapper | Poing fermé (grip sans objet) ou geste vif |
 | Inventaire | Y (ouvrir/fermer) ; viser + gâchette pour les boutons, viser une case + grip pour sortir l'objet à taille réelle |
-| Lampe frontale | B |
+| Lampe frontale | B (batterie limitée, HUD `BAT` : ramasser des piles au sol en marchant dessus ou en les touchant) |
 | Recaler la hauteur / STOP REC | Boutons du menu d'inventaire |
 
 Hauteur : au démarrage de la session, un joueur assis est automatiquement rehaussé à hauteur
@@ -78,10 +78,14 @@ comme un contexte sécurisé).
 | Commande | Rôle |
 |---|---|
 | `npm run dev` | Serveur de dev HTTPS avec HMR |
-| `npm run build` | Typecheck (`tsc -b`) + build de production |
+| `npm run build` | Typecheck (`tsc -b`) + build de production + pré-compression brotli/gzip |
 | `npm run preview` | Sert le build de production |
 | `npm run typecheck` | Vérification TypeScript seule |
 | `npm run test:physics` | Simulation physique sans rendu (marcher dans un meuble, saisir/lancer, murs, saisie à distance, rangement) |
+| `python3 scripts/convert-textures.py` | Recompresse les textures sources (`assets-src/`) en KTX2 (Pillow + `toktx` de KTX-Software requis) |
+
+Mesures de perfs en casque : ouvrir le jeu avec `?debug=1` (FPS, draw calls, triangles,
+géométries/textures en mémoire affichés sous le HUD caméscope).
 
 ## Structure
 
@@ -241,4 +245,5 @@ tests/physics.sim.ts         Simulation physique sans rendu (`npm run test:physi
 
 ## Prochaine étape
 
-9. Optimisation Quest (profiling fps/draw calls, réglages de confort)
+Voir `docs/PLAN-ACTION.md` (améliorations esthétique / gameplay / performance, toutes
+implémentées) : reste à mesurer en casque avec `?debug=1` et à ajuster (étape 9).

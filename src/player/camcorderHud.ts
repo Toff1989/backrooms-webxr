@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { t } from "../i18n";
 
 const CANVAS_WIDTH = 1024;
 const CANVAS_HEIGHT = 220;
@@ -108,12 +109,12 @@ export class CamcorderHud {
 
     // Batterie de la lampe torche (vraie ressource de jeu) : rouge sous 20 %, clignote sous 10 %.
     const level = Math.round(this.status.battery * 100);
-    if (level >= 10 || blink) this.text(`BAT ${level}%`, CANVAS_WIDTH - 20, 48, "right", level < 20 ? "#ff6b5a" : "#f4f1e8");
+    if (level >= 10 || blink) this.text(`${t("hud.battery")} ${level}%`, CANVAS_WIDTH - 20, 48, "right", level < 20 ? "#ff6b5a" : "#f4f1e8");
 
     ctx.font = "bold 34px monospace";
-    this.text(`NIV ${this.status.depth}`, 20, 120, "left", "#ffe89a");
-    this.text(`SAC ${this.status.items}`, 200, 120, "left");
-    const flags = [this.status.crouching ? "ACCROUPI" : "", this.status.sprinting ? "SPRINT" : "", this.status.flashlight ? "LAMPE" : ""].filter(Boolean).join("  ");
+    this.text(`${t("hud.level")} ${this.status.depth}`, 20, 120, "left", "#ffe89a");
+    this.text(`${t("hud.bag")} ${this.status.items}`, 200, 120, "left");
+    const flags = [this.status.crouching ? t("hud.crouch") : "", this.status.sprinting ? t("hud.sprint") : "", this.status.flashlight ? t("hud.flashlight") : ""].filter(Boolean).join("  ");
     this.text(flags, CANVAS_WIDTH - 20, 120, "right", "#b9e0ff");
 
     if (this.status.debug) {

@@ -12,6 +12,8 @@ const DECAY_LAMBDA = 2.2;
  */
 class CorruptionState {
   private intensity = 0;
+  /** Multiplicateur de dissipation (bonus de collection). */
+  decayMultiplier = 1;
 
   get value(): number {
     return this.intensity;
@@ -22,7 +24,7 @@ class CorruptionState {
   }
 
   update(deltaSeconds: number): void {
-    this.intensity = THREE.MathUtils.damp(this.intensity, 0, DECAY_LAMBDA, deltaSeconds);
+    this.intensity = THREE.MathUtils.damp(this.intensity, 0, DECAY_LAMBDA * this.decayMultiplier, deltaSeconds);
     setVhsCorruption(this.intensity);
   }
 }

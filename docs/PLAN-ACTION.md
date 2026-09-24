@@ -40,5 +40,21 @@ puis l'esthétique, puis le gameplay. Chaque phase = un commit sur `main`.
 | 3.6 | i18n | `fr.json` / `en.json`, langue du navigateur + bascule dans les options ; HUD, menus, écran de fin, lore. |
 
 ## Suivi
-Chaque ligne est cochée dans le message de commit de sa phase. Mesures Quest à reporter ici
-après test en casque (FPS moyen / draw calls au niveau 0 et au niveau 5).
+| Phase | État | Commit |
+|---|---|---|
+| 0 — Mesure | ✅ | `d7b0be6` |
+| 1 — Performance | ✅ (sauf mesures casque) | `d7b0be6` |
+| 2 — Esthétique | ✅ | `291735d` |
+| 3 — Gameplay | ✅ | commit « Gameplay … (phase 3) » |
+
+Mesures (Chromium/SwiftShader, vue ouverte au spawn, niveau 0) : **110 → 25 draw calls**,
+**627k → 147k triangles** après la phase 1. Écarts avec le plan :
+- 1.4 : toutes les cartes restent en 1K mais passent en KTX2 (UASTC pour couleur/normales,
+  ETC1S pour AO+roughness empaquetées) — l'ETC1S abîmait trop le papier peint. Téléchargement
+  des textures : 2,0 Mo (WebP) → 5,4 Mo, mémoire GPU ~4× plus faible.
+- 1.1 : les meubles restent un objet physique chacun ; ils sont fusionnés par matériau et
+  masqués au-delà de 17 m (c'étaient eux, plus que les chunks, qui coûtaient des draw calls).
+
+À faire en casque : FPS moyen et draw calls au niveau 0 et au niveau 5 avec `?debug=1`,
+à reporter ici ; ajuster `RENDER_DISTANCE` (grabbable.ts) et la densité des zones sombres
+(`lightField.ts`) selon le ressenti.

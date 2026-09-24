@@ -2,11 +2,12 @@ import * as THREE from "three";
 import { bandpass, brownNoise, createSamples, highpass, lowpass, makeLoopable, normalize, reverb, toBuffer } from "../assets/audio/synth";
 import { addGlitchZone, GlitchKind, removeGlitchZone, type GlitchZone } from "./glitchZones";
 
-export type GlitchTrapKind = "corruption" | "teleporter";
+export type GlitchTrapKind = "corruption" | "teleporter" | "loop";
 
 const ZONE_RADIUS: Record<GlitchTrapKind, [number, number]> = {
   corruption: [1.3, 2.1],
   teleporter: [1.1, 1.4],
+  loop: [1.0, 1.3],
 };
 
 const TRIGGER_RADIUS = 1.6;
@@ -26,8 +27,8 @@ export interface GlitchTrapUpdateResult {
   corruptionDelta: number;
   /** Vrai la frame où le joueur entre dans le rayon de déclenchement (pour le signal haptique). */
   justTriggered: boolean;
-  /** Vrai la frame où un téléporteur happe le joueur. */
-  teleport: boolean;
+  /** La frame où le joueur est happé : téléporteur ("random") ou boucle spatiale ("loop"). */
+  teleport: "random" | "loop" | null;
 }
 
 /**
@@ -39,6 +40,9 @@ export interface GlitchTrapUpdateResult {
  * - "corruption" : au contact, la corruption visuelle cumulable monte (pas de mort).
  * - "teleporter" : la surface est aspirée en spirale vers un noyau noir ; y marcher
  *   téléporte le joueur ailleurs dans le niveau (jamais plus près de la sortie).
+ * - "loop" (boucle spatiale) : presque invisible (une déchirure qui couve à peine) ; y
+ *   passer renvoie le joueur là où il était une dizaine de secondes plus tôt — il ne s'en
+ *   rend compte qu'en reconnaissant le couloir.
  */
 export class GlitchTrap {
   readonly group: THREE.Group;
@@ -77,11 +81,12 @@ export class GlitchTrap {
 
     this.sound = new THREE.PositionalAudio(listener);
     this.sound.setBuffer(kind === "teleporter" ? getTeleporterLoop(listener.context) : getStaticLoop(listener.context));
+    // La boucle ne grésille presque pas : on ne l'entend qu'en passant tout près.
     this.sound.setLoop(true);
     this.sound.setRefDistance(REF_DISTANCE);
     this.sound.setMaxDistance(MAX_DISTANCE);
     this.sound.setRolloffFactor(1.6);
-    this.sound.setVolume(LOOP_VOLUME);
+    this.sound.setVolume(kind === "loop" ? LOOP_VOLUME * 0.25 : LOOP_VOLUME);
     this.sound.position.y = 1.2;
     this.group.add(this.sound);
   }
@@ -107,9 +112,10 @@ export class GlitchTrap {
       this.surgeTimer = 1.5 + Math.random() * 7;
     }
     this.surge = Math.max(0, this.surge - deltaSeconds * 2.5);
-    const idle = this.kind === "teleporter" ? 0.45 : 0.22;
+    const idle = this.kind === "teleporter" ? 0.45 : this.kind === "loop" ? 0.1 : 0.22;
+    const reaction = this.kind === "loop" ? 0.25 : 0.6;
     const flicker = Math.random() < 0.08 ? 0.4 : 1;
-    this.zone.intensity = Math.min(1, (idle + awareness * 0.6 + this.surge * 0.5) * flicker);
+    this.zone.intensity = Math.min(1, (idle + awareness * reaction + this.surge * (this.kind === "loop" ? 0.2 : 0.5)) * flicker);
 
     if (this.playRequested && !this.sound.isPlaying && this.sound.context.state === "running") {
       this.sound.play();
@@ -119,16 +125,17 @@ export class GlitchTrap {
     const justTriggered = playerIsInside && !this.playerWasInside;
     this.playerWasInside = playerIsInside;
 
-    if (this.kind === "teleporter") {
-      const teleport = distance < TELEPORT_RADIUS && this.cooldown === 0;
-      if (teleport) this.cooldown = TELEPORT_COOLDOWN_SECONDS;
-      return { corruptionDelta: 0, justTriggered, teleport };
+    if (this.kind !== "corruption") {
+      const happens = distance < TELEPORT_RADIUS && this.cooldown === 0;
+      if (happens) this.cooldown = TELEPORT_COOLDOWN_SECONDS;
+      // La boucle ne prévient pas (pas de vibration à l'approche) : c'est tout son principe.
+      return { corruptionDelta: 0, justTriggered: this.kind === "teleporter" && justTriggered, teleport: happens ? (this.kind === "loop" ? "loop" : "random") : null };
     }
 
-    if (!playerIsInside) return { corruptionDelta: 0, justTriggered: false, teleport: false };
+    if (!playerIsInside) return { corruptionDelta: 0, justTriggered: false, teleport: null };
 
     const triggerProximity = 1 - distance / TRIGGER_RADIUS; // 0..1, plus fort au centre
-    return { corruptionDelta: CORRUPTION_RATE_PER_SECOND * triggerProximity * deltaSeconds, justTriggered, teleport: false };
+    return { corruptionDelta: CORRUPTION_RATE_PER_SECOND * triggerProximity * deltaSeconds, justTriggered, teleport: null };
   }
 
   dispose(): void {

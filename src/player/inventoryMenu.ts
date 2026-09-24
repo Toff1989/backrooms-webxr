@@ -1,8 +1,10 @@
 import * as THREE from "three";
+import { getLanguage, loreFragment, onLanguageChange, setLanguage, t } from "../i18n";
 import { getModelShape } from "../physics/modelShape";
 import { drawButton, drawPanelBackground, inRect, UiPanel, wrapText, type PressButton, type Rect } from "../ui/uiPanel";
 import { spawnCollectibleModel } from "../world/collectibleLoader";
 import type { CollectionEntry, CollectionStore } from "../world/collection";
+import { computePerks } from "../world/collectionPerks";
 import type { Hand } from "./hand";
 import type { Sfx } from "./sfx";
 
@@ -31,17 +33,18 @@ const MENU_DROP = 0.14;
 const MENU_TILT = THREE.MathUtils.degToRad(14);
 const STOP_CONFIRM_SECONDS = 3;
 
-type ButtonId = "prev" | "next" | "height" | "stop" | "close";
+type ButtonId = "prev" | "next" | "height" | "lang" | "stop" | "close";
 
 const BUTTONS: Record<ButtonId, Rect> = {
   prev: { x: 40, y: 556, w: 90, h: 64 },
   next: { x: 140, y: 556, w: 90, h: 64 },
-  height: { x: 250, y: 556, w: 300, h: 64 },
+  height: { x: 250, y: 556, w: 200, h: 64 },
+  lang: { x: 460, y: 556, w: 90, h: 64 },
   stop: { x: 570, y: 556, w: 220, h: 64 },
   close: { x: 810, y: 556, w: 174, h: 64 },
 };
 
-const RARITY_LABEL: Record<CollectionEntry["rarity"], string> = { common: "Commun", rare: "Rare", legendary: "Légendaire" };
+const rarityLabel = (rarity: CollectionEntry["rarity"]): string => t(`rarity.${rarity}`);
 const RARITY_COLOR: Record<CollectionEntry["rarity"], string> = { common: "#b9b2a0", rare: "#7fc4e8", legendary: "#e8c34a" };
 
 interface Miniature {
@@ -87,6 +90,7 @@ export class InventoryMenu extends UiPanel {
       this.rebuildMiniatures();
       this.invalidate();
     });
+    onLanguageChange(() => this.invalidate());
   }
 
   toggle(): void {
@@ -179,7 +183,11 @@ export class InventoryMenu extends UiPanel {
         break;
       case "height":
         this.actions.recalibrateHeight();
-        this.showStatus("Hauteur recalée sur votre position actuelle.");
+        this.showStatus(t("inv.heightStatus"));
+        break;
+      case "lang":
+        setLanguage(getLanguage() === "fr" ? "en" : "fr");
+        this.showStatus(t("inv.langStatus"));
         break;
       case "stop":
         if (this.stopArmedUntil) {
@@ -289,11 +297,11 @@ export class InventoryMenu extends UiPanel {
     ctx.textAlign = "left";
     ctx.fillStyle = "#f2e8cf";
     ctx.font = "bold 38px monospace";
-    ctx.fillText("INVENTAIRE", 40, 42);
+    ctx.fillText(t("inv.title"), 40, 42);
     ctx.textAlign = "right";
     ctx.font = "26px monospace";
     ctx.fillStyle = "#b9ae93";
-    ctx.fillText(`${this.store.count} objet(s) · page ${this.page + 1}/${this.pageCount}`, width - 40, 42);
+    ctx.fillText(t("inv.count", { count: this.store.count, page: this.page + 1, pages: this.pageCount }), width - 40, 42);
 
     const entries = this.entriesOnPage();
     const hoveredSlots = new Set([...this.hoverSlot.values()].filter((slot): slot is number => slot !== null));
@@ -317,13 +325,21 @@ export class InventoryMenu extends UiPanel {
     if (focus) {
       ctx.font = "bold 32px monospace";
       ctx.fillStyle = "#f2e8cf";
-      ctx.fillText(focus.nameFr, 40, 462);
+      const french = getLanguage() === "fr";
+      ctx.fillText(french ? focus.nameFr : focus.nameEn, 40, 462);
       ctx.font = "22px monospace";
       ctx.fillStyle = RARITY_COLOR[focus.rarity];
-      ctx.fillText(`${RARITY_LABEL[focus.rarity]} · trouvé au niveau ${focus.depth} · ${focus.nameEn}`, 40, 496);
-      ctx.fillStyle = "#a79d86";
+      ctx.fillText(t("inv.found", { rarity: rarityLabel(focus.rarity), depth: focus.depth }), 40, 496);
       ctx.font = "21px monospace";
-      wrapText(ctx, focus.descriptionFr, 40, 526, width - 80, 24, 1);
+      // Objet porteur d'un fragment du récit : la bande perdue remplace la description.
+      const fragment = focus.fragment !== undefined ? loreFragment(focus.fragment) : null;
+      if (fragment) {
+        ctx.fillStyle = "#e8c34a";
+        wrapText(ctx, `${t("lore.title", { n: (focus.fragment ?? 0) + 1 })} — « ${fragment} »`, 40, 526, width - 80, 24, 1);
+      } else {
+        ctx.fillStyle = "#a79d86";
+        wrapText(ctx, french ? focus.descriptionFr : focus.descriptionEn, 40, 526, width - 80, 24, 1);
+      }
     } else if (this.statusUntil) {
       ctx.font = "26px monospace";
       ctx.fillStyle = "#9fe39f";
@@ -331,23 +347,35 @@ export class InventoryMenu extends UiPanel {
     } else {
       ctx.font = "24px monospace";
       ctx.fillStyle = "#a79d86";
-      ctx.fillText(this.store.count === 0 ? "Inventaire vide — ramassez des objets et relâchez-les ici." : "Visez un objet pour le détailler, grip pour le prendre en main.", 40, 480);
-      ctx.fillText("Relâchez un objet tenu sur ce menu (ou A/X) pour le ranger.", 40, 514);
+      ctx.fillText(this.store.count === 0 ? t("inv.empty") : t("inv.aim"), 40, 480);
+      ctx.fillText(t("inv.store"), 40, 514);
     }
 
     const hoveredButtons = new Set(this.hoverButton.values());
     drawButton(ctx, BUTTONS.prev, "◀", { hovered: hoveredButtons.has("prev"), disabled: this.pageCount < 2 });
     drawButton(ctx, BUTTONS.next, "▶", { hovered: hoveredButtons.has("next"), disabled: this.pageCount < 2 });
-    drawButton(ctx, BUTTONS.height, "RECALER HAUTEUR", { hovered: hoveredButtons.has("height") });
-    drawButton(ctx, BUTTONS.stop, this.stopArmedUntil ? "CONFIRMER ?" : "■ STOP REC", {
+    drawButton(ctx, BUTTONS.height, t("inv.height"), { hovered: hoveredButtons.has("height") });
+    drawButton(ctx, BUTTONS.lang, t("inv.lang"), { hovered: hoveredButtons.has("lang") });
+    drawButton(ctx, BUTTONS.stop, this.stopArmedUntil ? t("inv.confirm") : t("inv.stop"), {
       hovered: hoveredButtons.has("stop"),
       accent: "#ff6b5a",
     });
-    drawButton(ctx, BUTTONS.close, "FERMER", { hovered: hoveredButtons.has("close") });
+    drawButton(ctx, BUTTONS.close, t("inv.close"), { hovered: hoveredButtons.has("close") });
 
     ctx.textAlign = "center";
     ctx.font = "20px monospace";
+    ctx.fillStyle = "#c9b98a";
+    const perks = computePerks(this.store.getAll());
+    const battery = Math.round((perks.batteryCapacity - 1) * 100);
+    const decay = Math.round((perks.corruptionDecay - 1) * 100);
+    ctx.fillText(
+      battery === 0 && decay === 0 && perks.beaconSteadiness === 0
+        ? t("perks.none")
+        : t("perks.line", { battery, decay, compass: perks.beaconSteadiness > 0 ? t("perks.compass") : "" }),
+      width / 2,
+      646,
+    );
     ctx.fillStyle = "#7d7563";
-    ctx.fillText("Y : ouvrir/fermer · gâchette : cliquer · grip : prendre un objet", width / 2, 662);
+    ctx.fillText(t("inv.footer"), width / 2, 680);
   }
 }

@@ -6,6 +6,7 @@ import { CELL_SIZE, CHUNK_CELLS, CHUNK_SIZE, STREAM_RADIUS_CHUNKS, WALL_HEIGHT }
 import type { LevelProfile } from "../shared/levelProfile";
 import { createSeededNoise2D } from "../shared/noise";
 import { coordinateHash01, stringSeedToInt } from "../shared/rng";
+import { BatteryPickup } from "./batteryPickup";
 import { buildChunkGroup } from "./chunkMesh";
 import { spawnCollectibleModel } from "./collectibleLoader";
 import { toCollectionEntry } from "./collection";
@@ -18,12 +19,23 @@ const REGEN_MIN_INTERVAL_SECONDS = 6;
 const REGEN_MAX_INTERVAL_SECONDS = 12;
 /** Distance minimale (en chunks) entre le chunk régénéré et le chunk du joueur : jamais sous ses pieds. */
 const REGEN_MIN_DISTANCE_CHUNKS = 2;
+/**
+ * Parfois, le chunk régénéré est un voisin direct, juste derrière le joueur (hors champ) :
+ * en se retournant, il voit que le couloir d'où il vient n'est plus le même.
+ */
+const REGEN_BEHIND_CHANCE = 0.35;
+/** Distance minimale (m) entre le joueur et les limites d'un chunk voisin régénéré. */
+const REGEN_BEHIND_MIN_DISTANCE = 4;
 /** Corruption ajoutée quand un chunk hors champ se régénère (masque discrètement le changement). */
 const REGEN_CORRUPTION_PULSE = 0.1;
 /** Part des pièges glitch qui sont des téléporteurs (croît avec la profondeur). */
 const BASE_TELEPORTER_SHARE = 0.25;
 const TELEPORTER_SHARE_PER_DEPTH = 0.03;
 const MAX_TELEPORTER_SHARE = 0.45;
+/** Part des pièges glitch qui sont des boucles spatiales (en plus des téléporteurs). */
+const BASE_LOOP_SHARE = 0.15;
+const LOOP_SHARE_PER_DEPTH = 0.02;
+const MAX_LOOP_SHARE = 0.3;
 /** Destination d'un téléporteur : à au moins cette distance (m) du point de départ. */
 const TELEPORT_MIN_JUMP = 12;
 /** Marge (m) autour des obstacles pour la destination (le joueur n'apparaît jamais dans un meuble). */
@@ -38,6 +50,7 @@ interface LoadedChunk {
   layout: ChunkLayout;
   glitchTraps: GlitchTrap[];
   wallTraps: WallTrap[];
+  batteries: BatteryPickup[];
   epoch: number;
   bounds: THREE.Box3;
 }
@@ -47,8 +60,10 @@ export interface ChunkStreamerUpdateResult {
   glitchTrapJustTriggered: boolean;
   wallTrapJustWarned: boolean;
   wallTrapJustPopped: boolean;
-  /** Vrai la frame où un téléporteur happe le joueur. */
-  teleportRequested: boolean;
+  /** La frame où un téléporteur ("random") ou une boucle ("loop") happe le joueur. */
+  teleportRequested: "random" | "loop" | null;
+  /** Nombre de piles ramassées cette frame. */
+  batteriesPicked: number;
 }
 
 /**
@@ -63,6 +78,8 @@ export class ChunkStreamer {
   depth = 0;
 
   private readonly loaded = new Map<string, LoadedChunk>();
+  /** Piles déjà ramassées dans ce level (ne réapparaissent pas au rechargement du chunk). */
+  private readonly pickedBatteries = new Set<string>();
   private noise2D: NoiseFunction2D;
   private profile: LevelProfile;
   private currentChunkX = Number.NaN;
@@ -91,6 +108,7 @@ export class ChunkStreamer {
     this.grabbables.removeAllNotHeld();
     this.profile = profile;
     this.noise2D = createSeededNoise2D(profile.seed);
+    this.pickedBatteries.clear();
     this.currentChunkX = Number.NaN;
     this.currentChunkZ = Number.NaN;
     this.regenTimer = randomRegenInterval();
@@ -113,7 +131,13 @@ export class ChunkStreamer {
     }
   }
 
-  update(playerPosition: THREE.Vector3, camera: THREE.Camera, elapsedSeconds: number, deltaSeconds: number): ChunkStreamerUpdateResult {
+  update(
+    playerPosition: THREE.Vector3,
+    hands: readonly THREE.Vector3[],
+    camera: THREE.Camera,
+    elapsedSeconds: number,
+    deltaSeconds: number,
+  ): ChunkStreamerUpdateResult {
     const chunkX = Math.floor(playerPosition.x / CHUNK_SIZE);
     const chunkZ = Math.floor(playerPosition.z / CHUNK_SIZE);
     if (chunkX !== this.currentChunkX || chunkZ !== this.currentChunkZ) {
@@ -126,14 +150,23 @@ export class ChunkStreamer {
     let glitchTrapJustTriggered = false;
     let wallTrapJustWarned = false;
     let wallTrapJustPopped = false;
-    let teleportRequested = false;
+    let teleportRequested: "random" | "loop" | null = null;
+    let batteriesPicked = 0;
 
     for (const chunk of this.loaded.values()) {
       for (const trap of chunk.glitchTraps) {
         const result = trap.update(playerPosition, elapsedSeconds, deltaSeconds);
         corruptionDelta += result.corruptionDelta;
         glitchTrapJustTriggered = glitchTrapJustTriggered || result.justTriggered;
-        teleportRequested = teleportRequested || result.teleport;
+        teleportRequested ??= result.teleport;
+      }
+      for (let i = chunk.batteries.length - 1; i >= 0; i--) {
+        const battery = chunk.batteries[i]!;
+        if (!battery.isPickedBy(playerPosition, hands)) continue;
+        this.pickedBatteries.add(battery.id);
+        chunk.group.remove(battery.object);
+        chunk.batteries.splice(i, 1);
+        batteriesPicked++;
       }
       for (const trap of chunk.wallTraps) {
         const result = trap.update(playerPosition, deltaSeconds);
@@ -143,9 +176,9 @@ export class ChunkStreamer {
       }
     }
 
-    corruptionDelta += this.updateDynamicMaze(camera, deltaSeconds);
+    corruptionDelta += this.updateDynamicMaze(camera, playerPosition, deltaSeconds);
 
-    return { corruptionDelta, glitchTrapJustTriggered, wallTrapJustWarned, wallTrapJustPopped, teleportRequested };
+    return { corruptionDelta, glitchTrapJustTriggered, wallTrapJustWarned, wallTrapJustPopped, teleportRequested, batteriesPicked };
   }
 
   /**
@@ -210,6 +243,16 @@ export class ChunkStreamer {
     return candidates[Math.floor(Math.random() * candidates.length)]!;
   }
 
+  /** Vrai si aucune boîte de collision (mur, pilier, meuble) n'est à moins de `clearance` du point. */
+  isPositionFree(x: number, z: number, clearance: number): boolean {
+    for (const { layout } of this.loaded.values()) {
+      for (const box of [...layout.wallSegments, ...layout.pillarObstacles, ...layout.propObstacles]) {
+        if (x > box.minX - clearance && x < box.maxX + clearance && z > box.minZ - clearance && z < box.maxZ + clearance) return false;
+      }
+    }
+    return true;
+  }
+
   private streamAround(chunkX: number, chunkZ: number): void {
     const desired = new Set<string>();
     for (let dx = -STREAM_RADIUS_CHUNKS; dx <= STREAM_RADIUS_CHUNKS; dx++) {
@@ -227,7 +270,7 @@ export class ChunkStreamer {
   }
 
   /** Régénère périodiquement un chunk chargé mais hors champ de vision (labyrinthe dynamique). */
-  private updateDynamicMaze(camera: THREE.Camera, deltaSeconds: number): number {
+  private updateDynamicMaze(camera: THREE.Camera, playerPosition: THREE.Vector3, deltaSeconds: number): number {
     this.regenTimer -= deltaSeconds;
     if (this.regenTimer > 0) return 0;
 
@@ -240,13 +283,16 @@ export class ChunkStreamer {
     this.frustumMatrix.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
     this.frustum.setFromProjectionMatrix(this.frustumMatrix);
 
+    const behind = Math.random() < REGEN_BEHIND_CHANCE;
     const candidates: string[] = [];
     for (const [key, chunk] of this.loaded) {
       const dx = chunk.layout.chunkX - this.currentChunkX;
       const dz = chunk.layout.chunkZ - this.currentChunkZ;
       const chebyshev = Math.max(Math.abs(dx), Math.abs(dz));
-      if (chebyshev < REGEN_MIN_DISTANCE_CHUNKS) continue;
       if (this.frustum.intersectsBox(chunk.bounds)) continue;
+      if (behind) {
+        if (chebyshev !== 1 || distanceToBox(playerPosition, chunk.bounds) < REGEN_BEHIND_MIN_DISTANCE) continue;
+      } else if (chebyshev < REGEN_MIN_DISTANCE_CHUNKS) continue;
       candidates.push(key);
     }
     if (candidates.length === 0) return 0;
@@ -278,10 +324,12 @@ export class ChunkStreamer {
 
     const seedInt = stringSeedToInt(this.profile.seed);
     const teleporterShare = Math.min(MAX_TELEPORTER_SHARE, BASE_TELEPORTER_SHARE + this.profile.depth * TELEPORTER_SHARE_PER_DEPTH);
+    const loopShare = Math.min(MAX_LOOP_SHARE, BASE_LOOP_SHARE + this.profile.depth * LOOP_SHARE_PER_DEPTH);
     const glitchTraps = layout.glitchTrapPositions.map((position) => {
       const cellX = Math.floor(position.x / CELL_SIZE);
       const cellZ = Math.floor(position.z / CELL_SIZE);
-      const kind = coordinateHash01(seedInt, cellX, cellZ, 313) < teleporterShare ? "teleporter" : "corruption";
+      const roll = coordinateHash01(seedInt, cellX, cellZ, 313);
+      const kind = roll < teleporterShare ? "teleporter" : roll < teleporterShare + loopShare ? "loop" : "corruption";
       const trap = new GlitchTrap(position.x, position.z, this.audioListener, kind);
       this.scene.add(trap.group);
       if (this.sessionStarted) trap.play();
@@ -294,9 +342,17 @@ export class ChunkStreamer {
       return trap;
     });
 
+    const batteries = layout.batteryPlacements
+      .filter((placement) => !this.pickedBatteries.has(placement.id))
+      .map((placement) => {
+        const battery = new BatteryPickup(placement.id, placement.x, placement.z, placement.rotationY);
+        group.add(battery.object);
+        return battery;
+      });
+
     const bounds = new THREE.Box3(new THREE.Vector3(originX, 0, originZ), new THREE.Vector3(originX + CHUNK_SIZE, WALL_HEIGHT, originZ + CHUNK_SIZE));
 
-    const loadedChunk: LoadedChunk = { group, staticBody, layout, glitchTraps, wallTraps, epoch, bounds };
+    const loadedChunk: LoadedChunk = { group, staticBody, layout, glitchTraps, wallTraps, batteries, epoch, bounds };
     this.loaded.set(key, loadedChunk);
 
     for (const placement of layout.propPlacements) {
@@ -370,6 +426,12 @@ function chunkKey(chunkX: number, chunkZ: number): string {
   return `${chunkX},${chunkZ}`;
 }
 
+function distanceToBox(point: THREE.Vector3, box: THREE.Box3): number {
+  const dx = Math.max(box.min.x - point.x, 0, point.x - box.max.x);
+  const dz = Math.max(box.min.z - point.z, 0, point.z - box.max.z);
+  return Math.hypot(dx, dz);
+}
+
 function edgeKey(x: number, z: number): string {
   return `${Math.round(x * 4)},${Math.round(z * 4)}`;
 }
@@ -379,9 +441,10 @@ function parseChunkKey(key: string): [number, number] {
   return [Number(parts[0]), Number(parts[1])];
 }
 
-/** Libère les géométries du chunk. Les matériaux sont des singletons partagés : jamais disposés ici. */
+/** Libère les géométries du chunk. Les matériaux (et la géométrie des piles) sont partagés : jamais disposés ici. */
 function disposeGroup(group: THREE.Group): void {
   group.traverse((object) => {
+    if (object.parent?.name === "battery") return;
     if (object instanceof THREE.Mesh || object instanceof THREE.InstancedMesh) {
       object.geometry.dispose();
     }

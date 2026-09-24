@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { onLanguageChange, t } from "../i18n";
 import { generatePseudoSuggestion, PSEUDO_ADJECTIVE_COUNT, PSEUDO_NOUN_COUNT } from "../shared/pseudoGenerator";
 import { drawButton, drawPanelBackground, inRect, UiPanel, wrapText, type PressButton, type Rect } from "../ui/uiPanel";
 import type { LeaderboardEntry } from "../world/runSession";
@@ -46,6 +47,7 @@ export class EndRunScreen extends UiPanel {
     super(WIDTH, HEIGHT, PX_PER_M);
     this.group.name = "end-run-screen";
     parent.add(this.group);
+    onLanguageChange(() => this.invalidate());
   }
 
   show(depthReached: number): void {
@@ -116,7 +118,7 @@ export class EndRunScreen extends UiPanel {
         this.invalidate();
       })
       .catch(() => {
-        this.errorMessage = "Envoi impossible (serveur injoignable) — score non classé.";
+        this.errorMessage = t("end.error");
         this.phase = "error";
         this.invalidate();
       });
@@ -136,36 +138,36 @@ export class EndRunScreen extends UiPanel {
     ctx.textBaseline = "middle";
     ctx.fillStyle = "#ff6b5a";
     ctx.font = "bold 40px monospace";
-    ctx.fillText("■ FIN DE L'ENREGISTREMENT", width / 2, 60);
+    ctx.fillText(t("end.title"), width / 2, 60);
     ctx.fillStyle = "#f2e8cf";
     ctx.font = "30px monospace";
-    ctx.fillText(`Profondeur atteinte : ${this.depthReached}`, width / 2, 116);
+    ctx.fillText(t("end.depth", { depth: this.depthReached }), width / 2, 116);
 
     if (this.phase === "review") {
       ctx.font = "24px monospace";
       ctx.fillStyle = "#a79d86";
-      ctx.fillText("Votre pseudo pour le classement :", width / 2, 180);
+      ctx.fillText(t("end.prompt"), width / 2, 180);
       ctx.font = "bold 40px monospace";
       ctx.fillStyle = "#ffe89a";
       ctx.fillText(this.currentPseudo(), width / 2, 250);
-      drawButton(ctx, BUTTONS.adjective, "↻ AUTRE ADJECTIF", { hovered: hovered.has("adjective") });
-      drawButton(ctx, BUTTONS.noun, "↻ AUTRE NOM", { hovered: hovered.has("noun") });
-      drawButton(ctx, BUTTONS.submit, "ENVOYER AU CLASSEMENT (A)", { hovered: hovered.has("submit"), accent: "#9fe39f" });
+      drawButton(ctx, BUTTONS.adjective, t("end.adjective"), { hovered: hovered.has("adjective") });
+      drawButton(ctx, BUTTONS.noun, t("end.noun"), { hovered: hovered.has("noun") });
+      drawButton(ctx, BUTTONS.submit, t("end.submit"), { hovered: hovered.has("submit"), accent: "#9fe39f" });
     } else if (this.phase === "submitting") {
       ctx.font = "30px monospace";
       ctx.fillStyle = "#cfc5ad";
-      ctx.fillText("Envoi au classement…", width / 2, 300);
+      ctx.fillText(t("end.sending"), width / 2, 300);
     } else if (this.phase === "error") {
       ctx.font = "26px monospace";
       ctx.fillStyle = "#e06a5a";
       ctx.textAlign = "left";
       wrapText(ctx, this.errorMessage, 80, 260, width - 160, 32, 3);
       ctx.textAlign = "center";
-      drawButton(ctx, BUTTONS.restart, "NOUVELLE RUN (A)", { hovered: hovered.has("restart") });
+      drawButton(ctx, BUTTONS.restart, t("end.restart"), { hovered: hovered.has("restart") });
     } else {
       ctx.font = "bold 26px monospace";
       ctx.fillStyle = "#9fe39f";
-      ctx.fillText(`Score envoyé : ${this.currentPseudo()}`, width / 2, 170);
+      ctx.fillText(t("end.sent", { pseudo: this.currentPseudo() }), width / 2, 170);
       ctx.textAlign = "left";
       ctx.font = "24px monospace";
       this.leaderboard.slice(0, LEADERBOARD_ROWS).forEach((entry, index) => {
@@ -174,15 +176,15 @@ export class EndRunScreen extends UiPanel {
         ctx.fillText(`${String(index + 1).padStart(2, "0")}. ${entry.pseudo}`, 120, y);
         ctx.fillStyle = "#a79d86";
         ctx.textAlign = "right";
-        ctx.fillText(`niv. ${entry.depth}`, width - 120, y);
+        ctx.fillText(t("end.levelShort", { n: entry.depth }), width - 120, y);
         ctx.textAlign = "left";
       });
       if (this.leaderboard.length === 0) {
         ctx.fillStyle = "#a79d86";
-        ctx.fillText("Aucune entrée pour l'instant.", 120, 240);
+        ctx.fillText(t("end.empty"), 120, 240);
       }
       ctx.textAlign = "center";
-      drawButton(ctx, BUTTONS.restart, "NOUVELLE RUN (A)", { hovered: hovered.has("restart") });
+      drawButton(ctx, BUTTONS.restart, t("end.restart"), { hovered: hovered.has("restart") });
     }
   }
 }
