@@ -30,6 +30,13 @@ import { CollectionStore } from "./world/collection";
 import { computePerks } from "./world/collectionPerks";
 import { corruption } from "./world/corruption";
 import { GrabbableRegistry, type LorePageData } from "./world/grabbable";
+import { InteractionSystem } from "./world/interactions";
+import { onNoise } from "./world/noise";
+import { ObjectAudio } from "./world/objectAudio";
+import { spawnCollectibleModel } from "./world/collectibleLoader";
+import type { CollectionEntry } from "./world/collection";
+import { COLLECTIBLE_SCALE_MAX, COLLECTIBLE_SCALE_MIN, generateCollectibleLore, getCollectibleRarity, pickCollectibleKind } from "./shared/collectibles";
+import { coordinateHash01, stringSeedToInt } from "./shared/rng";
 import { LevelManager, SPAWN_LOCAL_POSITION } from "./world/levelManager";
 import { LoreJournal } from "./world/loreJournal";
 import { configureLoreServices, updateLoreObjects } from "./world/lorePage";
@@ -140,8 +147,9 @@ const vhsOverlay = new VhsOverlay(camera);
 const hud = new CamcorderHud(camera);
 /** Bandes perdues : cassettes lues dans le viseur, polaroids photographiés derrière le joueur. */
 const tapePlayer = new TapePlayer(audioListener, hud);
+const capturePhoto = createPhotoCapture(renderer, scene, camera, physics);
 configureLoreServices({
-  capturePhoto: createPhotoCapture(renderer, scene, camera, physics),
+  capturePhoto,
   playTape: (fragment) => tapePlayer.play(fragment),
 });
 const ambientHum = new AmbientHum(audioListener, scene);
@@ -171,6 +179,8 @@ const poltergeist = new Poltergeist(scene, audioListener, grabbables);
 /** Menaces : la Coupure (néons qui meurent en vague) et le Cadreur (il bouge quand on ne le voit pas). */
 const blackout = new Blackout(scene, audioListener);
 const cadreur = new Cadreur(scene, audioListener, physics);
+/** Le bruit (télé, réveil, objets lancés) attire le Cadreur, partout. */
+onNoise((event) => cadreur.hear(event, levelManager.depth));
 
 /** Bonus de collection : recalculés à chaque rangement/sortie d'objet. */
 function applyPerks(): void {
@@ -275,8 +285,11 @@ grabSystem = new GrabSystem(physics, grabbables, hands, sfx, {
   inventorySlotAt: (hand) => inventoryMenu.slotIndexFor(hand),
   store: (item, slotIndex) => collectionStore.add(item, slotIndex ?? null),
   onGrab: (grabbable) => {
-    if (grabbable.lorePage && grabbable.heldBy instanceof Hand) readLorePage(grabbable.lorePage, grabbable.heldBy);
+    if (!(grabbable.heldBy instanceof Hand)) return;
+    if (grabbable.lorePage) readLorePage(grabbable.lorePage, grabbable.heldBy);
+    interactions.grabbed(grabbable.heldBy, grabbable);
   },
+  onUse: (hand, grabbable) => interactions.use(hand, grabbable),
   onEmptyGrip: (hand) => {
     if (!journal.isAtHip(hand)) return false;
     journal.openInHand(hand);
@@ -284,6 +297,50 @@ grabSystem = new GrabSystem(physics, grabbables, hands, sfx, {
   },
   head: () => ({ position: player.headWorld, forward: camera.getWorldDirection(new THREE.Vector3()) }),
 }, scene);
+
+/**
+ * Objet de collection caché dans un meuble fouillé (tiroir, carton, casier) : tiré au sort à
+ * partir de la seed du level et de l'emplacement du meuble — un seul par meuble et par level.
+ */
+function spawnHiddenItem(key: string, position: THREE.Vector3): void {
+  const id = `${levelManager.levelSeed}:hid:${key}`;
+  if (collectionStore.has(id) || grabbables.isItemAlive(id)) return;
+  const seedInt = stringSeedToInt(id);
+  const roll = (salt: number): number => coordinateHash01(seedInt, 0, 0, salt);
+  const kind = pickCollectibleKind(roll(1));
+  const entry: CollectionEntry = {
+    id,
+    kind,
+    rarity: getCollectibleRarity(kind),
+    scale: COLLECTIBLE_SCALE_MIN + roll(4) * (COLLECTIBLE_SCALE_MAX - COLLECTIBLE_SCALE_MIN),
+    depth: levelManager.depth,
+    ...generateCollectibleLore(kind, roll(2), roll(3)),
+    collectedAt: 0,
+  };
+  grabbables.reserveItem(id);
+  spawnCollectibleModel(kind)
+    .then(({ model, template }) => grabbables.createCollectible(entry, model, template, position, new THREE.Quaternion()))
+    .catch(() => grabbables.releaseItem(id));
+}
+
+/** Objets qui s'animent : télé, réveil, tiroirs, lampes, tapette... (voir `interactions.ts`). */
+const interactions = new InteractionSystem({
+  audio: new ObjectAudio(scene, audioListener),
+  physics,
+  registry: grabbables,
+  flashlight,
+  scene,
+  camera,
+  head: () => player.headWorld,
+  cadreurPosition: () => cadreur.worldPosition,
+  stunCadreur: (seconds) => cadreur.stun(seconds),
+  exitPosition: () => levelManager.exitPosition,
+  capturePhoto,
+  spawnHiddenItem,
+  take: () => take,
+  runSeconds: () => hud.recordingSeconds,
+  drop: (grabbable) => grabSystem.drop(grabbable),
+});
 
 /** Place le joueur au spawn du level courant (changement de level, nouvelle run). */
 function respawn(): void {
@@ -460,6 +517,7 @@ renderer.setAnimationLoop((timestamp) => {
   });
   grabbables.sync(player.headWorld);
   grabSystem.updateVisuals();
+  interactions.update(deltaSeconds, hands);
   perfStats.end("physique");
 
   perfStats.begin("monde");

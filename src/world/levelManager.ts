@@ -118,6 +118,16 @@ export class LevelManager {
     this.pinnedLoreFragment = fragment;
   }
 
+  /** Seed du level courant (objets cachés dans les meubles : un par meuble et par level). */
+  get levelSeed(): string {
+    return this.profile.seed;
+  }
+
+  /** Position monde de la sortie du level (boussole, multimètre). */
+  get exitPosition(): { x: number; z: number } {
+    return { x: this.exitWorldX, z: this.exitWorldZ };
+  }
+
   /** Éclairage ambiant des néons [0..1] à une position (0 = zone éteinte). */
   zoneLightAt(x: number, z: number): number {
     return sampleZoneLight(this.lightField, x, z);

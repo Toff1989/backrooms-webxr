@@ -98,6 +98,8 @@ export interface GrabbableInit {
   awake?: boolean;
   /** Libère les ressources propres à cette instance (texture d'une page). */
   onDispose?: () => void;
+  /** Type de meuble (le type d'un objet de collection vient de `item`). */
+  propKind?: PropKind;
 }
 
 /** Page de bande perdue posée dans le monde : identifiant unique par level, fragment de récit porté. */
@@ -119,6 +121,8 @@ export class Grabbable {
   readonly mass: number;
   readonly item: CollectionEntry | null;
   readonly lorePage: LorePageData | null;
+  /** Type de meuble ou d'objet de collection (null : page de bande perdue). */
+  readonly kind: string | null;
   /** Centre de la boîte englobante, en espace local du corps (échelle comprise). */
   readonly localCenter: THREE.Vector3;
   /** Main qui tient l'objet (opaque ici, voir `GrabSystem`). */
@@ -135,6 +139,7 @@ export class Grabbable {
     this.mass = init.mass;
     this.item = init.item;
     this.lorePage = init.lorePage ?? null;
+    this.kind = init.item?.kind ?? init.propKind ?? null;
     this.onDispose = init.onDispose;
     // Meuble : endormi, fortement amorti. Petit objet (collection, page) : libre, il roule.
     const furniture = init.item === null && this.lorePage === null;
@@ -231,6 +236,9 @@ export class GrabbableRegistry {
   private readonly aliveItems = new Map<string, Grabbable>();
   /** Objets en cours de sortie de l'inventaire (modèle en chargement) : déjà "vivants". */
   private readonly reservedItems = new Set<string>();
+  /** Abonnés à l'apparition / disparition des objets (interactions). */
+  readonly onCreate = new Set<(grabbable: Grabbable) => void>();
+  readonly onRemove = new Set<(grabbable: Grabbable) => void>();
 
   constructor(
     private readonly scene: THREE.Scene,
@@ -250,6 +258,7 @@ export class GrabbableRegistry {
       this.reservedItems.delete(uniqueId);
       this.aliveItems.set(uniqueId, grabbable);
     }
+    for (const listener of this.onCreate) listener(grabbable);
     return grabbable;
   }
 
@@ -267,6 +276,7 @@ export class GrabbableRegistry {
       item: null,
       boxCollider: BOX_COLLIDER_PROPS.has(kind),
       awake: tipped,
+      propKind: kind,
     });
   }
 
@@ -309,6 +319,7 @@ export class GrabbableRegistry {
     this.byCollider.delete(grabbable.collider.handle);
     const uniqueId = grabbable.uniqueId;
     if (uniqueId && this.aliveItems.get(uniqueId) === grabbable) this.aliveItems.delete(uniqueId);
+    for (const listener of this.onRemove) listener(grabbable);
     grabbable.dispose();
   }
 

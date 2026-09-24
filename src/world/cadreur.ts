@@ -4,6 +4,7 @@ import { queueWarmup } from "../assets/audio/synth";
 import { log } from "../debug/debugLog";
 import { CollisionGroups, RAPIER, type PhysicsWorld } from "../physics/physicsWorld";
 import { loadCadreur, type CadreurRig } from "./cadreurModel";
+import type { NoiseEvent } from "./noise";
 
 /** Profondeur à partir de laquelle le Cadreur peut apparaître (le niveau 0 reste sûr). */
 export const CADREUR_MIN_DEPTH = 1;
@@ -40,6 +41,13 @@ const BODY_CENTER_Y = 1.2;
 /** Bloqué (coin, mur régénéré sur la trace) hors de vue : il saute en avant sur la trace. */
 const STUCK_SECONDS = 1.2;
 const STUCK_SKIP_POINTS = 4;
+/** Il entend un bruit jusqu'à `loudness × NOISE_RANGE` mètres (une alarme porte à 40 m). */
+const NOISE_RANGE = 40;
+/** Arrivé à la source d'un bruit, il fouille un instant avant de reprendre la trace. */
+const LURE_SEARCH_SECONDS = 2.5;
+const LURE_TIMEOUT_SECONDS = 20;
+/** Sous ce seuil, le joueur est trop près : il ne se laisse plus distraire. */
+const LURE_IGNORE_DISTANCE = 4;
 
 export interface CadreurContext {
   head: THREE.Vector3;
@@ -106,6 +114,10 @@ export class Cadreur {
   private readonly tmp = new THREE.Vector3();
   /** Appelé à la main (menu debug) : ignore la profondeur minimale, apparaît plus près. */
   private manual = false;
+  /** Bruit vers lequel il marche (leurre), et le temps passé à le chercher. */
+  private lure: { x: number; z: number; seconds: number; searching: number } | null = null;
+  /** Étourdi (tapette à souris) : figé, la caméra grésille. */
+  private stunnedSeconds = 0;
 
   constructor(
     scene: THREE.Scene,
@@ -149,6 +161,34 @@ export class Cadreur {
 
   get present(): boolean {
     return this.stalking;
+  }
+
+  /** Position au sol (x, z) quand il est là, sinon null. */
+  get worldPosition(): THREE.Vector3 | null {
+    return this.stalking ? this.position : null;
+  }
+
+  /**
+   * Un bruit : absent, un bruit fort (ou proche de là où il rôde) le fait venir plus tôt ;
+   * présent, il va voir d'où ça vient — sauf s'il tient déjà le joueur de près.
+   */
+  hear(event: NoiseEvent, depth: number): void {
+    if (event.loudness <= 0 || (depth < CADREUR_MIN_DEPTH && !this.manual)) return;
+    if (!this.stalking) {
+      this.timer = Math.min(this.timer, 2 + (1 - event.loudness) * 25);
+      return;
+    }
+    const distance = Math.hypot(event.x - this.position.x, event.z - this.position.z);
+    if (distance > event.loudness * NOISE_RANGE) return;
+    this.lure = { x: event.x, z: event.z, seconds: 0, searching: 0 };
+    log("cadreur", { action: "heard", distance: Math.round(distance), loudness: Math.round(event.loudness * 100) / 100 });
+  }
+
+  /** Tapette à souris : il reste figé quelques secondes. */
+  stun(seconds: number): void {
+    if (!this.stalking) return;
+    this.stunnedSeconds = Math.max(this.stunnedSeconds, seconds);
+    this.play(this.staticBuffer, 0.9);
   }
 
   /** Nouveau niveau (ou nouvelle run) : il disparaît, la trace repart de zéro. */
@@ -205,8 +245,12 @@ export class Cadreur {
     }
     const watched = this.observedGrace > 0;
     const hunting = Math.min(2.3, 1.25 + context.depth * 0.1);
-    this.frozenSeconds = sight.flashlit ? this.frozenSeconds + deltaSeconds : 0;
-    const speed = sight.flashlit ? 0 : watched ? WATCHED_SPEED : hunting;
+    this.stunnedSeconds = Math.max(0, this.stunnedSeconds - deltaSeconds);
+    const frozen = sight.flashlit || this.stunnedSeconds > 0;
+    this.frozenSeconds = frozen ? this.frozenSeconds + deltaSeconds : 0;
+    this.updateLure(deltaSeconds, context.head);
+    const searching = this.lure !== null && this.lure.searching > 0;
+    const speed = frozen || searching ? 0 : watched ? WATCHED_SPEED : hunting;
     this.advance(deltaSeconds, speed, watched, context);
     if (sight.flashlit) {
       // Pris dans la lampe : la caméra grésille par salves.
@@ -244,6 +288,19 @@ export class Cadreur {
     // REC : clignote une fois par seconde ; affolée quand la lampe le fige.
     rig.led.visible = this.frozenSeconds > 0 ? Math.random() < 0.5 : this.elapsed % 1 < 0.6;
     return events;
+  }
+
+  /** Leurre : arrivé à la source du bruit, il fouille, puis reprend la trace du joueur. */
+  private updateLure(deltaSeconds: number, head: THREE.Vector3): void {
+    const lure = this.lure;
+    if (!lure) return;
+    lure.seconds += deltaSeconds;
+    const arrived = Math.hypot(lure.x - this.position.x, lure.z - this.position.z) < 0.8;
+    if (arrived) lure.searching += deltaSeconds;
+    if (lure.searching > LURE_SEARCH_SECONDS || lure.seconds > LURE_TIMEOUT_SECONDS || this.distanceTo(head) < LURE_IGNORE_DISTANCE) {
+      this.lure = null;
+      this.syncTrailIndex();
+    }
   }
 
   private distanceTo(head: THREE.Vector3): number {
@@ -310,6 +367,8 @@ export class Cadreur {
 
   private despawn(): void {
     this.stalking = false;
+    this.lure = null;
+    this.stunnedSeconds = 0;
     this.body.setTranslation({ x: 0, y: -20, z: 0 }, true);
     if (this.rig) this.rig.root.visible = false;
     if (this.motor.isPlaying) this.motor.stop();
@@ -398,7 +457,8 @@ export class Cadreur {
     if (step.footstep) this.play(this.steps[Math.floor(Math.random() * this.steps.length)] ?? null, watched ? 0.8 : 0.55);
     let budget = step.distance;
     if (budget <= 0) return;
-    const direct = this.distanceTo(head) < DIRECT_CHASE_DISTANCE && this.clearPath(this.position.x, this.position.z, head.x, head.z);
+    const lure = this.lure;
+    const direct = !lure && this.distanceTo(head) < DIRECT_CHASE_DISTANCE && this.clearPath(this.position.x, this.position.z, head.x, head.z);
     // Point visé à la fin de ce pas, en suivant la trace (ou droit sur le joueur).
     let targetX = this.position.x;
     let targetZ = this.position.z;
@@ -406,7 +466,7 @@ export class Cadreur {
     let headingX = 0;
     let headingZ = 0;
     while (budget > 1e-4) {
-      const target: TrailPoint = direct || index >= this.trail.length ? { x: head.x, z: head.z } : this.trail[index]!;
+      const target: TrailPoint = lure ? { x: lure.x, z: lure.z } : direct || index >= this.trail.length ? { x: head.x, z: head.z } : this.trail[index]!;
       const dx = target.x - targetX;
       const dz = target.z - targetZ;
       const gap = Math.hypot(dx, dz);
@@ -418,7 +478,7 @@ export class Cadreur {
         targetX = target.x;
         targetZ = target.z;
         budget -= gap;
-        if (direct || index >= this.trail.length) break;
+        if (lure || direct || index >= this.trail.length) break;
         index++;
       } else {
         targetX += headingX * budget;
@@ -436,7 +496,10 @@ export class Cadreur {
     this.body.setNextKinematicTranslation({ x: this.position.x, y: BODY_CENTER_Y, z: this.position.z });
 
     // On n'avance sur la trace que jusqu'au point réellement atteint (bloqué : il la reprend d'où il est).
-    if (!direct && Math.hypot(this.position.x - targetX, this.position.z - targetZ) < 0.2) this.trailIndex = index;
+    if (lure) {
+      // Bloqué en allant vers le bruit : il abandonne et reprend la trace.
+      if (Math.hypot(moved.x, moved.z) < Math.hypot(wantedX, wantedZ) * 0.3) lure.seconds += deltaSeconds * 4;
+    } else if (!direct && Math.hypot(this.position.x - targetX, this.position.z - targetZ) < 0.2) this.trailIndex = index;
     else this.syncTrailIndex();
 
     // Coincé contre un mur (coin serré, couloir régénéré sur sa trace) : hors de vue, il

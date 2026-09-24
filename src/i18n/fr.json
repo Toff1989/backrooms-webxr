@@ -142,5 +142,38 @@
   "audio.transcript": "TRANSCRIPTION",
   "blue.cut": "COUPEZ !",
   "blue.take": "PRISE {n}",
-  "fiche.full": "INTÉGRAL"
+  "fiche.full": "INTÉGRAL",
+  "interact.chalk": [
+    "COUPEZ.",
+    "PRISE {take}",
+    "TU SAVAIS",
+    "ON LA GARDE !",
+    "BOBINE 4",
+    "REGARDE-LA EN ENTIER",
+    "IL TOURNE ENCORE"
+  ],
+  "interact.notes": [
+    "Appel équipe : 22 h. Plateau, 3e étage.",
+    "Électro : groupe à revoir AVANT la nuit du 14.",
+    "Prod : on tourne quoi qu'il arrive.",
+    "Julien — rappeler sa femme.",
+    "Rushes de la nuit du 14 → salle 2. Ne pas numériser.",
+    "Monteur : version sans la séquence 14 pour lundi."
+  ],
+  "interact.photoBacks": [
+    "L'équipe, premier jour. Tout le monde sourit.",
+    "Julien et sa caméra. Il ne la lâchait jamais.",
+    "Le couloir du 3e, repérages.",
+    "Ne pas montrer à la production."
+  ],
+  "interact.callSheet": [
+    "FEUILLE DE SERVICE",
+    "« COULOIRS » — jour 23, nuit du 14",
+    "Rendez-vous : 21 h 30, 3e étage",
+    "Cadre : Julien M.",
+    "Électro : groupe électrogène (à surveiller)",
+    "Séq. 14 — couloir, néons, travelling",
+    "Fin prévue : avant l'aube"
+  ],
+  "tv.play": "▶ LECTURE"
 }

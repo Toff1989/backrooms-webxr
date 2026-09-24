@@ -40,6 +40,7 @@ main, menus sans quitter le jeu) :
 | Lampe frontale | B (batterie limitée, HUD `BAT` : ramasser des piles au sol en marchant dessus ou en les touchant) |
 | Journal des bandes perdues | Grip avec la main à la ceinture (le carnet reste en main tant que le grip est tenu), ou bouton JOURNAL du menu d'inventaire ; l'autre main tourne les pages à la gâchette |
 | Lire une bande perdue | Saisir la page au sol (grip) : elle entre au journal ; A/X ou par-dessus l'épaule pour la classer |
+| Utiliser un objet | Gâchette en le tenant (allumer une lampe ou la télé, remonter le réveil, armer la tapette, pulvériser...) ; pour un meuble, le toucher du bout de l'index (gâchette relâchée) : tiroirs, télé, tabouret |
 | Recaler la hauteur / STOP REC | Boutons du menu d'inventaire |
 
 Hauteur : au démarrage de la session, un joueur assis est automatiquement rehaussé à hauteur
@@ -257,6 +258,19 @@ tests/physics.sim.ts         Simulation physique sans rendu (`npm run test:physi
 - **Ombres des zones sombres** : le seuil clair/noir est appliqué au pixel (seul le bruit
   lumineux, qui varie doucement, est interpolé entre sommets) — fini les ombres en biseau
   dessinées par les triangles ; pénombre plus large et moins noire.
+- **Objets qui s'animent** (`world/interactions.ts`, `objectAudio.ts`, `noise.ts`,
+  `modelFace.ts`, sons dans `assets/audio/objectSounds.ts`) : une quarantaine d'objets ont
+  un comportement. Télé (neige qui grésille, jeu si une console est à côté, lecture si on
+  approche une cassette), écran de projection (amorce et compte à rebours), tableau noir (un
+  message apparaît à la craie quand on a le dos tourné), tiroirs, casiers, cartons et coussins
+  (un objet caché, une fois par meuble et par level), réveil (leurre à retardement), tapette
+  (armée, elle fige le Cadreur), lampes trouvées (le faisceau part de la main, sans pile),
+  multimètre, boussole et instrument de bord (détecteurs), photo qui change quand on ne la
+  regarde pas, mètre ruban, ventouse qui se colle au mur, horloge qui se tait quand le Cadreur
+  approche, objets qui se brisent ou résonnent quand on les lance. Écrans et cadrans sont
+  posés sur la surface trouvée automatiquement dans la géométrie du modèle. **Le bruit attire
+  le Cadreur** : un bruit fort le fait venir plus tôt ; présent, il va voir d'où ça vient — un
+  objet bruyant lancé au loin sert de leurre.
 - **Tester les menaces** : en mode debug (`?debug=1`), le menu d'inventaire (Y) a une rangée
   bleue de boutons de test : lancer/arrêter la Coupure, appeler/renvoyer le Cadreur (même au
   niveau 0), passer au niveau suivant, recharger la lampe.

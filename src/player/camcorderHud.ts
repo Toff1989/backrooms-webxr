@@ -79,6 +79,11 @@ export class CamcorderHud {
     this.timeSinceRedraw = Infinity;
   }
 
+  /** Temps d'enregistrement de la run (s), celui du compteur REC. */
+  get recordingSeconds(): number {
+    return this.elapsedSeconds;
+  }
+
   /** Remet le compteur REC à zéro (nouvelle run). */
   resetClock(): void {
     this.elapsedSeconds = 0;

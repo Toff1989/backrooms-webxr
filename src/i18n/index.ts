@@ -53,6 +53,13 @@ export function t(key: TranslationKey, variables: Record<string, string | number
   return template.replace(/\{(\w+)\}/g, (_, name: string) => String(variables[name] ?? `{${name}}`));
 }
 
+type ListKey = { [K in keyof Dictionary]: Dictionary[K] extends string[] ? K : never }[keyof Dictionary];
+
+/** Liste de textes traduits (messages à la craie, notes de production...). */
+export function tList(key: ListKey): readonly string[] {
+  return DICTIONARIES[current][key] as string[];
+}
+
 /** Fragment n (0-based) du récit des bandes perdues, ou null au-delà du dernier. */
 export function loreFragment(index: number): string | null {
   return DICTIONARIES[current]["lore.fragments"][index] ?? null;

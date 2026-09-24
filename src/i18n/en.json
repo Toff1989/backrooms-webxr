@@ -142,5 +142,38 @@
   "audio.transcript": "TRANSCRIPT",
   "blue.cut": "CUT!",
   "blue.take": "TAKE {n}",
-  "fiche.full": "UNCUT"
+  "fiche.full": "UNCUT",
+  "interact.chalk": [
+    "CUT.",
+    "TAKE {take}",
+    "YOU KNEW",
+    "WE'RE KEEPING IT!",
+    "REEL 4",
+    "WATCH IT ALL THE WAY",
+    "STILL ROLLING"
+  ],
+  "interact.notes": [
+    "Crew call: 10 pm. Set, 3rd floor.",
+    "Electrician: check generator BEFORE the night of the 14th.",
+    "Producer: we shoot no matter what.",
+    "Julien — call his wife back.",
+    "Night of the 14th rushes → room 2. Do not digitize.",
+    "Editor: cut without sequence 14 by Monday."
+  ],
+  "interact.photoBacks": [
+    "The crew, day one. Everyone's smiling.",
+    "Julien and his camera. He never put it down.",
+    "3rd floor corridor, location scouting.",
+    "Do not show the producers."
+  ],
+  "interact.callSheet": [
+    "CALL SHEET",
+    "\"CORRIDORS\" — day 23, night of the 14th",
+    "Call: 9:30 pm, 3rd floor",
+    "Camera: Julien M.",
+    "Electrics: generator (keep an eye on it)",
+    "Seq. 14 — corridor, lights, tracking",
+    "Wrap: before dawn"
+  ],
+  "tv.play": "▶ PLAY"
 }

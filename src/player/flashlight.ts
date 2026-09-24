@@ -25,6 +25,9 @@ const LOW_BATTERY = 0.2;
  * s'éteint à 0 — il faut trouver des piles (voir `BatteryPickups`). Les zones sombres
  * deviennent un vrai choix : traverser vite dans le noir, ou dépenser de la batterie.
  */
+/** Lampe ancienne : ampoule à filament, lumière orangée. */
+const WARM_COLOR = 0xffc27a;
+
 export class Flashlight {
   on = false;
   private readonly light: THREE.SpotLight;
@@ -37,8 +40,12 @@ export class Flashlight {
   battery = 1;
   /** Multiplicateur d'autonomie (bonus de collection). */
   capacity = 1;
+  /** Lampe d'appoint tenue en main (objet de collection) : position et direction du faisceau. */
+  private handTorch: { position: THREE.Vector3; direction: THREE.Vector3; warm: boolean } | null = null;
+  private readonly camera: THREE.Camera;
 
   constructor(camera: THREE.Camera) {
+    this.camera = camera;
     this.light = new THREE.SpotLight(LIGHT_COLOR, 0, RANGE, THREE.MathUtils.degToRad(ANGLE_DEGREES), PENUMBRA, DECAY);
     this.light.position.set(0, -0.08, 0);
     this.light.target.position.set(0, -0.3, -3);
@@ -48,6 +55,15 @@ export class Flashlight {
   /** Puissance actuelle (0..1), grésillements et batterie faible compris. */
   get strength(): number {
     return this.intensity / ON_INTENSITY;
+  }
+
+  /**
+   * Lampe torche trouvée, allumée en main : le faisceau part de la main, dans la direction
+   * pointée, sans consommer la batterie (la lampe frontale ne sert plus tant qu'on la tient).
+   * `warm` : lampe ancienne, lumière plus chaude qui vacille. null : retour à la lampe frontale.
+   */
+  setHandTorch(source: { position: THREE.Vector3; direction: THREE.Vector3; warm: boolean } | null): void {
+    this.handTorch = source;
   }
 
   /** Vrai si la lampe éclaire réellement (allumée et pas en micro-coupure). */
@@ -88,8 +104,29 @@ export class Flashlight {
     this.sag = THREE.MathUtils.damp(this.sag, this.sagTarget, 10, deltaSeconds);
     this.cutSeconds = Math.max(0, this.cutSeconds - deltaSeconds);
 
-    const target = this.on && this.cutSeconds === 0 ? ON_INTENSITY * (1 - this.sag) * (1 - low * 0.6) : 0;
+    const torch = this.handTorch;
+    this.placeLight(torch);
+    const flicker = torch?.warm ? 0.75 + Math.random() * 0.2 : 1;
+    const target = torch ? ON_INTENSITY * flicker * (1 - this.sag * 0.3) : this.on && this.cutSeconds === 0 ? ON_INTENSITY * (1 - this.sag) * (1 - low * 0.6) : 0;
     this.intensity = THREE.MathUtils.damp(this.intensity, target, 22, deltaSeconds);
     this.light.intensity = this.intensity;
+  }
+
+  /** Faisceau à la main (dans le repère de la scène) ou fixé à la tête (repère de la caméra). */
+  private placeLight(torch: { position: THREE.Vector3; direction: THREE.Vector3; warm: boolean } | null): void {
+    if (torch) {
+      let root: THREE.Object3D = this.camera;
+      while (root.parent) root = root.parent;
+      if (this.light.parent !== root) root.add(this.light, this.light.target);
+      this.light.position.copy(torch.position);
+      this.light.target.position.copy(torch.position).addScaledVector(torch.direction, 3);
+      this.light.color.setHex(torch.warm ? WARM_COLOR : LIGHT_COLOR);
+      return;
+    }
+    if (this.light.parent === this.camera) return;
+    this.camera.add(this.light, this.light.target);
+    this.light.position.set(0, -0.08, 0);
+    this.light.target.position.set(0, -0.3, -3);
+    this.light.color.setHex(LIGHT_COLOR);
   }
 }

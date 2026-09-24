@@ -53,6 +53,8 @@ export interface GrabHooks {
   store(item: CollectionEntry, slotIndex?: number | null): void;
   /** Objet saisi (au contact, à distance ou sorti du sac) : une page de bande perdue est lue. */
   onGrab?(grabbable: Grabbable): void;
+  /** Gâchette pressée en tenant un objet : l'utiliser (allumer, remonter, pulvériser...). */
+  onUse?(hand: Hand, grabbable: Grabbable): void;
   /** Grip serré sans rien à saisir (main à la ceinture : le journal). Vrai si l'appui est consommé. */
   onEmptyGrip?(hand: Hand): boolean;
   /** Pose de la tête (rangement "par-dessus l'épaule", comme le sac de Saints & Sinners). */
@@ -189,6 +191,7 @@ export class GrabSystem {
         const state = this.held.get(hand)!;
         const storable = state.grabbable.isSmall;
         if (input.primary.justPressed && storable) this.storeHeld(hand, null);
+        else if (input.trigger.justPressed && !pointer.frame(hand).target) this.hooks.onUse?.(hand, state.grabbable);
         else if (input.squeeze.justReleased) {
           if (storable && this.hooks.isOverInventory(hand)) this.storeHeld(hand, this.hooks.inventorySlotAt?.(hand) ?? null);
           else if (storable && this.isOverShoulder(hand)) this.storeHeld(hand, null);
@@ -384,6 +387,11 @@ export class GrabSystem {
       state.grabbable.body.setAngvel({ x: 0, y: 0, z: 0 }, true);
     }
     for (const hand of [...this.remote.keys()]) this.cancelRemote(hand);
+  }
+
+  /** Toutes les mains lâchent cet objet, sans le lancer (ventouse qui se colle au mur). */
+  drop(grabbable: Grabbable): void {
+    for (const hand of this.holdersOf(grabbable)) this.release(hand, false);
   }
 
   /** Le joueur est emporté (rattrapé par le Cadreur) : ce qu'il tenait reste derrière et disparaît. */
