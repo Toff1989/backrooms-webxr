@@ -175,7 +175,9 @@ export class Cadreur {
   hear(event: NoiseEvent, depth: number): void {
     if (event.loudness <= 0 || (depth < CADREUR_MIN_DEPTH && !this.manual)) return;
     if (!this.stalking) {
-      this.timer = Math.min(this.timer, 2 + (1 - event.loudness) * 25);
+      const timer = Math.min(this.timer, 2 + (1 - event.loudness) * 25);
+      if (timer < this.timer - 1) log("cadreur", { action: "called-by-noise", loudness: Math.round(event.loudness * 100) / 100, in: Math.round(timer) });
+      this.timer = timer;
       return;
     }
     const distance = Math.hypot(event.x - this.position.x, event.z - this.position.z);
@@ -187,6 +189,7 @@ export class Cadreur {
   /** Tapette à souris : il reste figé quelques secondes. */
   stun(seconds: number): void {
     if (!this.stalking) return;
+    log("cadreur", { action: "stunned", seconds });
     this.stunnedSeconds = Math.max(this.stunnedSeconds, seconds);
     this.play(this.staticBuffer, 0.9);
   }

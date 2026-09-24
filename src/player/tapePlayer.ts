@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { log } from "../debug/debugLog";
 import { loreFragment } from "../i18n";
 import type { CamcorderHud } from "./camcorderHud";
 
@@ -53,6 +54,7 @@ export class TapePlayer {
     ];
     this.fragment = fragment;
     this.timer = 2;
+    log("lore", { action: "tape", fragment });
     this.startHiss();
   }
 

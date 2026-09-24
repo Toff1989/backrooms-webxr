@@ -1,6 +1,8 @@
 import * as THREE from "three";
 import { CollisionGroups, RAPIER, type PhysicsWorld } from "../physics/physicsWorld";
+import { log } from "../debug/debugLog";
 import { renderOffscreen } from "./liveViews";
+import { perf } from "./perfStats";
 
 const PHOTO_SIZE = 256;
 /** Recul (m) de l'objectif derrière la tête du joueur, et marge gardée devant un mur. */
@@ -36,8 +38,11 @@ export function createPhotoCapture(renderer: THREE.WebGLRenderer, scene: THREE.S
     lens.lookAt(tmpHead.x + tmpForward.x * 3, tmpHead.y - 0.25, tmpHead.z + tmpForward.z * 3);
     lens.updateMatrixWorld();
 
+    const started = performance.now();
     if (!renderOffscreen(renderer, scene, camera, lens, target)) return null;
     renderer.readRenderTargetPixels(target, 0, 0, PHOTO_SIZE, PHOTO_SIZE, pixels);
+    perf?.event("photo");
+    log("photo", { ms: Math.round((performance.now() - started) * 10) / 10 });
 
     const canvas = document.createElement("canvas");
     canvas.width = PHOTO_SIZE;

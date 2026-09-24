@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { perf } from "./perfStats";
 
 /** Une vue est rendue si elle a été demandée récemment (sinon on arrête de la calculer). */
 const IDLE_SECONDS = 0.4;
@@ -22,6 +23,11 @@ interface View {
 export class LiveViews {
   private readonly views = new Map<string, View>();
   private time = 0;
+  /** Mesures pour le journal de debug (remises à zéro à chaque lecture). */
+  private statRenders = 0;
+  private statMs = 0;
+  private statMaxMs = 0;
+  private readonly statIds = new Set<string>();
 
   constructor(
     private readonly renderer: THREE.WebGLRenderer,
@@ -62,15 +68,37 @@ export class LiveViews {
   render(deltaSeconds: number): void {
     this.time += deltaSeconds;
     let due: View | null = null;
-    for (const view of this.views.values()) {
+    let dueId = "";
+    for (const [id, view] of this.views) {
       if (this.time - view.lastUsed > IDLE_SECONDS) continue;
+      this.statIds.add(id);
       view.timer -= deltaSeconds;
-      if (view.timer <= 0 && (!due || view.timer < due.timer)) due = view;
+      if (view.timer <= 0 && (!due || view.timer < due.timer)) {
+        due = view;
+        dueId = id;
+      }
     }
     if (!due) return;
     due.timer = due.interval;
     due.camera.updateMatrixWorld();
+    const started = performance.now();
     renderOffscreen(this.renderer, this.scene, this.playerCamera, due.camera, due.target, due.displays);
+    const ms = performance.now() - started;
+    this.statRenders++;
+    this.statMs += ms;
+    this.statMaxMs = Math.max(this.statMaxMs, ms);
+    perf?.event(`vue ${dueId}`);
+  }
+
+  /** Mesures de la seconde écoulée (journal de debug), puis remise à zéro. */
+  drainStats(): { renders: number; ms: number; maxMs: number; ids: string[] } | undefined {
+    if (this.statIds.size === 0 && this.statRenders === 0) return undefined;
+    const stats = { renders: this.statRenders, ms: Math.round(this.statMs * 10) / 10, maxMs: Math.round(this.statMaxMs * 10) / 10, ids: [...this.statIds] };
+    this.statRenders = 0;
+    this.statMs = 0;
+    this.statMaxMs = 0;
+    this.statIds.clear();
+    return stats;
   }
 }
 

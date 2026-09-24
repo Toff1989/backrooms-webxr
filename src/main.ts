@@ -178,6 +178,8 @@ perfStats.extra = () => {
     flashlight: flashlight.on,
     blackout: blackout.active,
     cadreur: cadreur.present,
+    mode,
+    views: liveViews.drainStats(),
   };
 };
 const atmosphere = new Atmosphere(scene, hemisphere, ambient);
@@ -287,7 +289,7 @@ function readLorePage(page: LorePageData, hand: Hand): void {
   if (!loreJournal.read(fragment, currentSession)) return;
   hud.showNotice(t("lore.new", { n: fragment + 1 }));
   hand.pulse(0.5, 120);
-  log("lore", { action: "read", fragment, depth: levelManager.depth });
+  log("lore", { action: "read", fragment, format: loreFormat(fragment), depth: levelManager.depth });
 }
 
 grabSystem = new GrabSystem(physics, grabbables, hands, sfx, {
@@ -739,8 +741,10 @@ renderer.setAnimationLoop((timestamp) => {
   updateVhsTime(elapsedSeconds);
   runWarmupStep(renderer.xr.isPresenting);
   perfStats.end("effets");
-  perfStats.begin("rendu");
+  perfStats.begin("vues");
   liveViews.render(deltaSeconds);
+  perfStats.end("vues");
+  perfStats.begin("rendu");
   perfStats.beginGpu();
   renderer.render(scene, camera);
   perfStats.endGpu();

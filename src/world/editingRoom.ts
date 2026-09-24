@@ -3,6 +3,7 @@ import deskLampUrl from "../assets/models/intro/deskLamp.glb";
 import fluorescentLightUrl from "../assets/models/intro/fluorescentLight.glb";
 import pictureFrameUrl from "../assets/models/intro/pictureFrame.glb";
 import projector8mmUrl from "../assets/models/intro/projector8mm.glb";
+import { log } from "../debug/debugLog";
 import { t, tList, type TranslationKey } from "../i18n";
 import { getModelShape } from "../physics/modelShape";
 import { CollisionGroups, RAPIER, type PhysicsWorld } from "../physics/physicsWorld";
@@ -202,6 +203,7 @@ export class EditingRoom {
     let step = this.steps[this.stepIndex];
     // Plusieurs étapes déjà faites d'avance (joueur qui connaît les gestes) : on les enchaîne.
     while (step && step.done()) {
+      log("intro", { action: "step", step: step.key.replace("intro.", "") });
       this.stepIndex++;
       step = this.steps[this.stepIndex];
       if (step) {

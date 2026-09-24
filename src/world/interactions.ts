@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { log } from "../debug/debugLog";
 import { tList, t } from "../i18n";
 import { CollisionGroups, RAPIER, type PhysicsWorld } from "../physics/physicsWorld";
 import type { Flashlight } from "../player/flashlight";
@@ -199,6 +200,7 @@ const television: Factory = (g, w, system) => {
   }
   let onSince = 0;
   let glitchUntil = 0;
+  let wentLive = false;
   let on = false;
   let hum: LoopHandle | null = null;
   let frame = 0;
@@ -214,6 +216,7 @@ const television: Factory = (g, w, system) => {
   const setOn = (value: boolean): void => {
     on = value;
     onSince = time;
+    wentLive = false;
     if (screen) screen.visible = on;
     w.audio.playAt(on ? "tvOn" : "tvOff", g.object.position, 0.7);
     if (on) hum = w.audio.loop("tvStatic", g.object, 0.28);
@@ -324,7 +327,13 @@ const television: Factory = (g, w, system) => {
         }
         // Après deux secondes de neige : l'image en direct, coupée de temps en temps par la neige.
         if (Math.random() < 0.06) glitchUntil = time + 0.35;
+        const previousMode = mode;
         mode = time < tapeUntil ? "tape" : nearbyKind("gamingConsole", 1.6) ? "game" : time - onSince > 2 && time > glitchUntil ? "live" : "static";
+        // Journal : un changement de mode réel, pas chaque coupure de neige du direct.
+        if (mode !== previousMode && !(wentLive && (mode === "static" || mode === "live"))) {
+          log("interact", { action: "tv", mode, source: mode === "live" ? (system.securityCamera ? "security" : w.cadreurEye() ? "cadreur" : "behind") : undefined });
+        }
+        if (mode === "live") wentLive = true;
         hum?.setVolume(mode === "static" ? 0.28 : 0.1);
       }
       const material = screen.mesh.material as THREE.MeshBasicMaterial;
@@ -860,6 +869,7 @@ function handTorch(warm: boolean): Factory {
   return (g, w, system) => {
     let on = false;
     const light = (): void => {
+      log("interact", { action: "torch", kind: g.kind });
       on = true;
       system.torchOwner = g;
       w.audio.playAt("metalClick", g.object.position, 0.5);
@@ -1133,6 +1143,7 @@ const securityCamera: Factory = (g, w, system) => {
       if (!wasHeld) return;
       wasHeld = false;
       system.placeSecurityCamera(g, direction);
+      log("interact", { action: "security-placed" });
       w.audio.playAt("beep", g.object.position, 0.4);
     },
     dispose: () => system.removeSecurityCamera(g),
@@ -1145,7 +1156,9 @@ const binoculars: Factory = (g, w) => {
   const overlay = eyeOverlay(w, 0.22, 0.11, new THREE.MeshBasicMaterial({ alphaMap: mask, transparent: true, depthTest: false, depthWrite: false, toneMapped: false }));
   return {
     update: () => {
-      overlay.visible = atEye(g, w, 0.2);
+      const visible = atEye(g, w, 0.2);
+      if (visible && !overlay.visible) log("interact", { action: "view", kind: "binoculars" });
+      overlay.visible = visible;
       if (!overlay.visible) return;
       const view = w.views.use("binoculars", 256, 128, 15, 11);
       w.camera.getWorldPosition(view.camera.position);
@@ -1178,7 +1191,9 @@ const magnifyingGlass: Factory = (g, w, system) => {
   const center = new THREE.Vector3();
   return {
     update: () => {
-      lens.visible = !!g.heldBy && g.object.position.distanceTo(w.head()) < 0.8;
+      const visible = !!g.heldBy && g.object.position.distanceTo(w.head()) < 0.8;
+      if (visible && !lens.visible) log("interact", { action: "view", kind: "magnifyingGlass" });
+      lens.visible = visible;
       if (!lens.visible) return;
       lens.getWorldPosition(center);
       const head = w.head();
@@ -1241,7 +1256,9 @@ const videoCamera: Factory = (g, w, system) => {
       if (!w.playLatestTape()) w.audio.playAt("crackle", g.object.position, 0.6);
     },
     update: () => {
-      viewfinder.visible = atEye(g, w, 0.2);
+      const visible = atEye(g, w, 0.2);
+      if (visible && !viewfinder.visible) log("interact", { action: "view", kind: "videoCamera" });
+      viewfinder.visible = visible;
       if (!viewfinder.visible) return;
       const view = w.views.use("camcorder", 192, 144, 12, 50, [...system.displays]);
       g.object.getWorldPosition(view.camera.position);
@@ -1397,7 +1414,10 @@ export class InteractionSystem {
   }
 
   use(hand: Hand, g: Grabbable): void {
-    this.behaviours.get(g)?.use?.(hand);
+    const behaviour = this.behaviours.get(g);
+    if (!behaviour?.use) return;
+    log("interact", { action: "use", kind: g.kind });
+    behaviour.use(hand);
   }
 
   grabbed(hand: Hand, g: Grabbable): void {
@@ -1442,7 +1462,10 @@ export class InteractionSystem {
     const speed = Math.hypot(v.x, v.y, v.z);
     const previous = this.speeds.get(g) ?? 0;
     this.speeds.set(g, speed);
-    if (previous > IMPACT_MIN_SPEED && speed < previous * 0.45) behaviour.impact!(previous);
+    if (previous > IMPACT_MIN_SPEED && speed < previous * 0.45) {
+      log("interact", { action: "impact", kind: g.kind, speed: Math.round(previous * 10) / 10 });
+      behaviour.impact!(previous);
+    }
   }
 
   /** Doigt tendu (gâchette relâchée) posé sur un objet qui réagit au toucher. */
@@ -1459,6 +1482,7 @@ export class InteractionSystem {
         if (touching && !this.touching.has(key) && this.time - (this.lastPoke.get(g) ?? -Infinity) > POKE_COOLDOWN) {
           this.lastPoke.set(g, this.time);
           hand.pulse(0.3, 25);
+          log("interact", { action: "poke", kind: g.kind });
           behaviour.poke(hand);
         }
         if (touching) this.touching.add(key);

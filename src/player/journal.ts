@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { log } from "../debug/debugLog";
 import { onLanguageChange, t, type TranslationKey } from "../i18n";
 import { LORE_FRAGMENT_COUNT, loreFormat, type LoreFormat } from "../shared/lore";
 import { drawButton, inRect, UiPanel, wrapText, type PressButton, type Rect } from "../ui/uiPanel";
@@ -132,6 +133,7 @@ export class Journal extends UiPanel {
   }
 
   private show(): void {
+    log("journal", { action: "open", held: this.heldBy !== null });
     this.group.visible = true;
     // Ouvert sur la dernière bande lue (la plus récente), sinon sur la première à trouver.
     this.selected = Math.max(0, Math.min(this.lore.count, LORE_FRAGMENT_COUNT) - 1);
