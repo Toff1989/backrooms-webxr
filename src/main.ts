@@ -38,10 +38,8 @@ import { spawnCollectibleModel } from "./world/collectibleLoader";
 import type { CollectionEntry } from "./world/collection";
 import { COLLECTIBLE_SCALE_MAX, COLLECTIBLE_SCALE_MIN, generateCollectibleLore, getCollectibleRarity, pickCollectibleKind } from "./shared/collectibles";
 import { coordinateHash01, stringSeedToInt } from "./shared/rng";
-import { LevelManager, SPAWN_LOCAL_POSITION, type LevelUpdateResult } from "./world/levelManager";
-import { EditingRoom, INTRO_LORE_ID } from "./world/editingRoom";
-import { CHUNK_SIZE } from "./shared/constants";
-import { LORE_FRAGMENT_COUNT, loreFormat } from "./shared/lore";
+import { LevelManager, SPAWN_LOCAL_POSITION } from "./world/levelManager";
+import { loreFormat } from "./shared/lore";
 import { LoreJournal } from "./world/loreJournal";
 import { configureLoreServices, updateLoreObjects } from "./world/lorePage";
 import { Poltergeist } from "./world/poltergeist";
@@ -178,7 +176,6 @@ perfStats.extra = () => {
     flashlight: flashlight.on,
     blackout: blackout.active,
     cadreur: cadreur.present,
-    mode,
     views: liveViews.drainStats(),
   };
 };
@@ -216,9 +213,6 @@ const inventoryMenu = new InventoryMenu(
     },
     recalibrateHeight: () => player.recalibrate(),
     stopRec: () => endRunScreen.show(levelManager.depth),
-    introActive: () => mode === "intro",
-    canSkipIntro: introSeen,
-    skipIntro: () => enterBackrooms(),
     openJournal: () => journal.openFloating(),
     vignetteEnabled: () => comfortVignette.enabled,
     toggleVignette: () => {
@@ -284,7 +278,6 @@ const pointer = new UiPointer(hands, scene, [inventoryMenu, endRunScreen, journa
 function readLorePage(page: LorePageData, hand: Hand): void {
   const { fragment } = page;
   page.onRead();
-  if (page.id === INTRO_LORE_ID) tutorial.loreRead = true;
   levelManager.pinLorePage(fragment);
   if (!loreJournal.read(fragment, currentSession)) return;
   hud.showNotice(t("lore.new", { n: fragment + 1 }));
@@ -298,7 +291,6 @@ grabSystem = new GrabSystem(physics, grabbables, hands, sfx, {
   store: (item, slotIndex) => collectionStore.add(item, slotIndex ?? null),
   onGrab: (grabbable) => {
     if (!(grabbable.heldBy instanceof Hand)) return;
-    tutorial.grabbed = true;
     if (grabbable.lorePage) readLorePage(grabbable.lorePage, grabbable.heldBy);
     interactions.grabbed(grabbable.heldBy, grabbable);
   },
@@ -369,103 +361,9 @@ const interactions = new InteractionSystem({
   },
 });
 
-/**
- * Où en est le joueur : la salle de montage (intro, puis fins) ou les Backrooms. Dans la salle,
- * pas de streaming de chunks, pas de menaces : seulement la pièce et son tutoriel.
- */
-type Mode = "intro" | "game" | "ending";
-let mode: Mode = "game";
-const INTRO_SEEN_KEY = "backrooms-vr:intro-seen";
-/** Profondeur à partir de laquelle une dernière capture, sans toutes les bandes, mène à la boucle. */
-const LOOP_ENDING_DEPTH = 10;
-/** Gestes du tutoriel déjà faits (verrouillés : le tutoriel les lit à son rythme). */
-const tutorial = { grabbed: false, stored: false, loreRead: false, journalOpened: false };
-collectionStore.onChange(() => {
-  if (collectionStore.count > 0) tutorial.stored = true;
-});
-const ROOM_LEVEL_UPDATE: LevelUpdateResult = {
-  corruptionDelta: 0,
-  wallTrapJustWarned: false,
-  wallTrapJustPopped: false,
-  batteriesPicked: 0,
-  darkness: 0,
-  exitDistance: Infinity,
-};
-
-function introSeen(): boolean {
-  try {
-    return localStorage.getItem(INTRO_SEEN_KEY) === "1";
-  } catch {
-    return false;
-  }
-}
-
-const editingRoom = new EditingRoom({
-  scene,
-  physics,
-  registry: grabbables,
-  interactions,
-  audio: objectAudio,
-  hud,
-  signals: {
-    grabbed: () => tutorial.grabbed,
-    stored: () => tutorial.stored,
-    loreRead: () => tutorial.loreRead,
-    journalOpened: () => tutorial.journalOpened || journal.visible,
-    lampOn: () => flashlight.on,
-    crouching: () => player.crouching,
-  },
-  head: () => player.headWorld,
-  addCorruption: (amount) => corruption.add(amount),
-  take: () => take,
-  capturePhoto,
-  onEnterBackrooms: () => enterBackrooms(),
-  onEndingFinished: (variant) => endRunScreen.show(levelManager.depth, t(variant === "aveu" ? "ending.aveuTitle" : "ending.boucleTitle")),
-});
-
-/** Intro : la salle de montage, la veille du rendu (le niveau 0 attend derrière le mur). */
-async function startIntro(): Promise<void> {
-  mode = "intro";
-  await editingRoom.build("intro");
-  player.teleport(editingRoom.spawn);
-  grabSystem.onTeleport();
-  log("intro", { action: "start" });
-}
-
-/** Mur traversé (ou intro passée) : on tombe dans le niveau 0. */
-function enterBackrooms(): void {
-  editingRoom.dispose();
-  mode = "game";
-  levelManager.applyLook();
-  respawn();
-  vhsOverlay.blueScreen(1.8, ["\u25B6 PLAY", t("blue.level", { n: levelManager.depth })]);
-  corruption.add(1);
-  try {
-    localStorage.setItem(INTRO_SEEN_KEY, "1");
-  } catch {
-    // Pas de stockage : l'intro restera simplement non passable.
-  }
-  log("intro", { action: "noclip" });
-}
-
-/** Une des deux fins : retour à la salle de montage. */
-function startEnding(variant: "aveu" | "boucle"): void {
-  mode = "ending";
-  tapePlayer.stop();
-  cadreur.reset(0);
-  void editingRoom.build(variant).then(() => {
-    player.teleport(editingRoom.spawn);
-    grabSystem.onTeleport();
-  });
-  vhsOverlay.blueScreen(2.2, variant === "aveu" ? ["\u25B6 PLAY", t("fiche.reel") + " 4"] : [t("blue.cut"), t("blue.take", { n: take })]);
-  log("ending", { variant, depth: levelManager.depth, tapes: loreJournal.count });
-}
-
 /** Place le joueur au spawn du level courant (changement de level, nouvelle run). */
 function respawn(): void {
   tapePlayer.stop();
-  // Dalles physiques sol/plafond : sous le spawn (elles ont pu suivre le joueur dans la salle).
-  physics.recenter((Math.floor(SPAWN_LOCAL_POSITION.x / CHUNK_SIZE) + 0.5) * CHUNK_SIZE, (Math.floor(SPAWN_LOCAL_POSITION.z / CHUNK_SIZE) + 0.5) * CHUNK_SIZE);
   player.teleport(SPAWN_LOCAL_POSITION);
   syncHands(timer.getElapsed());
   grabSystem.onTeleport();
@@ -480,18 +378,6 @@ let take = 1;
 
 /** Niveau suivant : sortie atteinte, rattrapé par le Cadreur (réveil les mains vides), ou menu debug. */
 function goDeeper(caught: boolean): void {
-  // Les fins : toutes les bandes, la porte s'ouvre sur la salle de montage (l'aveu) ; trop
-  // profond sans elles, la dernière capture ramène à la salle, filmé de dos (la boucle).
-  if (!caught && loreJournal.count >= LORE_FRAGMENT_COUNT) {
-    startEnding("aveu");
-    return;
-  }
-  if (caught && levelManager.depth >= LOOP_ENDING_DEPTH && loreJournal.count < LORE_FRAGMENT_COUNT) {
-    grabSystem.loseHeld();
-    take += 1;
-    startEnding("boucle");
-    return;
-  }
   if (caught) grabSystem.loseHeld();
   levelManager.descend();
   log("level", { action: caught ? "caught" : "descend", depth: levelManager.depth });
@@ -524,19 +410,6 @@ function beginNewRun(restartLocallyOnFailure: boolean): void {
 
 /** Nouvelle partie : monde neuf, inventaire vidé, rien en main. */
 function restartWorld(seed: string): void {
-  if (mode === "intro") {
-    // La seed serveur arrive pendant l'intro : le niveau 0 est reconstruit derrière le mur,
-    // le joueur reste dans la salle de montage avec ce qu'il a déjà rangé.
-    levelManager.restartRun(seed);
-    editingRoom.applyLook();
-    take = 1;
-    log("run", { action: "start", seed, intro: true });
-    return;
-  }
-  if (mode === "ending") {
-    editingRoom.dispose();
-    mode = "game";
-  }
   grabSystem.loseHeld();
   collectionStore.clear();
   levelManager.restartRun(seed);
@@ -548,8 +421,6 @@ function restartWorld(seed: string): void {
 
 beginNewRun(false);
 void loreJournal.sync();
-// L'intro se joue à chaque lancement (passable depuis le menu une fois vue) ; `?intro=0` la saute.
-if (new URLSearchParams(location.search).get("intro") !== "0") void startIntro();
 
 /**
  * Son : les navigateurs (dont celui du Quest) ne démarrent l'audio que pendant un geste de
@@ -669,9 +540,7 @@ renderer.setAnimationLoop((timestamp) => {
   perfStats.end("physique");
 
   perfStats.begin("monde");
-  const inRoom = mode !== "game";
-  if (journal.visible) tutorial.journalOpened = true;
-  const levelUpdate = inRoom ? ROOM_LEVEL_UPDATE : levelManager.update(player.headWorld, handPalms, camera, elapsedSeconds, deltaSeconds, corruption.value);
+  const levelUpdate = levelManager.update(player.headWorld, handPalms, camera, elapsedSeconds, deltaSeconds, corruption.value);
   perfStats.end("monde");
   if (levelUpdate.batteriesPicked > 0) {
     flashlight.recharge(BATTERY_RECHARGE * levelUpdate.batteriesPicked);
@@ -686,32 +555,27 @@ renderer.setAnimationLoop((timestamp) => {
 
   perfStats.begin("menaces");
   const head = player.headWorld;
-  let localLight = 1;
-  let darkness = levelUpdate.darkness;
-  let cadreurEvents = { caught: false, sighted: false };
-  if (!inRoom) {
-    const blackoutEvents = blackout.update(deltaSeconds, head, levelManager.depth);
-    // Avant la coupure, les néons s'étranglent.
-    if (blackout.warning && Math.random() < deltaSeconds * 3) atmosphere.triggerFlicker(0.12);
-    if (blackoutEvents.reachedPlayer) {
-      triggerHapticPulse(renderer, 0.25, 70);
-      cadreur.summon();
-    }
-    localLight = blackout.lightAt(head.x, head.z);
-    darkness = Math.max(levelUpdate.darkness, 1 - localLight);
-    cadreurEvents = cadreur.update(deltaSeconds, {
-      head,
-      camera,
-      flashlight: flashlight.shining,
-      lightAt: (x, z) => levelManager.zoneLightAt(x, z) * blackout.lightAt(x, z) * atmosphere.level,
-      depth: levelManager.depth,
-    });
-    // Découvert : la bande décroche une fraction de seconde.
-    if (cadreurEvents.sighted) vhsOverlay.triggerTrackingLoss(0.35);
-  } else editingRoom.update(deltaSeconds);
+  const blackoutEvents = blackout.update(deltaSeconds, head, levelManager.depth);
+  // Avant la coupure, les néons s'étranglent.
+  if (blackout.warning && Math.random() < deltaSeconds * 3) atmosphere.triggerFlicker(0.12);
+  if (blackoutEvents.reachedPlayer) {
+    triggerHapticPulse(renderer, 0.25, 70);
+    cadreur.summon();
+  }
+  const localLight = blackout.lightAt(head.x, head.z);
+  const darkness = Math.max(levelUpdate.darkness, 1 - localLight);
+  const cadreurEvents = cadreur.update(deltaSeconds, {
+    head,
+    camera,
+    flashlight: flashlight.shining,
+    lightAt: (x, z) => levelManager.zoneLightAt(x, z) * blackout.lightAt(x, z) * atmosphere.level,
+    depth: levelManager.depth,
+  });
+  // Découvert : la bande décroche une fraction de seconde.
+  if (cadreurEvents.sighted) vhsOverlay.triggerTrackingLoss(0.35);
   perfStats.end("menaces");
 
-  if (!inRoom && (cadreurEvents.caught || levelManager.hasReachedExit(player.headWorld))) goDeeper(cadreurEvents.caught);
+  if (cadreurEvents.caught || levelManager.hasReachedExit(player.headWorld)) goDeeper(cadreurEvents.caught);
   corruption.update(deltaSeconds);
 
   hud.status = {
@@ -736,7 +600,7 @@ renderer.setAnimationLoop((timestamp) => {
   bouncePosition.copy(camera.getWorldDirection(bouncePosition)).setY(0).normalize().add(player.headWorld).setY(1);
   setFlashlightBounce(bouncePosition, flashlight.strength);
   atmosphere.update(deltaSeconds, corruption.value);
-  if (!inRoom) poltergeist.update(deltaSeconds, camera, player.headWorld, levelManager.depth, darkness);
+  poltergeist.update(deltaSeconds, camera, player.headWorld, levelManager.depth, darkness);
   ambientHum.update(deltaSeconds, player.headWorld, darkness, levelManager.depth, atmosphere.level * localLight);
   updateVhsTime(elapsedSeconds);
   runWarmupStep(renderer.xr.isPresenting);

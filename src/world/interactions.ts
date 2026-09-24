@@ -50,10 +50,6 @@ interface Behaviour {
   update?(deltaSeconds: number, near: boolean): void;
   /** Lubrifiant pulvérisé dessus (chariot qui ne grince plus). */
   oil?(): void;
-  /** Allumé / en marche (télé). */
-  isActive?(): boolean;
-  /** Commande de mise en scène (salle de montage) : allumer, lancer une lecture. */
-  command?(name: "on" | "off" | "tape", photo?: HTMLCanvasElement | null): void;
   dispose?(): void;
 }
 
@@ -300,15 +296,6 @@ const television: Factory = (g, w, system) => {
   return {
     use: () => setOn(!on),
     poke: () => setOn(!on),
-    isActive: () => on,
-    command: (name, photo) => {
-      if (name === "tape") {
-        if (!on) setOn(true);
-        tapeUntil = Infinity;
-        tapePhoto = photo ?? w.capturePhoto();
-        mode = "tape";
-      } else if ((name === "on") !== on) setOn(name === "on");
-    },
     update: (dt, near) => {
       if (!on || !screen) return;
       time += dt;
@@ -1403,14 +1390,6 @@ export class InteractionSystem {
     this.behaviours.delete(g);
     this.speeds.delete(g);
     this.lastPoke.delete(g);
-  }
-
-  isActive(g: Grabbable): boolean {
-    return this.behaviours.get(g)?.isActive?.() ?? false;
-  }
-
-  command(g: Grabbable, name: "on" | "off" | "tape", photo?: HTMLCanvasElement | null): void {
-    this.behaviours.get(g)?.command?.(name, photo);
   }
 
   use(hand: Hand, g: Grabbable): void {

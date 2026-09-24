@@ -175,36 +175,5 @@
     "Séq. 14 — couloir, néons, travelling",
     "Fin prévue : avant l'aube"
   ],
-  "tv.play": "▶ LECTURE",
-  "intro.opening": "La veille du rendu. Il est tard. Il ne reste que la bobine 4.",
-  "intro.grab": "Prenez un objet sur le bureau : serrez le grip au contact.",
-  "intro.store": "Rangez-le dans la mallette : bouton A/X, ou lâchez-le par-dessus l'épaule.",
-  "intro.read": "Une note traîne sur le bureau. Prenez-la pour la lire.",
-  "intro.journal": "Ouvrez votre journal : grip, main à la ceinture.",
-  "intro.lamp": "Le néon faiblit. Allumez votre lampe : bouton B.",
-  "intro.crouch": "Quelque chose a bougé sous le bureau. Accroupissez-vous : stick droit vers le bas.",
-  "intro.monitor": "Allumez le moniteur : touchez-le du bout de l'index.",
-  "intro.wall": "Le mur derrière le moniteur grésille. Avancez à travers.",
-  "inv.skipIntro": "PASSER INTRO",
-  "ending.aveuTitle": "■ FIN — L'AVEU",
-  "ending.boucleTitle": "■ FIN — LA BOUCLE",
-  "ending.aveu": [
-    "La porte donne sur la salle de montage. Le moniteur est allumé.",
-    "Bobine 4, plan 14. En entier, cette fois.",
-    "Je regarde Julien filmer jusqu'au bout.",
-    "Je la monte. Sans couper.",
-    "Quelqu'un a enfin vu."
-  ],
-  "ending.boucle": [
-    "COUPEZ. Dernière prise.",
-    "La salle de montage. Sur le moniteur, quelqu'un filme de dos.",
-    "C'est moi.",
-    "Quelqu'un doit continuer à filmer.",
-    "PRISE {take}."
-  ],
-  "intro.poster": [
-    "COULOIRS",
-    "un film Hexa Films",
-    "Prochainement"
-  ]
+  "tv.play": "▶ LECTURE"
 }

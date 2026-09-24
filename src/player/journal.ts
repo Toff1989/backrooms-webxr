@@ -1,9 +1,9 @@
 import * as THREE from "three";
 import { log } from "../debug/debugLog";
-import { onLanguageChange, t, type TranslationKey } from "../i18n";
+import { loreFragment, onLanguageChange, t, type TranslationKey } from "../i18n";
 import { LORE_FRAGMENT_COUNT, loreFormat, type LoreFormat } from "../shared/lore";
-import { drawButton, inRect, UiPanel, wrapText, type PressButton, type Rect } from "../ui/uiPanel";
-import { drawAgedPaper, drawLoreFragment, HANDWRITING_FONT, loreExcerpt, onLorePhotoChange } from "../world/loreArt";
+import { drawButton, drawPanelBackground, inRect, UiPanel, wrapText, type PressButton, type Rect } from "../ui/uiPanel";
+import { loreExcerpt } from "../world/loreArt";
 import { playLoreTape } from "../world/lorePage";
 import type { LoreJournal } from "../world/loreJournal";
 import { confirmPairing, startPairing, type PairingRequest } from "../world/playerIdentity";
@@ -87,7 +87,6 @@ export class Journal extends UiPanel {
     this.group.name = "journal";
     onLanguageChange(() => this.invalidate());
     lore.onChange(() => this.invalidate());
-    onLorePhotoChange(() => this.invalidate());
   }
 
   /** La main est-elle à la ceinture (zone de prise du journal) ? */
@@ -261,10 +260,9 @@ export class Journal extends UiPanel {
 
   protected draw(ctx: CanvasRenderingContext2D): void {
     this.hitRects = [];
-    this.drawCover(ctx);
-    drawAgedPaper(ctx, LEFT_PAGE.x, LEFT_PAGE.y, LEFT_PAGE.w, LEFT_PAGE.h, 101, false);
-    drawAgedPaper(ctx, RIGHT_PAGE.x, RIGHT_PAGE.y, RIGHT_PAGE.w, RIGHT_PAGE.h, 202 + this.selected, this.tab === "tapes");
-    this.drawGutter(ctx);
+    drawPanelBackground(ctx, CANVAS_W, CANVAS_H);
+    this.drawPagePanel(ctx, LEFT_PAGE);
+    this.drawPagePanel(ctx, RIGHT_PAGE);
     if (this.tab === "tapes") this.drawTapes(ctx);
     else this.drawRecord(ctx);
 
@@ -277,34 +275,20 @@ export class Journal extends UiPanel {
     }
   }
 
-  private drawCover(ctx: CanvasRenderingContext2D): void {
-    ctx.clearRect(0, 0, CANVAS_W, CANVAS_H);
+  /** Fond simple d'une colonne (même esprit que les autres menus, pas de texture). */
+  private drawPagePanel(ctx: CanvasRenderingContext2D, page: Rect): void {
     ctx.beginPath();
-    ctx.roundRect(4, 4, CANVAS_W - 8, CANVAS_H - 8, 22);
-    ctx.fillStyle = "#2a1c13";
+    ctx.roundRect(page.x, page.y, page.w, page.h, 12);
+    ctx.fillStyle = "rgba(255, 244, 214, 0.05)";
     ctx.fill();
-    ctx.setLineDash([10, 8]);
-    ctx.lineWidth = 3;
-    ctx.strokeStyle = "rgba(214, 170, 110, 0.5)";
-    ctx.beginPath();
-    ctx.roundRect(14, 14, CANVAS_W - 28, CANVAS_H - 28, 16);
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = "rgba(255, 244, 214, 0.15)";
     ctx.stroke();
-    ctx.setLineDash([]);
-  }
-
-  private drawGutter(ctx: CanvasRenderingContext2D): void {
-    const middle = CANVAS_W / 2;
-    const shadow = ctx.createLinearGradient(middle - 24, 0, middle + 24, 0);
-    shadow.addColorStop(0, "rgba(0, 0, 0, 0)");
-    shadow.addColorStop(0.5, "rgba(0, 0, 0, 0.45)");
-    shadow.addColorStop(1, "rgba(0, 0, 0, 0)");
-    ctx.fillStyle = shadow;
-    ctx.fillRect(middle - 24, LEFT_PAGE.y, 48, LEFT_PAGE.h);
   }
 
   private heading(ctx: CanvasRenderingContext2D, page: Rect, text: string): void {
-    ctx.fillStyle = "#3a2f22";
-    ctx.font = `bold 30px "Courier New", monospace`;
+    ctx.fillStyle = "#f2e8cf";
+    ctx.font = "bold 30px monospace";
     ctx.textAlign = "left";
     ctx.textBaseline = "alphabetic";
     ctx.fillText(text, page.x + 30, page.y + 56);
@@ -313,8 +297,9 @@ export class Journal extends UiPanel {
   private drawTapes(ctx: CanvasRenderingContext2D): void {
     const count = this.lore.count;
     this.heading(ctx, LEFT_PAGE, t("journal.title"));
-    ctx.font = `22px "Courier New", monospace`;
+    ctx.font = "22px monospace";
     ctx.textAlign = "right";
+    ctx.fillStyle = "#b9ae93";
     ctx.fillText(t("journal.progress", { count, total: LORE_FRAGMENT_COUNT }), LEFT_PAGE.x + LEFT_PAGE.w - 26, LEFT_PAGE.y + 56);
 
     const hovered = new Set(this.hovered.values());
@@ -322,78 +307,76 @@ export class Journal extends UiPanel {
       const rect: Rect = { x: LEFT_PAGE.x + 20, y: LEFT_PAGE.y + INDEX_TOP + index * INDEX_ROW - 22, w: LEFT_PAGE.w - 40, h: INDEX_ROW };
       const known = index < count;
       if (index === this.selected) {
-        ctx.fillStyle = "rgba(232, 195, 74, 0.45)";
+        ctx.fillStyle = "rgba(232, 195, 74, 0.3)";
         ctx.fillRect(rect.x, rect.y + 2, rect.w, rect.h - 2);
       } else if (hovered.has(`tape:${index}`)) {
-        ctx.fillStyle = "rgba(232, 195, 74, 0.2)";
+        ctx.fillStyle = "rgba(232, 195, 74, 0.14)";
         ctx.fillRect(rect.x, rect.y + 2, rect.w, rect.h - 2);
       }
       ctx.textAlign = "left";
-      ctx.fillStyle = known ? "#3a2f22" : "rgba(58, 47, 34, 0.4)";
-      ctx.font = `bold 20px "Courier New", monospace`;
+      ctx.fillStyle = known ? "#f2e8cf" : "rgba(255, 244, 214, 0.3)";
+      ctx.font = "bold 20px monospace";
       const label = `n°${String(index + 1).padStart(2, "0")}`;
       ctx.fillText(label, rect.x + 8, rect.y + 21);
       if (known) {
         const format = loreFormat(index);
-        ctx.font = `bold 13px "Courier New", monospace`;
+        ctx.font = "bold 13px monospace";
         ctx.fillStyle = FORMAT_COLOR[format];
         ctx.fillText(t(`lore.format.${format}`), rect.x + 70, rect.y + 20);
       }
-      ctx.font = known ? `20px ${HANDWRITING_FONT}` : `20px "Courier New", monospace`;
-      ctx.fillStyle = known ? "#1c2753" : "rgba(58, 47, 34, 0.35)";
+      ctx.font = "20px monospace";
+      ctx.fillStyle = known ? "#d8cfb6" : "rgba(255, 244, 214, 0.25)";
       const text = known ? loreExcerpt(index) : "— — — — — —";
       ctx.fillText(ellipsize(ctx, text, rect.w - 132), rect.x + 124, rect.y + 21);
       this.hitRects.push({ id: `tape:${index}`, rect });
     }
 
     if (this.selected < count) {
-      // La bande dans sa forme : note, fiche de montage, polaroid (légende au dos) ou transcription.
-      drawLoreFragment(ctx, RIGHT_PAGE.x, RIGHT_PAGE.y, RIGHT_PAGE.w, RIGHT_PAGE.h, this.selected);
+      this.heading(ctx, RIGHT_PAGE, t("lore.title", { n: this.selected + 1 }));
+      this.note(ctx, RIGHT_PAGE, loreFragment(this.selected) ?? "", 100, "#d8cfb6", 22);
       if (loreFormat(this.selected) === "audio") {
         drawButton(ctx, PLAY_BUTTON, t("audio.play"), { hovered: hovered.has("audio:play"), accent: "#8a5a2b" });
         this.hitRects.push({ id: "audio:play", rect: PLAY_BUTTON });
       }
     } else {
       this.heading(ctx, RIGHT_PAGE, t("lore.title", { n: this.selected + 1 }));
-      this.note(ctx, RIGHT_PAGE, count === 0 ? t("journal.none") : t("journal.locked"), 200);
+      this.note(ctx, RIGHT_PAGE, count === 0 ? t("journal.none") : t("journal.locked"), 100);
     }
   }
 
-  private note(ctx: CanvasRenderingContext2D, page: Rect, text: string, y: number, color = "#5a4a36", size = 24): void {
+  private note(ctx: CanvasRenderingContext2D, page: Rect, text: string, y: number, color = "#a79d86", size = 21): void {
     ctx.fillStyle = color;
-    ctx.font = `${size}px "Courier New", monospace`;
+    ctx.font = `${size}px monospace`;
     ctx.textAlign = "left";
-    wrapText(ctx, text, page.x + 34, page.y + y, page.w - 68, Math.round(size * 1.3), 6);
+    wrapText(ctx, text, page.x + 34, page.y + y, page.w - 68, Math.round(size * 1.3), 12);
   }
 
   private drawRecord(ctx: CanvasRenderingContext2D): void {
     const profile = this.lore.serverProfile;
     this.heading(ctx, LEFT_PAGE, t("journal.codeTitle"));
 
-    // Étiquette de cassette : le code de récupération, bien lisible.
-    const label: Rect = { x: LEFT_PAGE.x + 30, y: LEFT_PAGE.y + 84, w: LEFT_PAGE.w - 60, h: 110 };
-    ctx.fillStyle = "#f3ecd8";
-    ctx.fillRect(label.x, label.y, label.w, label.h);
-    ctx.fillStyle = "#c0392b";
-    ctx.fillRect(label.x, label.y + 12, label.w, 10);
-    ctx.fillRect(label.x, label.y + label.h - 22, label.w, 10);
-    ctx.fillStyle = "#1a1a1a";
-    ctx.font = `bold 50px "Courier New", monospace`;
-    ctx.textAlign = "center";
-    ctx.fillText(profile?.recoveryCode ?? "K7-····-····", label.x + label.w / 2, label.y + 76);
-    this.note(ctx, LEFT_PAGE, profile ? t("journal.codeHelp") : t("journal.offline"), 234, undefined, 21);
-
-    this.heading(ctx, { ...LEFT_PAGE, y: LEFT_PAGE.y + 392 }, t("journal.best"));
-    ctx.font = `22px "Courier New", monospace`;
+    ctx.fillStyle = "#ffe89a";
+    ctx.font = "bold 40px monospace";
     ctx.textAlign = "left";
-    ctx.fillStyle = "#3a2f22";
+    ctx.fillText(profile?.recoveryCode ?? "K7-····-····", LEFT_PAGE.x + 30, LEFT_PAGE.y + 110);
+    this.note(ctx, LEFT_PAGE, profile ? t("journal.codeHelp") : t("journal.offline"), 150);
+
+    this.heading(ctx, { ...LEFT_PAGE, y: LEFT_PAGE.y + 320 }, t("journal.best"));
+    ctx.font = "22px monospace";
+    ctx.textAlign = "left";
+    ctx.fillStyle = "#f2e8cf";
     const runs = profile?.bestRuns ?? [];
-    if (runs.length === 0) ctx.fillText(t("journal.noRuns"), LEFT_PAGE.x + 34, LEFT_PAGE.y + 490);
+    if (runs.length === 0) {
+      ctx.fillStyle = "#a79d86";
+      ctx.fillText(t("journal.noRuns"), LEFT_PAGE.x + 34, LEFT_PAGE.y + 418);
+    }
     runs.slice(0, 4).forEach((run, index) => {
-      const y = LEFT_PAGE.y + 490 + index * 26;
+      const y = LEFT_PAGE.y + 418 + index * 28;
       ctx.textAlign = "left";
+      ctx.fillStyle = "#f2e8cf";
       ctx.fillText(`${index + 1}. ${run.pseudo}`, LEFT_PAGE.x + 34, y);
       ctx.textAlign = "right";
+      ctx.fillStyle = "#a79d86";
       ctx.fillText(t("end.levelShort", { n: run.depth }), LEFT_PAGE.x + LEFT_PAGE.w - 34, y);
     });
 
@@ -417,8 +400,8 @@ export class Journal extends UiPanel {
       button("pair:enter", wide(290), t("pair.confirm"));
       this.note(ctx, page, t("pair.confirmHelp"), 388);
     } else if (pair.kind === "showing") {
-      ctx.fillStyle = "#1a1a1a";
-      ctx.font = `bold 84px "Courier New", monospace`;
+      ctx.fillStyle = "#ffe89a";
+      ctx.font = "bold 84px monospace";
       ctx.textAlign = "center";
       ctx.fillText(`${pair.request.code.slice(0, 3)} ${pair.request.code.slice(3)}`, page.x + page.w / 2, page.y + 170);
       this.note(ctx, page, t("pair.showHelp"), 226);
@@ -426,8 +409,8 @@ export class Journal extends UiPanel {
       button("pair:cancel", wide(470), t("pair.cancel"));
     } else if (pair.kind === "entering" || pair.kind === "confirming") {
       const digits = pair.kind === "entering" ? pair.digits : "······";
-      ctx.fillStyle = "#1a1a1a";
-      ctx.font = `bold 54px "Courier New", monospace`;
+      ctx.fillStyle = "#f2e8cf";
+      ctx.font = "bold 54px monospace";
       ctx.textAlign = "center";
       ctx.fillText(digits.padEnd(6, "_").split("").join(" "), page.x + page.w / 2, page.y + 128);
       const keyW = 118;

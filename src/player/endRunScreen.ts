@@ -29,7 +29,6 @@ const BUTTONS: Record<ButtonId, Rect> = {
  */
 export class EndRunScreen extends UiPanel {
   private phase: Phase = "review";
-  private title: string | null = null;
   private depthReached = 0;
   private adjectiveIndex = 0;
   private nounIndex = 0;
@@ -51,10 +50,8 @@ export class EndRunScreen extends UiPanel {
     onLanguageChange(() => this.invalidate());
   }
 
-  /** `title` : titre de fin (l'aveu, la boucle) à la place de « fin de l'enregistrement ». */
-  show(depthReached: number, title: string | null = null): void {
+  show(depthReached: number): void {
     this.depthReached = depthReached;
-    this.title = title;
     this.adjectiveIndex = Math.floor(Math.random() * PSEUDO_ADJECTIVE_COUNT);
     this.nounIndex = Math.floor(Math.random() * PSEUDO_NOUN_COUNT);
     this.suffix = Math.floor(Math.random() * 10000);
@@ -141,7 +138,7 @@ export class EndRunScreen extends UiPanel {
     ctx.textBaseline = "middle";
     ctx.fillStyle = "#ff6b5a";
     ctx.font = "bold 40px monospace";
-    ctx.fillText(this.title ?? t("end.title"), width / 2, 60);
+    ctx.fillText(t("end.title"), width / 2, 60);
     ctx.fillStyle = "#f2e8cf";
     ctx.font = "30px monospace";
     ctx.fillText(t("end.depth", { depth: this.depthReached }), width / 2, 116);
