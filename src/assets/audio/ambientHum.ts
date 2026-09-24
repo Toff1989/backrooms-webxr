@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { bandpass, brownNoise, createSamples, fadeEdges, highpass, lowpass, makeLoopable, normalize, reverb, toBuffer } from "./synth";
+import { bandpass, brownNoise, createSamples, fadeEdges, highpass, lowpass, makeLoopable, normalize, queueWarmup, reverb, toBuffer } from "./synth";
 
 const BUZZ_VOLUME = 0.07;
 const ROOM_VOLUME = 0.1;
@@ -48,6 +48,16 @@ export class AmbientHum {
     this.eventVoice.setMaxDistance(30);
     this.eventVoice.setRolloffFactor(0.9);
     scene.add(this.eventVoice);
+    for (const kind of EVENT_KINDS) queueWarmup(() => this.variantsFor(kind));
+  }
+
+  private variantsFor(kind: DistantEventKind): AudioBuffer[] {
+    let variants = this.eventBuffers.get(kind);
+    if (!variants) {
+      variants = [createEventBuffer(this.listener.context, kind), createEventBuffer(this.listener.context, kind)];
+      this.eventBuffers.set(kind, variants);
+    }
+    return variants;
   }
 
   private createLoop(buffer: AudioBuffer, volume: number): THREE.Audio {
@@ -97,12 +107,7 @@ export class AmbientHum {
     while (kind === this.lastEvent);
     this.lastEvent = kind;
 
-    let variants = this.eventBuffers.get(kind);
-    if (!variants) {
-      variants = [createEventBuffer(this.listener.context, kind), createEventBuffer(this.listener.context, kind)];
-      this.eventBuffers.set(kind, variants);
-    }
-
+    const variants = this.variantsFor(kind);
     const angle = Math.random() * Math.PI * 2;
     const distance = EVENT_MIN_DISTANCE + Math.random() * (EVENT_MAX_DISTANCE - EVENT_MIN_DISTANCE);
     this.eventVoice.position.set(

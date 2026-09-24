@@ -16,6 +16,8 @@ export const GlitchKind = {
 export interface GlitchZone extends ShaderGlitchZone {}
 
 const zones = new Set<GlitchZone>();
+/** Au-delà (m), une zone n'est pas envoyée au shader : invisible dans le brouillard de toute façon. */
+const MAX_SHADER_DISTANCE = 16;
 const sorted: GlitchZone[] = [];
 
 export function addGlitchZone(zone: GlitchZone): GlitchZone {
@@ -30,8 +32,8 @@ export function removeGlitchZone(zone: GlitchZone): void {
 /** Envoie au shader les zones actives les plus proches du joueur (budget fixe d'uniformes). */
 export function flushGlitchZones(playerPosition: THREE.Vector3): void {
   sorted.length = 0;
-  for (const zone of zones) if (zone.intensity > 0.001) sorted.push(zone);
   const distance = (zone: GlitchZone): number => Math.hypot(zone.x - playerPosition.x, zone.z - playerPosition.z);
+  for (const zone of zones) if (zone.intensity > 0.001 && distance(zone) - zone.radius < MAX_SHADER_DISTANCE) sorted.push(zone);
   if (sorted.length > MAX_GLITCH_ZONES) sorted.sort((a, b) => distance(a) - distance(b));
   setGlitchZones(sorted);
 }

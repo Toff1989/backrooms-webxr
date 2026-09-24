@@ -6,6 +6,10 @@ const RANGE = 18;
 const DECAY = 1.3;
 const ANGLE_DEGREES = 30;
 const PENUMBRA = 0.6;
+/** Autonomie d'une batterie pleine (s) lampe allumée, avant bonus de collection. */
+const BATTERY_SECONDS = 240;
+/** Sous ce niveau, la lampe faiblit et grésille. */
+const LOW_BATTERY = 0.2;
 
 /**
  * Lampe torche frontale (B) — comme la lampe de poitrine de Saints & Sinners, indispensable
@@ -16,6 +20,10 @@ const PENUMBRA = 0.6;
  *
  * Le grésillement suit des baisses de tension lissées et de rares micro-coupures (plutôt
  * qu'un tirage aléatoire à chaque frame, qui stroboscopait dès la moindre corruption).
+ *
+ * Batterie : la lampe se vide quand elle est allumée (HUD `BAT`), faiblit sous 20 % et
+ * s'éteint à 0 — il faut trouver des piles (voir `BatteryPickups`). Les zones sombres
+ * deviennent un vrai choix : traverser vite dans le noir, ou dépenser de la batterie.
  */
 export class Flashlight {
   on = false;
@@ -25,6 +33,10 @@ export class Flashlight {
   private sagTarget = 0;
   private sagTimer = 0;
   private cutSeconds = 0;
+  /** Charge restante (0..1). */
+  battery = 1;
+  /** Multiplicateur d'autonomie (bonus de collection). */
+  capacity = 1;
 
   constructor(camera: THREE.Camera) {
     this.light = new THREE.SpotLight(LIGHT_COLOR, 0, RANGE, THREE.MathUtils.degToRad(ANGLE_DEGREES), PENUMBRA, DECAY);
@@ -33,8 +45,15 @@ export class Flashlight {
     camera.add(this.light, this.light.target);
   }
 
-  toggle(): void {
+  /** Bascule la lampe. Faux si elle ne peut pas s'allumer (batterie vide). */
+  toggle(): boolean {
+    if (!this.on && this.battery <= 0) return false;
     this.on = !this.on;
+    return true;
+  }
+
+  recharge(amount: number): void {
+    this.battery = Math.min(1, this.battery + amount);
   }
 
   /** Coupure brève (téléportation, glitch fort). */
@@ -43,17 +62,23 @@ export class Flashlight {
   }
 
   update(deltaSeconds: number, corruption: number): void {
+    if (this.on) {
+      this.battery = Math.max(0, this.battery - deltaSeconds / (BATTERY_SECONDS * this.capacity));
+      if (this.battery === 0) this.on = false;
+    }
+    const low = this.battery < LOW_BATTERY ? 1 - this.battery / LOW_BATTERY : 0;
+
     this.sagTimer -= deltaSeconds;
     if (this.sagTimer <= 0) {
-      // Nouvelle "tension" tous les 0,1 à 0,6 s : amplitude liée à la corruption.
-      this.sagTarget = Math.random() * Math.min(0.75, 0.08 + corruption * 0.8);
+      // Nouvelle "tension" tous les 0,1 à 0,6 s : amplitude liée à la corruption et à la batterie faible.
+      this.sagTarget = Math.random() * Math.min(0.75, 0.08 + corruption * 0.8 + low * 0.4);
       this.sagTimer = 0.1 + Math.random() * 0.5;
-      if (corruption > 0.3 && Math.random() < corruption * 0.25) this.cut(0.05 + Math.random() * 0.12);
+      if ((corruption > 0.3 && Math.random() < corruption * 0.25) || Math.random() < low * 0.3) this.cut(0.05 + Math.random() * 0.12);
     }
     this.sag = THREE.MathUtils.damp(this.sag, this.sagTarget, 10, deltaSeconds);
     this.cutSeconds = Math.max(0, this.cutSeconds - deltaSeconds);
 
-    const target = this.on && this.cutSeconds === 0 ? ON_INTENSITY * (1 - this.sag) : 0;
+    const target = this.on && this.cutSeconds === 0 ? ON_INTENSITY * (1 - this.sag) * (1 - low * 0.6) : 0;
     this.intensity = THREE.MathUtils.damp(this.intensity, target, 22, deltaSeconds);
     this.light.intensity = this.intensity;
   }

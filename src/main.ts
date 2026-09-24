@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import { VRButton } from "three/addons/webxr/VRButton.js";
 import { AmbientHum } from "./assets/audio/ambientHum";
+import { runWarmupStep } from "./assets/audio/synth";
 import { PhysicsWorld } from "./physics/physicsWorld";
 import { CamcorderHud } from "./player/camcorderHud";
 import { ComfortVignette } from "./player/comfortVignette";
@@ -10,6 +11,7 @@ import { GrabSystem } from "./player/grabSystem";
 import { Hand } from "./player/hand";
 import { triggerHapticPulse } from "./player/haptics";
 import { InventoryMenu } from "./player/inventoryMenu";
+import { PerfStats } from "./player/perfStats";
 import { PlayerController } from "./player/playerController";
 import { Sfx } from "./player/sfx";
 import { VhsOverlay } from "./player/vhsOverlay";
@@ -20,6 +22,7 @@ import { CollectionStore } from "./world/collection";
 import { corruption } from "./world/corruption";
 import { GrabbableRegistry } from "./world/grabbable";
 import { LevelManager, SPAWN_LOCAL_POSITION } from "./world/levelManager";
+import { initMaterials } from "./world/materials";
 import { endRun, reportLevel, startRun, type RunSessionInfo } from "./world/runSession";
 import { updateVhsTime } from "./world/vhsMaterial";
 
@@ -38,12 +41,20 @@ scene.fog = new THREE.FogExp2(BACKGROUND_COLOR, 0.035);
 const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.03, 60);
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+// Le pixel ratio ne concerne que l'aperçu écran : en XR, la résolution vient du casque
+// (framebufferScaleFactor). Rendu fovéal au maximum : périphérie moins détaillée, gros
+// gain GPU sur Quest, invisible avec le grain VHS.
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
+renderer.xr.setFramebufferScaleFactor(1);
+renderer.xr.setFoveation(1);
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.xr.enabled = true;
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 appRoot.appendChild(renderer.domElement);
 document.body.appendChild(VRButton.createButton(renderer));
+
+// Textures KTX2 transcodées avant de construire le premier level (matériaux partagés).
+await initMaterials(renderer);
 
 const player = new PlayerController(renderer, camera, physics);
 scene.add(player.rig);
@@ -77,6 +88,7 @@ const vhsOverlay = new VhsOverlay(camera);
 const hud = new CamcorderHud(camera);
 const ambientHum = new AmbientHum(audioListener, scene);
 const flashlight = new Flashlight(camera);
+const perfStats = new PerfStats(renderer);
 const atmosphere = new Atmosphere(scene, hemisphere, ambient);
 
 let currentSession: RunSessionInfo | null = null;
@@ -193,8 +205,7 @@ renderer.setAnimationLoop((timestamp) => {
   // Y : inventaire, B : lampe (contrôles type Saints & Sinners, voir README).
   if (input.left.secondary.justPressed) inventoryMenu.toggle();
   if (input.right.secondary.justPressed) {
-    flashlight.toggle();
-    sfx.play("click", 0.3);
+    sfx.play(flashlight.toggle() ? "click" : "denied", 0.3);
   }
 
   player.update(deltaSeconds, input);
@@ -210,7 +221,7 @@ renderer.setAnimationLoop((timestamp) => {
     for (const hand of hands) hand.applyKinematicTarget();
     grabSystem.step(stepSeconds);
   });
-  grabbables.sync();
+  grabbables.sync(player.headWorld);
 
   const levelUpdate = levelManager.update(player.headWorld, camera, elapsedSeconds, deltaSeconds, corruption.value);
   if (levelUpdate.corruptionDelta > 0) corruption.add(levelUpdate.corruptionDelta);
@@ -251,6 +262,8 @@ renderer.setAnimationLoop((timestamp) => {
     sprinting: player.sprinting,
     flashlight: flashlight.on,
     items: collectionStore.count,
+    battery: flashlight.battery,
+    debug: perfStats.readAndReset(),
   };
   comfortVignette.update(player.movementIntensity, deltaSeconds);
   vhsOverlay.update(elapsedSeconds, corruption.value, deltaSeconds);
@@ -259,5 +272,8 @@ renderer.setAnimationLoop((timestamp) => {
   atmosphere.update(deltaSeconds, corruption.value);
   ambientHum.update(deltaSeconds, player.headWorld, levelUpdate.darkness, levelManager.depth, atmosphere.level);
   updateVhsTime(elapsedSeconds);
+  runWarmupStep();
+  perfStats.beginFrame(deltaSeconds);
   renderer.render(scene, camera);
 });
+

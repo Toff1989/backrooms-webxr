@@ -22,10 +22,11 @@ const TRUST_PROXY = process.env["TRUST_PROXY"] !== "0";
 const app = Fastify({ logger: true, trustProxy: TRUST_PROXY });
 
 await app.register(cors, { origin: true });
-await app.register(rateLimit, { max: 60, timeWindow: "1 minute" });
-
 app.register(
   async (api) => {
+    // Limite de débit sur l'API seulement : un chargement de page demande des dizaines de
+    // fichiers statiques, qui ne doivent pas consommer le quota anti-abus du classement.
+    await api.register(rateLimit, { max: 60, timeWindow: "1 minute" });
     registerRunRoutes(api);
     registerLeaderboardRoute(api);
   },
@@ -35,6 +36,12 @@ app.register(
 await app.register(fastifyStatic, {
   root: STATIC_DIR,
   index: ["index.html"],
+  // Fichiers .br/.gz générés au build (scripts/compress-dist.mjs).
+  preCompressed: true,
+  setHeaders: (reply, path) => {
+    // Fichiers nommés par hash de contenu : cache définitif côté navigateur.
+    if (path.includes("/assets/")) reply.header("Cache-Control", "public, max-age=31536000, immutable");
+  },
 });
 
 app.setNotFoundHandler((request, reply) => {

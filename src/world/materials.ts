@@ -1,101 +1,113 @@
 import * as THREE from "three";
-import ceilingAoUrl from "../assets/textures/ceiling/ao.webp";
-import ceilingBaseColorUrl from "../assets/textures/ceiling/basecolor.webp";
-import ceilingDisplacementUrl from "../assets/textures/ceiling/displacement.webp";
-import ceilingEmissionUrl from "../assets/textures/ceiling/emission.webp";
-import ceilingNormalUrl from "../assets/textures/ceiling/normal.webp";
-import ceilingRoughnessUrl from "../assets/textures/ceiling/roughness.webp";
-import floorAoUrl from "../assets/textures/floor/ao.webp";
-import floorBaseColorUrl from "../assets/textures/floor/basecolor.webp";
-import floorDisplacementUrl from "../assets/textures/floor/displacement.webp";
-import floorNormalUrl from "../assets/textures/floor/normal.webp";
-import floorRoughnessUrl from "../assets/textures/floor/roughness.webp";
-import pillarAoUrl from "../assets/textures/pillar/ao.webp";
-import pillarBaseColorUrl from "../assets/textures/pillar/basecolor.webp";
-import pillarDisplacementUrl from "../assets/textures/pillar/displacement.webp";
-import pillarNormalUrl from "../assets/textures/pillar/normal.webp";
-import pillarRoughnessUrl from "../assets/textures/pillar/roughness.webp";
-import wallAoUrl from "../assets/textures/wall/ao.webp";
-import wallBaseColorUrl from "../assets/textures/wall/basecolor.webp";
-import wallDisplacementUrl from "../assets/textures/wall/displacement.webp";
-import wallNormalUrl from "../assets/textures/wall/normal.webp";
-import wallRoughnessUrl from "../assets/textures/wall/roughness.webp";
-import { CHUNK_CELLS } from "../shared/constants";
+import { KTX2Loader } from "three/addons/loaders/KTX2Loader.js";
+import ceilingBaseColorUrl from "../assets/textures/ceiling/basecolor.ktx2";
+import ceilingEmissionUrl from "../assets/textures/ceiling/emission.ktx2";
+import ceilingNormalUrl from "../assets/textures/ceiling/normal.ktx2";
+import ceilingOrmUrl from "../assets/textures/ceiling/orm.ktx2";
+import floorBaseColorUrl from "../assets/textures/floor/basecolor.ktx2";
+import floorNormalUrl from "../assets/textures/floor/normal.ktx2";
+import floorOrmUrl from "../assets/textures/floor/orm.ktx2";
+import pillarBaseColorUrl from "../assets/textures/pillar/basecolor.ktx2";
+import pillarDisplacementUrl from "../assets/textures/pillar/displacement.ktx2";
+import pillarNormalUrl from "../assets/textures/pillar/normal.ktx2";
+import pillarOrmUrl from "../assets/textures/pillar/orm.ktx2";
+import wallBaseColorUrl from "../assets/textures/wall/basecolor.ktx2";
+import wallDisplacementUrl from "../assets/textures/wall/displacement.ktx2";
+import wallNormalUrl from "../assets/textures/wall/normal.ktx2";
+import wallOrmUrl from "../assets/textures/wall/orm.ktx2";
+import { CHUNK_CELLS, STREAM_RADIUS_CHUNKS } from "../shared/constants";
 import { applyVhsEffect } from "./vhsMaterial";
 
 /**
- * Textures Poliigon (catégorie Backrooms, gratuites sur le site — fiche projet) :
- * basecolor/normal/roughness/ao/displacement (+ emission pour le plafond),
- * redimensionnées 1K et converties en WebP. Commitées normalement dans le dépôt.
+ * Textures Poliigon (catégorie Backrooms, CC0) compressées en KTX2/Basis (fiche projet :
+ * "textures 1K max en KTX2") : transcodées au chargement vers le format GPU natif (ASTC sur
+ * Quest), ~4 à 8× moins de mémoire vidéo que des PNG/WebP décompressés. Sources et pipeline :
+ * `assets-src/textures/` et `scripts/convert-textures.py`.
  *
- * Les matériaux sont des singletons partagés par tous les chunks (streaming) : un
- * seul jeu de textures pour tout le monde généré, pas de rechargement par chunk.
+ * AO (canal R) et roughness (canal G) sont empaquetées dans une seule texture "ORM". Sol et
+ * plafond n'ont ni AO ni displacement : relief invisible à cette échelle.
+ *
+ * Les matériaux sont des singletons partagés par tous les chunks : un seul jeu de textures
+ * pour tout le monde généré. `initMaterials` doit être attendu avant de construire le monde.
  */
 
-const textureLoader = new THREE.TextureLoader();
-
-interface SurfaceTextureUrls {
-  baseColor: string;
-  normal: string;
-  roughness: string;
-  ao: string;
-  displacement: string;
-}
+/** Côté (en chunks) du plan unique de sol/plafond (voir `floorCeiling.ts`) : la zone de streaming. */
+export const SURFACE_CHUNKS = STREAM_RADIUS_CHUNKS * 2 + 1;
+/** Côté (en cellules) : `repeat` des textures sol/plafond (une tuile par cellule). */
+export const SURFACE_CELLS = SURFACE_CHUNKS * CHUNK_CELLS;
 
 interface SurfaceTextures {
   map: THREE.Texture;
   normalMap: THREE.Texture;
   roughnessMap: THREE.Texture;
-  aoMap: THREE.Texture;
-  displacementMap: THREE.Texture;
+  aoMap?: THREE.Texture;
+  displacementMap?: THREE.Texture;
 }
 
-function loadTexture(url: string, colorSpace: THREE.ColorSpace, repeat: number): THREE.Texture {
-  const texture = textureLoader.load(url);
+let ktx2Loader: KTX2Loader | null = null;
+const loaded = new Map<string, THREE.Texture>();
+
+async function loadTexture(url: string, colorSpace: THREE.ColorSpace): Promise<void> {
+  const texture = await ktx2Loader!.loadAsync(url);
   texture.colorSpace = colorSpace;
   texture.wrapS = THREE.RepeatWrapping;
   texture.wrapT = THREE.RepeatWrapping;
-  texture.repeat.set(repeat, repeat);
   texture.anisotropy = 4;
-  return texture;
+  loaded.set(url, texture);
 }
 
-function loadSurfaceTextures(urls: SurfaceTextureUrls, repeat: number): SurfaceTextures {
+/** Précharge toutes les textures (à attendre avant la construction du premier level). */
+export async function initMaterials(renderer: THREE.WebGLRenderer): Promise<void> {
+  ktx2Loader = new KTX2Loader().setTranscoderPath("/basis/").detectSupport(renderer);
+  const srgb = [wallBaseColorUrl, floorBaseColorUrl, ceilingBaseColorUrl, pillarBaseColorUrl, ceilingEmissionUrl];
+  const linear = [
+    wallNormalUrl, wallOrmUrl, wallDisplacementUrl,
+    floorNormalUrl, floorOrmUrl,
+    ceilingNormalUrl, ceilingOrmUrl,
+    pillarNormalUrl, pillarOrmUrl, pillarDisplacementUrl,
+  ];
+  await Promise.all([
+    ...srgb.map((url) => loadTexture(url, THREE.SRGBColorSpace)),
+    ...linear.map((url) => loadTexture(url, THREE.NoColorSpace)),
+  ]);
+  ktx2Loader.dispose();
+}
+
+function texture(url: string, repeat: number): THREE.Texture {
+  const source = loaded.get(url);
+  if (!source) throw new Error(`Texture non préchargée : ${url} (initMaterials doit être attendu)`);
+  const result = repeat === 1 ? source : source.clone();
+  result.repeat.set(repeat, repeat);
+  return result;
+}
+
+function surface(baseColor: string, normal: string, orm: string, repeat: number, withAo: boolean): SurfaceTextures {
+  const ormTexture = texture(orm, repeat);
   return {
-    map: loadTexture(urls.baseColor, THREE.SRGBColorSpace, repeat),
-    normalMap: loadTexture(urls.normal, THREE.NoColorSpace, repeat),
-    roughnessMap: loadTexture(urls.roughness, THREE.NoColorSpace, repeat),
-    // channel 0 par défaut : réutilise le même jeu d'UV que map/normalMap, pas besoin d'un uv2.
-    aoMap: loadTexture(urls.ao, THREE.NoColorSpace, repeat),
-    displacementMap: loadTexture(urls.displacement, THREE.NoColorSpace, repeat),
+    map: texture(baseColor, repeat),
+    normalMap: texture(normal, repeat),
+    roughnessMap: ormTexture,
+    ...(withAo ? { aoMap: ormTexture } : {}),
   };
 }
 
 /**
- * Le displacement déplace les sommets le long de leur normale : sur nos géométries
- * (voir `chunkMesh.ts`, quads/box subdivisés), on garde une échelle faible et un biais
- * négatif pour rester un simple relief de surface (pas de pics qui traversent les
- * boîtes de collision AABB, qui elles restent plates).
+ * Le displacement déplace les sommets le long de leur normale : on garde une échelle faible
+ * et un biais négatif pour rester un simple relief de surface (pas de pics qui traversent les
+ * boîtes de collision, qui elles restent plates). Murs et piliers seulement.
  */
-interface DisplacementSettings {
-  displacementScale: number;
-  displacementBias: number;
-}
-
-const WALL_DISPLACEMENT: DisplacementSettings = { displacementScale: 0.035, displacementBias: -0.02 };
-const FLOOR_DISPLACEMENT: DisplacementSettings = { displacementScale: 0.025, displacementBias: -0.02 };
-const CEILING_DISPLACEMENT: DisplacementSettings = { displacementScale: 0.02, displacementBias: -0.01 };
-const PILLAR_DISPLACEMENT: DisplacementSettings = { displacementScale: 0.03, displacementBias: -0.018 };
+const WALL_DISPLACEMENT = { displacementScale: 0.035, displacementBias: -0.02 };
+const PILLAR_DISPLACEMENT = { displacementScale: 0.03, displacementBias: -0.018 };
 
 let wallMaterial: THREE.MeshStandardMaterial | null = null;
 export function getWallMaterial(): THREE.MeshStandardMaterial {
   if (!wallMaterial) {
     // Un mur = une cellule (2,5 m) : chaque quad de mur fusionné porte déjà son propre UV 0..1.
-    const textures = loadSurfaceTextures(
-      { baseColor: wallBaseColorUrl, normal: wallNormalUrl, roughness: wallRoughnessUrl, ao: wallAoUrl, displacement: wallDisplacementUrl },
-      1,
-    );
-    wallMaterial = new THREE.MeshStandardMaterial({ ...textures, ...WALL_DISPLACEMENT });
+    wallMaterial = new THREE.MeshStandardMaterial({
+      ...surface(wallBaseColorUrl, wallNormalUrl, wallOrmUrl, 1, true),
+      displacementMap: texture(wallDisplacementUrl, 1),
+      ...WALL_DISPLACEMENT,
+    });
     applyVhsEffect(wallMaterial);
   }
   return wallMaterial;
@@ -104,12 +116,8 @@ export function getWallMaterial(): THREE.MeshStandardMaterial {
 let floorMaterial: THREE.MeshStandardMaterial | null = null;
 export function getFloorMaterial(): THREE.MeshStandardMaterial {
   if (!floorMaterial) {
-    // Une dalle de sol par chunk : repeat = nombre de cellules par côté de chunk.
-    const textures = loadSurfaceTextures(
-      { baseColor: floorBaseColorUrl, normal: floorNormalUrl, roughness: floorRoughnessUrl, ao: floorAoUrl, displacement: floorDisplacementUrl },
-      CHUNK_CELLS,
-    );
-    floorMaterial = new THREE.MeshStandardMaterial({ ...textures, ...FLOOR_DISPLACEMENT });
+    // Un seul plan de sol pour toute la zone chargée : repeat = nombre de cellules par côté.
+    floorMaterial = new THREE.MeshStandardMaterial(surface(floorBaseColorUrl, floorNormalUrl, floorOrmUrl, SURFACE_CELLS, false));
     applyVhsEffect(floorMaterial);
   }
   return floorMaterial;
@@ -118,18 +126,12 @@ export function getFloorMaterial(): THREE.MeshStandardMaterial {
 let ceilingMaterial: THREE.MeshStandardMaterial | null = null;
 export function getCeilingMaterial(): THREE.MeshStandardMaterial {
   if (!ceilingMaterial) {
-    const textures = loadSurfaceTextures(
-      { baseColor: ceilingBaseColorUrl, normal: ceilingNormalUrl, roughness: ceilingRoughnessUrl, ao: ceilingAoUrl, displacement: ceilingDisplacementUrl },
-      CHUNK_CELLS,
-    );
     // Vraie carte d'émission Poliigon (dalles lumineuses déjà présentes dans la photo du
     // plafond) : pas d'objet 3D séparé, et alignée pixel pour pixel avec le carrelage.
-    const emissiveMap = loadTexture(ceilingEmissionUrl, THREE.SRGBColorSpace, CHUNK_CELLS);
     ceilingMaterial = new THREE.MeshStandardMaterial({
-      ...textures,
-      ...CEILING_DISPLACEMENT,
+      ...surface(ceilingBaseColorUrl, ceilingNormalUrl, ceilingOrmUrl, SURFACE_CELLS, false),
+      emissiveMap: texture(ceilingEmissionUrl, SURFACE_CELLS),
       emissive: new THREE.Color(0xffffff),
-      emissiveMap,
       emissiveIntensity: 2.2,
     });
     applyVhsEffect(ceilingMaterial, { ceilingLights: true });
@@ -140,11 +142,11 @@ export function getCeilingMaterial(): THREE.MeshStandardMaterial {
 let pillarMaterial: THREE.MeshStandardMaterial | null = null;
 export function getPillarMaterial(): THREE.MeshStandardMaterial {
   if (!pillarMaterial) {
-    const textures = loadSurfaceTextures(
-      { baseColor: pillarBaseColorUrl, normal: pillarNormalUrl, roughness: pillarRoughnessUrl, ao: pillarAoUrl, displacement: pillarDisplacementUrl },
-      1,
-    );
-    pillarMaterial = new THREE.MeshStandardMaterial({ ...textures, ...PILLAR_DISPLACEMENT });
+    pillarMaterial = new THREE.MeshStandardMaterial({
+      ...surface(pillarBaseColorUrl, pillarNormalUrl, pillarOrmUrl, 1, true),
+      displacementMap: texture(pillarDisplacementUrl, 1),
+      ...PILLAR_DISPLACEMENT,
+    });
     applyVhsEffect(pillarMaterial);
   }
   return pillarMaterial;

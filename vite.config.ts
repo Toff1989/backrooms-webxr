@@ -3,7 +3,7 @@ import mkcert from "vite-plugin-mkcert";
 
 export default defineConfig({
   plugins: [mkcert()],
-  assetsInclude: ["**/*.glb"],
+  assetsInclude: ["**/*.glb", "**/*.ktx2"],
   server: {
     https: {},
     host: true,
@@ -19,5 +19,19 @@ export default defineConfig({
   },
   build: {
     target: "es2022",
+    // Dépendances lourdes dans des fichiers séparés, stables d'une version à l'autre : le
+    // navigateur (et le cache du casque) ne retélécharge que le code du jeu après une mise à jour.
+    rolldownOptions: {
+      output: {
+        codeSplitting: {
+          groups: [
+            { name: "rapier", test: /node_modules[\\/]@dimforge/ },
+            { name: "three", test: /node_modules[\\/]three/ },
+          ],
+        },
+      },
+    },
+    // Rapier embarque son WASM en base64 (~2 Mo) : taille connue et assumée.
+    chunkSizeWarningLimit: 3000,
   },
 });

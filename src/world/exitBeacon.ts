@@ -108,7 +108,8 @@ export class ExitBeacon {
     this.group.add(portalPlane);
 
     this.sound = new THREE.PositionalAudio(listener);
-    this.sound.setBuffer(createBeaconBuffer(listener.context));
+    beaconBuffer ??= createBeaconBuffer(listener.context);
+    this.sound.setBuffer(beaconBuffer);
     this.sound.setLoop(true);
     this.sound.setRefDistance(BEACON_REF_DISTANCE);
     this.sound.setMaxDistance(BEACON_MAX_DISTANCE);
@@ -143,6 +144,8 @@ export class ExitBeacon {
     });
   }
 }
+
+let beaconBuffer: AudioBuffer | null = null;
 
 /**
  * Balise : une radio mal réglée quelque part — porteuse grave désaccordée, qui pleure

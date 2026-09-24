@@ -140,3 +140,18 @@ export function makeLoopable(data: Float32Array, sampleRate: number, seconds = 0
   }
   return out;
 }
+
+const warmupQueue: Array<() => void> = [];
+
+/**
+ * File de pré-génération : les buffers coûteux (réverbe calculée en JS) sont construits un par
+ * frame au démarrage, au lieu d'un gros calcul au premier déclenchement du son (à-coup en jeu).
+ */
+export function queueWarmup(task: () => void): void {
+  warmupQueue.push(task);
+}
+
+/** À appeler une fois par frame : exécute au plus une tâche de pré-génération. */
+export function runWarmupStep(): void {
+  warmupQueue.shift()?.();
+}

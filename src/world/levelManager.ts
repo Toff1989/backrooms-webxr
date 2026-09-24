@@ -5,6 +5,7 @@ import { getExitWorldPosition } from "../shared/exit";
 import { createLevelProfile, type LevelProfile } from "../shared/levelProfile";
 import { ChunkStreamer } from "./chunkStreamer";
 import { ExitBeacon } from "./exitBeacon";
+import { FloorCeiling } from "./floorCeiling";
 import { flushGlitchZones, PhantomGlitches } from "./glitchZones";
 import type { GrabbableRegistry } from "./grabbable";
 import { createLightFieldParams, sampleZoneLight, type LightFieldParams } from "./lightField";
@@ -51,6 +52,7 @@ export class LevelManager {
   private runSeed: string;
   private lightField: LightFieldParams;
   private readonly phantomGlitches: PhantomGlitches;
+  private readonly floorCeiling: FloorCeiling;
 
   constructor(
     private readonly scene: THREE.Scene,
@@ -65,6 +67,8 @@ export class LevelManager {
     this.lightField = createLightFieldParams(this.profile.seed, this.depth);
     setLightField(this.lightField);
     this.phantomGlitches = new PhantomGlitches(scene, audioListener);
+    this.floorCeiling = new FloorCeiling(scene);
+    this.floorCeiling.update(SPAWN_LOCAL_POSITION);
     this.chunkStreamer = new ChunkStreamer(scene, audioListener, physics, grabbables, isItemStored, this.profile);
     this.chunkStreamer.primeArea(SPAWN_LOCAL_POSITION);
 
@@ -86,6 +90,7 @@ export class LevelManager {
   update(playerPosition: THREE.Vector3, camera: THREE.Camera, elapsedSeconds: number, deltaSeconds: number, corruption: number): LevelUpdateResult {
     const { teleportRequested, ...streamerResult } = this.chunkStreamer.update(playerPosition, camera, elapsedSeconds, deltaSeconds);
     this.exitBeacon.update(elapsedSeconds);
+    this.floorCeiling.update(playerPosition);
 
     const darkness = 1 - sampleZoneLight(this.lightField, playerPosition.x, playerPosition.z);
     this.phantomGlitches.update(deltaSeconds, playerPosition, this.depth, darkness, corruption);

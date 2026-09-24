@@ -2,24 +2,18 @@ import * as THREE from "three";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import { PILLAR_SIZE, WALL_HEIGHT, WALL_THICKNESS } from "../shared/constants";
 import type { ChunkLayout } from "../shared/chunkLayout";
-import { getCeilingMaterial, getFloorMaterial, getPillarMaterial, getWallMaterial } from "./materials";
+import { getPillarMaterial, getWallMaterial } from "./materials";
 
 /**
  * Construit le groupe THREE d'un chunk à partir de sa disposition (murs/piliers).
  * Les murs sont fusionnés en une seule géométrie (1 draw call) pour tenir le budget
  * de la fiche projet (<100 draw calls) même avec plusieurs dizaines de chunks chargés.
- * Les néons ne sont plus des objets 3D séparés : ce sont des panneaux émissifs tissés
- * dans la texture du plafond (voir `materials.ts`, `createCeilingEmissiveTexture`).
+ * Sol et plafond ne sont pas par chunk : un seul plan chacun suit le joueur (voir
+ * `floorCeiling.ts`).
  */
-export function buildChunkGroup(layout: ChunkLayout, chunkOriginX: number, chunkOriginZ: number, chunkSize: number): THREE.Group {
+export function buildChunkGroup(layout: ChunkLayout): THREE.Group {
   const group = new THREE.Group();
   group.name = `chunk-${layout.chunkX}-${layout.chunkZ}`;
-
-  const centerX = chunkOriginX + chunkSize / 2;
-  const centerZ = chunkOriginZ + chunkSize / 2;
-
-  group.add(buildFloor(centerX, centerZ, chunkSize));
-  group.add(buildCeiling(centerX, centerZ, chunkSize));
 
   const walls = buildWalls(layout);
   if (walls) group.add(walls);
@@ -30,29 +24,11 @@ export function buildChunkGroup(layout: ChunkLayout, chunkOriginX: number, chunk
   return group;
 }
 
-// Nombre de segments par côté pour le sol/plafond/murs/piliers : sans subdivision, le
-// displacementMap (voir materials.ts) ne déplace que les sommets des coins et gondole
-// tout le quad au lieu de créer un relief de surface.
-const PLANE_SEGMENTS_PER_CHUNK = 24;
+// Segments des murs/piliers : sans subdivision, le displacementMap (voir materials.ts) ne
+// déplace que les sommets des coins et gondole tout le quad au lieu de créer un relief.
 const WALL_SEGMENTS_LENGTH = 12;
 const WALL_SEGMENTS_HEIGHT = 6;
 const PILLAR_SEGMENTS = 4;
-
-function buildFloor(centerX: number, centerZ: number, size: number): THREE.Mesh {
-  const geometry = new THREE.PlaneGeometry(size, size, PLANE_SEGMENTS_PER_CHUNK, PLANE_SEGMENTS_PER_CHUNK);
-  const mesh = new THREE.Mesh(geometry, getFloorMaterial());
-  mesh.rotation.x = -Math.PI / 2;
-  mesh.position.set(centerX, 0, centerZ);
-  return mesh;
-}
-
-function buildCeiling(centerX: number, centerZ: number, size: number): THREE.Mesh {
-  const geometry = new THREE.PlaneGeometry(size, size, PLANE_SEGMENTS_PER_CHUNK, PLANE_SEGMENTS_PER_CHUNK);
-  const mesh = new THREE.Mesh(geometry, getCeilingMaterial());
-  mesh.rotation.x = Math.PI / 2;
-  mesh.position.set(centerX, WALL_HEIGHT, centerZ);
-  return mesh;
-}
 
 function buildWalls(layout: ChunkLayout): THREE.Mesh | null {
   if (layout.wallSegments.length === 0) return null;

@@ -9,6 +9,7 @@ RUN npm ci
 COPY tsconfig.json vite.config.ts index.html ./
 COPY src ./src
 COPY public ./public
+COPY scripts/compress-dist.mjs ./scripts/
 RUN npm run build
 
 FROM node:22-slim AS server-deps

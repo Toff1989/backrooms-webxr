@@ -5,6 +5,12 @@ import type { PropKind } from "../shared/props";
 import type { CollectionEntry } from "./collection";
 import { applyVhsEffect } from "./vhsMaterial";
 
+/**
+ * Au-delà (m) du joueur, un objet n'est plus dessiné : noyé dans le brouillard, il coûtait
+ * quand même un draw call (une centaine de meubles chargés sur les 25 chunks).
+ */
+const RENDER_DISTANCE = 17;
+
 /** Au-delà, un objet ne se soulève pas (on peut seulement le pousser) — fiche : physique réaliste. */
 export const MAX_LIFT_MASS = 32;
 
@@ -204,9 +210,11 @@ export class GrabbableRegistry {
     for (const grabbable of [...this.all]) if (!grabbable.heldBy) this.remove(grabbable);
   }
 
-  sync(): void {
+  sync(viewer: THREE.Vector3): void {
     for (const grabbable of this.all) {
       grabbable.sync();
+      const position = grabbable.object.position;
+      grabbable.object.visible = grabbable.heldBy !== null || Math.hypot(position.x - viewer.x, position.z - viewer.z) < RENDER_DISTANCE;
       // Filet de sécurité : un objet sorti du monde (éjecté à travers un mur) est retiré.
       if (grabbable.object.position.y < -3 && !grabbable.heldBy) this.remove(grabbable);
     }

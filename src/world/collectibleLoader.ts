@@ -50,8 +50,7 @@ import watchUrl from "../assets/models/collectibles/watch.glb";
 import woodenSpoonUrl from "../assets/models/collectibles/woodenSpoon.glb";
 import wrenchUrl from "../assets/models/collectibles/wrench.glb";
 import type { CollectibleKind } from "../shared/collectibles";
-import { gltfLoader } from "./gltfLoader";
-import { applyVhsEffect } from "./vhsMaterial";
+import { loadTemplateModel } from "./gltfLoader";
 
 /**
  * Objets de collection (fiche projet étape 6) : ~50 vrais modèles CC0 distincts (Poly
@@ -117,23 +116,7 @@ const templateCache = new Map<CollectibleKind, Promise<THREE.Object3D>>();
 function loadTemplate(kind: CollectibleKind): Promise<THREE.Object3D> {
   let cached = templateCache.get(kind);
   if (cached) return cached;
-
-  cached = new Promise((resolve, reject) => {
-    gltfLoader.load(
-      COLLECTIBLE_URLS[kind],
-      (gltf) => {
-        const root = gltf.scene;
-        root.traverse((object) => {
-          if (object instanceof THREE.Mesh && object.material instanceof THREE.MeshStandardMaterial) {
-            applyVhsEffect(object.material);
-          }
-        });
-        resolve(root);
-      },
-      undefined,
-      (error) => reject(error instanceof Error ? error : new Error(String(error))),
-    );
-  });
+  cached = loadTemplateModel(COLLECTIBLE_URLS[kind]);
   templateCache.set(kind, cached);
   return cached;
 }

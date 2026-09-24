@@ -48,7 +48,7 @@ for (let i = 0; i < 72 * 3; i++) {
   input.right.update();
   player.update(DT, input);
   physics.step(DT, () => {});
-  registry.sync();
+  registry.sync(new THREE.Vector3());
   // Distance réelle entre l'axe de la capsule (à mi-hauteur) et la surface de la chaise.
   const probe = { x: player.headWorld.x, y: 0.45, z: player.headWorld.z };
   const projection = chair.collider.projectPoint(probe, true);
@@ -100,7 +100,7 @@ function tick(): void {
     hand.applyKinematicTarget();
     grab.step(step);
   });
-  registry.sync();
+  registry.sync(new THREE.Vector3());
 }
 
 // Main posée sur la canette (paume = grip + décalage), puis grip.

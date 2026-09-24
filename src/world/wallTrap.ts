@@ -80,8 +80,11 @@ export class WallTrap {
     this.mesh.visible = false;
     this.group.add(this.mesh);
 
-    this.warningBuffer = createWarningBuffer(listener.context);
-    this.impactBuffer = createImpactBuffer(listener.context);
+    // Buffers partagés : les recalculer (réverbe en JS) à chaque chargement de chunk saccadait le streaming.
+    warningBuffer ??= createWarningBuffer(listener.context);
+    impactBuffer ??= createImpactBuffer(listener.context);
+    this.warningBuffer = warningBuffer;
+    this.impactBuffer = impactBuffer;
     this.sound = new THREE.PositionalAudio(listener);
     this.sound.setRefDistance(REF_DISTANCE);
     this.sound.setMaxDistance(MAX_DISTANCE);
@@ -205,6 +208,9 @@ export class WallTrap {
     this.sound.play();
   }
 }
+
+let warningBuffer: AudioBuffer | null = null;
+let impactBuffer: AudioBuffer | null = null;
 
 /** Avertissement : grondement de béton qui se met à racler, montant, avec des craquements. */
 function createWarningBuffer(context: AudioContext): AudioBuffer {

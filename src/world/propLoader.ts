@@ -4,8 +4,7 @@ import chairUrl from "../assets/models/chair.glb";
 import officeDeskUrl from "../assets/models/officedesk.glb";
 import schoolDeskUrl from "../assets/models/schooldesk.glb";
 import type { PropKind } from "../shared/props";
-import { gltfLoader } from "./gltfLoader";
-import { applyVhsEffect } from "./vhsMaterial";
+import { loadTemplateModel } from "./gltfLoader";
 
 /**
  * Mobilier décoratif (fiche étape 6, décor inspiré des images de référence) : modèles
@@ -26,23 +25,7 @@ const templateCache = new Map<PropKind, Promise<THREE.Object3D>>();
 function loadTemplate(kind: PropKind): Promise<THREE.Object3D> {
   let cached = templateCache.get(kind);
   if (cached) return cached;
-
-  cached = new Promise((resolve, reject) => {
-    gltfLoader.load(
-      PROP_URLS[kind],
-      (gltf) => {
-        const root = gltf.scene;
-        root.traverse((object) => {
-          if (object instanceof THREE.Mesh && object.material instanceof THREE.MeshStandardMaterial) {
-            applyVhsEffect(object.material);
-          }
-        });
-        resolve(root);
-      },
-      undefined,
-      (error) => reject(error instanceof Error ? error : new Error(String(error))),
-    );
-  });
+  cached = loadTemplateModel(PROP_URLS[kind]);
   templateCache.set(kind, cached);
   return cached;
 }

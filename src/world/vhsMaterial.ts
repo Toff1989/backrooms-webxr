@@ -69,6 +69,7 @@ const COMMON_GLSL = /* glsl */ `
   uniform int uGlitchCount;
   varying vec3 vVhsWorldPos;
   varying vec3 vVhsWorldNormal;
+  varying float vVhsZoneLight;
 
   float vhsHash12( vec2 p ) {
     vec3 p3 = fract( vec3( p.xyx ) * 0.1031 );
@@ -111,6 +112,7 @@ const COMMON_GLSL = /* glsl */ `
 
 const VERTEX_PARS_GLSL = /* glsl */ `
   ${COMMON_GLSL}
+  ${VHS_LIGHT_FIELD_GLSL}
 `;
 
 /** Tremblement des sommets dans une zone de glitch : la géométrie elle-même se froisse. */
@@ -136,6 +138,8 @@ const VERTEX_GLITCH_GLSL = /* glsl */ `
       vhsWorld.xyz += normalize( mat3( modelMatrix ) * objectNormal ) * jitter * amount * glitch;
     }
     vVhsWorldPos = vhsWorld.xyz;
+    // Champ de lumière évalué par sommet (il varie sur ~12 m) : bien moins cher que par pixel.
+    vVhsZoneLight = vhsZoneLight( vhsWorld.xyz );
     vVhsWorldNormal = normalize( mat3( modelMatrix ) * objectNormal );
   }
 `;
@@ -269,7 +273,7 @@ const CEILING_EMISSIVE_GLSL = /* glsl */ `
  * torche (lumière directe) n'est pas touchée : c'est elle qui éclaire les zones sombres. */
 const ZONE_LIGHT_GLSL = /* glsl */ `
   #if defined( RE_IndirectDiffuse )
-    irradiance *= mix( ${DARK_ZONE_AMBIENT.toFixed(3)}, 1.0, vhsZoneLight( vVhsWorldPos ) );
+    irradiance *= mix( ${DARK_ZONE_AMBIENT.toFixed(3)}, 1.0, vVhsZoneLight );
   #endif
   #include <lights_fragment_maps>
 `;
@@ -308,9 +312,9 @@ export interface VhsEffectOptions {
 export function applyVhsEffect(material: THREE.Material, options: VhsEffectOptions = {}): void {
   const ceilingLights = options.ceilingLights ?? false;
   const zoneLighting = options.zoneLighting ?? true;
-  if (!sharedUniforms.uVhsNoise.value) sharedUniforms.uVhsNoise.value = getVhsNoiseTexture();
-
   material.onBeforeCompile = (shader) => {
+    // Paresseux : la vidéo de bruit n'est créée qu'à la première compilation (rendu réel).
+    sharedUniforms.uVhsNoise.value ??= getVhsNoiseTexture();
     Object.assign(shader.uniforms, sharedUniforms);
 
     shader.vertexShader = shader.vertexShader

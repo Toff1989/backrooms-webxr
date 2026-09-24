@@ -269,7 +269,7 @@ export class ChunkStreamer {
     const layout = generateChunkLayout(this.profile, this.noise2D, chunkX, chunkZ, epoch);
     const originX = chunkX * CHUNK_SIZE;
     const originZ = chunkZ * CHUNK_SIZE;
-    const group = buildChunkGroup(layout, originX, originZ, CHUNK_SIZE);
+    const group = buildChunkGroup(layout);
     this.scene.add(group);
 
     const staticBody = this.physics.world.createRigidBody(RAPIER.RigidBodyDesc.fixed());

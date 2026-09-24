@@ -1,7 +1,7 @@
 import * as THREE from "three";
 
 const CANVAS_WIDTH = 1024;
-const CANVAS_HEIGHT = 170;
+const CANVAS_HEIGHT = 220;
 const UPDATE_INTERVAL_SECONDS = 0.25;
 /**
  * Bandeau façon viseur de caméscope, en haut du champ de vision (confortable à lire sans
@@ -9,11 +9,7 @@ const UPDATE_INTERVAL_SECONDS = 0.25;
  */
 const PANEL_WIDTH = 0.36;
 const PANEL_HEIGHT = (CANVAS_HEIGHT / CANVAS_WIDTH) * PANEL_WIDTH;
-const PANEL_POSITION = new THREE.Vector3(0, 0.155, -0.5);
-
-interface BatteryLike {
-  level: number;
-}
+const PANEL_POSITION = new THREE.Vector3(0, 0.1465, -0.5);
 
 export interface HudStatus {
   depth: number;
@@ -21,6 +17,10 @@ export interface HudStatus {
   sprinting: boolean;
   flashlight: boolean;
   items: number;
+  /** Batterie de la lampe torche (0..1). */
+  battery: number;
+  /** Ligne de mesures de perfs (`?debug=1`), sinon null. */
+  debug: string | null;
 }
 
 /**
@@ -29,13 +29,12 @@ export interface HudStatus {
  * boutons soient toujours visibles.
  */
 export class CamcorderHud {
-  status: HudStatus = { depth: 0, crouching: false, sprinting: false, flashlight: false, items: 0 };
+  status: HudStatus = { depth: 0, crouching: false, sprinting: false, flashlight: false, items: 0, battery: 1, debug: null };
 
   private readonly ctx: CanvasRenderingContext2D;
   private readonly texture: THREE.CanvasTexture;
   private elapsedSeconds = 0;
   private timeSinceRedraw = Infinity;
-  private battery: BatteryLike | null = null;
 
   constructor(camera: THREE.Camera) {
     const canvas = document.createElement("canvas");
@@ -56,14 +55,6 @@ export class CamcorderHud {
     mesh.renderOrder = 997;
     mesh.frustumCulled = false;
     camera.add(mesh);
-
-    const nav = navigator as Navigator & { getBattery?: () => Promise<BatteryLike> };
-    nav
-      .getBattery?.()
-      .then((battery) => {
-        this.battery = battery;
-      })
-      .catch(() => {});
   }
 
   /** Remet le compteur REC à zéro (nouvelle run). */
@@ -115,14 +106,20 @@ export class CamcorderHud {
     const seconds = total % 60;
     this.text(`${hours}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`, CANVAS_WIDTH / 2, 48, "center");
 
-    const level = this.battery ? Math.round(this.battery.level * 100) : null;
-    this.text(level === null ? "BAT --" : `BAT ${level}%`, CANVAS_WIDTH - 20, 48, "right", level !== null && level < 20 ? "#ff6b5a" : "#f4f1e8");
+    // Batterie de la lampe torche (vraie ressource de jeu) : rouge sous 20 %, clignote sous 10 %.
+    const level = Math.round(this.status.battery * 100);
+    if (level >= 10 || blink) this.text(`BAT ${level}%`, CANVAS_WIDTH - 20, 48, "right", level < 20 ? "#ff6b5a" : "#f4f1e8");
 
     ctx.font = "bold 34px monospace";
     this.text(`NIV ${this.status.depth}`, 20, 120, "left", "#ffe89a");
     this.text(`SAC ${this.status.items}`, 200, 120, "left");
     const flags = [this.status.crouching ? "ACCROUPI" : "", this.status.sprinting ? "SPRINT" : "", this.status.flashlight ? "LAMPE" : ""].filter(Boolean).join("  ");
     this.text(flags, CANVAS_WIDTH - 20, 120, "right", "#b9e0ff");
+
+    if (this.status.debug) {
+      ctx.font = "bold 28px monospace";
+      this.text(this.status.debug, 20, 185, "left", "#9dff9d");
+    }
 
     this.texture.needsUpdate = true;
   }

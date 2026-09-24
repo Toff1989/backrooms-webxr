@@ -1,7 +1,8 @@
 import * as THREE from "three";
-import { bandpass, brownNoise, createSamples, fadeEdges, highpass, lowpass, normalize, reverb, toBuffer } from "../assets/audio/synth";
+import { bandpass, brownNoise, createSamples, fadeEdges, highpass, lowpass, normalize, queueWarmup, reverb, toBuffer } from "../assets/audio/synth";
 
-type SoundName = "store" | "take" | "grab" | "click" | "denied" | "teleport";
+const SOUND_NAMES = ["store", "take", "grab", "click", "denied", "teleport"] as const;
+type SoundName = (typeof SOUND_NAMES)[number];
 
 /**
  * Sons d'interaction générés procéduralement (pas de fichier audio), volontairement
@@ -20,16 +21,22 @@ export class Sfx {
       listener.add(audio);
       this.voices.push(audio);
     }
+    for (const name of SOUND_NAMES) queueWarmup(() => this.bufferFor(name));
+  }
+
+  private bufferFor(name: SoundName): AudioBuffer {
+    let buffer = this.buffers.get(name);
+    if (!buffer) {
+      buffer = createBuffer(this.listener.context, name);
+      this.buffers.set(name, buffer);
+    }
+    return buffer;
   }
 
   play(name: SoundName, volume = 0.5): void {
     const context = this.listener.context;
     if (context.state !== "running") return;
-    let buffer = this.buffers.get(name);
-    if (!buffer) {
-      buffer = createBuffer(context, name);
-      this.buffers.set(name, buffer);
-    }
+    const buffer = this.bufferFor(name);
     const voice = this.voices[this.nextVoice]!;
     this.nextVoice = (this.nextVoice + 1) % this.voices.length;
     if (voice.isPlaying) voice.stop();
