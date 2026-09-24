@@ -90,7 +90,7 @@ export class ExitBeacon {
     this.group.rotation.y = facing;
 
     const wallMaterial = getWallMaterial();
-    this.doorMaterial = new THREE.MeshStandardMaterial({ color: 0x7c7462, roughness: 0.75, metalness: 0.1 });
+    this.doorMaterial = new THREE.MeshStandardMaterial({ color: 0x3e3a33, roughness: 0.8, metalness: 0.1 });
     applyVhsEffect(this.doorMaterial);
 
     // Bloc : deux joues, fond, et linteau au-dessus de la porte, en papier peint des murs.
@@ -142,14 +142,15 @@ export class ExitBeacon {
     this.leaf.rotation.y = LEAF_OPEN_ANGLE;
     this.group.add(this.leaf);
 
-    // Vieux panneau de sortie de secours au-dessus de la porte : vert, fatigué, qui grésille.
-    // Visible de loin dans l'enfilade des pièces (fiche : "lumière différente").
+    // Vieux panneau de sortie de secours au-dessus de la porte : presque éteint, il grésille
+    // faiblement — le portail doit rester sombre ; on le trouve surtout à l'oreille (balise)
+    // et au signal du caméscope.
     const signTexture = createExitSignTexture();
     this.signMaterial = new THREE.MeshStandardMaterial({
       map: signTexture,
       emissive: 0xffffff,
       emissiveMap: signTexture,
-      emissiveIntensity: 1.6,
+      emissiveIntensity: 0.3,
       roughness: 0.6,
     });
     applyVhsEffect(this.signMaterial, { zoneLighting: false });
@@ -194,7 +195,7 @@ export class ExitBeacon {
   update(elapsedSeconds: number, deltaSeconds: number, corruption: number, listenerPosition: THREE.Vector3, scene: THREE.Scene): void {
     const pulse = 0.5 + 0.5 * Math.sin(elapsedSeconds * 2.4);
     // Tube fatigué : quelques micro-coupures, jamais éteint longtemps.
-    this.signMaterial.emissiveIntensity = Math.random() < 0.04 ? 0.25 : 1.6;
+    this.signMaterial.emissiveIntensity = Math.random() < 0.08 ? 0.05 : 0.3;
     this.voidMaterial.uniforms["uTime"]!.value = elapsedSeconds;
     this.voidMaterial.uniforms["uPulse"]!.value = pulse;
     // Le battant frémit à peine, comme poussé par un courant d'air venu du noir.

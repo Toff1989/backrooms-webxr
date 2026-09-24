@@ -9,6 +9,7 @@ dist
 .env
 server/data
 server/backups
+server/logs
 
 # Hébergement Node.js natif Plesk (Phusion Passenger, voir docs/DEPLOIEMENT-PLESK.md).
 tmp

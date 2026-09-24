@@ -3,9 +3,10 @@
 Jeu d'exploration horrifique en VR, dans le navigateur (WebXR). Voir la fiche projet pour le concept complet.
 
 **État actuel : étape 8 de la roadmap (déploiement)** — scène WebXR, locomotion fluide +
-snap-turn, génération par chunks streamés avec collisions, levels avec sortie signalée (portail
-VHS, pas un simple anneau) et difficulté progressive, deux types de pièges glitch (zones de
-corruption + murs qui surgissent) et un labyrinthe dynamique. Décor (mobilier CC0) et ~50 objets
+snap-turn, génération par chunks streamés avec collisions, levels avec sortie sombre (porte
+entrouverte sur le noir, balise sonore, signal du caméscope) et difficulté progressive, murs qui
+surgissent, zones sombres (lampe torche à piles) et un labyrinthe dynamique. Les pièges "glitch"
+visuels ont été retirés (rendu jugé raté). Décor (mobilier CC0) et ~50 objets
 de collection (vrais modèles CC0, rareté fixe par objet) avec un vrai moteur physique (Rapier),
 mains gantées, saisie/lancer au grip (y compris à distance), menu d'inventaire avec aperçus 3D,
 accroupi, jouable assis, persistance IndexedDB. Contrôles inspirés de *The Walking Dead: Saints
@@ -29,13 +30,13 @@ main, menus sans quitter le jeu) :
 | Se déplacer | Stick gauche (clic : sprint, bascule) |
 | Tourner | Stick droit gauche/droite (crans de 45°, pivot sur la tête) |
 | S'accroupir / se relever | Stick droit vers le bas / le haut (ou clic du stick droit, ou se baisser physiquement) |
-| Attraper / tenir | Grip au contact d'un objet (il s'illumine) |
-| Attraper à distance | Maintenir la gâchette : un rayon s'affiche (jusqu'à 4 m, l'objet visé s'illumine) + grip : il vole jusqu'à la main |
+| Attraper / tenir | Grip au contact d'un objet (il s'illumine) : on le prend **là où on le touche** ; la main reste posée sur l'objet, une main fantôme montre la manette si l'objet est retenu |
+| Attraper à distance | Maintenir la gâchette : un rayon s'affiche (5 m, l'objet visé s'illumine) ; grip = verrouillage (lien vert) ; **coup de poignet vers soi** : l'objet vole en cloche vers la main, garder le grip pour le rattraper (sans geste, il vient seul après ~1 s) |
 | Deux mains / changer de main | Saisir le même objet avec l'autre main (on le porte à deux, un meuble lourd se soulève) ; lâcher la première main pour changer de main. D'une seule main, un meuble lourd se traîne |
 | Lâcher / lancer | Relâcher le grip (l'objet part avec la vitesse de la main) |
-| Ranger l'objet tenu | A / X, ou le relâcher sur le menu d'inventaire ouvert |
+| Ranger l'objet tenu | A / X, le lâcher **derrière l'épaule** (sac à dos), ou le lâcher sur une case du menu d'inventaire (rangé à cette case) |
 | Pousser / frapper | Poing fermé (grip sans objet) ou geste vif |
-| Inventaire | Y (ouvrir/fermer) ; viser + gâchette pour les boutons ; gâchette sur une case puis sur une autre : déplacer l'objet ; bouton TRI (récent / rareté / profondeur / nom) ; viser une case + grip pour sortir l'objet à taille réelle |
+| Inventaire | Y (ouvrir/fermer) ; gâchette sur une case puis sur une autre : déplacer l'objet ; grip sur une case : sortir l'objet, puis le relâcher sur une autre case pour l'y ranger ; bouton TRI (récent / rareté / profondeur / nom) ; identifiant de build en bas à droite |
 | Lampe frontale | B (batterie limitée, HUD `BAT` : ramasser des piles au sol en marchant dessus ou en les touchant) |
 | Recaler la hauteur / STOP REC | Boutons du menu d'inventaire |
 
@@ -85,8 +86,13 @@ comme un contexte sécurisé).
 | `npm run test:physics` | Simulation physique sans rendu (marcher dans un meuble, saisir/lancer, murs, saisie à distance, rangement) |
 | `python3 scripts/convert-textures.py` | Recompresse les textures sources (`assets-src/`) en KTX2 (Pillow + `toktx` de KTX-Software requis) |
 
-Mesures de perfs en casque : ouvrir le jeu avec `?debug=1` (FPS, draw calls, triangles,
-géométries/textures en mémoire affichés sous le HUD caméscope).
+Mode debug : ouvrir le jeu avec `?debug=1`. En casque : FPS, draw calls, à-coups et graphe des
+frames sous le HUD. Et surtout un **journal envoyé au serveur** toutes les 5 s (erreurs, à-coups
+avec leur cause, stats par seconde, état audio, session XR, chunks...) dans
+`server/logs/debug-AAAA-MM-JJ.jsonl`, relisible via `GET /api/debug-log?token=DEBUG_LOG_TOKEN`
+(jeton dans `server/.env`, généré par `scripts/plesk-install.sh`). L'identifiant de build (commit
++ date) est affiché dans le menu d'inventaire et les options : il permet de vérifier que le casque
+charge bien la dernière version.
 
 ## Structure
 
@@ -124,8 +130,7 @@ src/
     chunkStreamer.ts        Charge/décharge les chunks (rayon 2), anime les pièges, régénère le
                                labyrinthe hors champ de vision
     chunkMesh.ts             Construit les meshes THREE d'un chunk (murs fusionnés, piliers instanciés)
-    exitBeacon.ts             Marqueur de sortie : anneau émissif pulsé + balise sonore positionnelle
-    glitchTrap.ts             Piège "zone de corruption" : décalques (sol + mur proche) scintillants
+    exitBeacon.ts             Sortie : porte entrouverte sur le noir + balise sonore positionnelle
     wallTrap.ts                Piège "mur qui surgit" : bloque temporairement un passage ouvert
     vhsNoiseTexture.ts         Texture vidéo de bruit VHS partagée (un seul <video> décodé)
     corruption.ts             Accumulateur de corruption VHS cumulable, dissipée dans le temps
@@ -189,16 +194,11 @@ tests/physics.sim.ts         Simulation physique sans rendu (`npm run test:physi
   régénération du labyrinthe dynamique : la sortie reste toujours atteignable.
 - Chaque level repart d'un monde régénéré autour de l'origine locale (`ChunkStreamer.setProfile`) :
   pas de world persistant entre les levels, juste une seed différente à chaque descente.
-- **Corruption VHS cumulable** (`corruption.ts`) : chaque déclencheur (transition de level, piège
-  glitch, régénération de labyrinthe hors champ) ajoute de l'intensité à l'uniforme `uCorruption`
+- **Corruption VHS cumulable** (`corruption.ts`) : chaque déclencheur (transition de level,
+  mur-piège, régénération de labyrinthe hors champ) ajoute de l'intensité à l'uniforme `uCorruption`
   du shader ; elle se dissipe ensuite progressivement. Aucune distorsion de la position/rotation
   caméra — uniquement l'effet shader, comme demandé par la fiche pour le confort VR.
-- **Pièges glitch** (`glitchTrap.ts`) : marqueur au sol scintillant + grésillement audio
-  positionnel comme signaux avant-coureurs. Au contact (rayon de déclenchement), la corruption
-  augmente progressivement tant que le joueur reste à proximité, plus une pulsation haptique sur
-  les manettes à l'entrée. Aucune collision, aucune mort — uniquement la vision qui se dégrade.
-  Seul le type "zone de corruption" de la fiche est implémenté pour l'instant ; les types "mur qui
-  surgit/se déplace" et "boucle spatiale" restent à faire.
+- **Pièges glitch** : retirés (rendu jugé raté) ; restent les murs qui surgissent (`wallTrap.ts`).
 - **Labyrinthe dynamique** (`chunkStreamer.ts`) : toutes les 6 à 12 secondes, un chunk chargé mais
   hors du champ de vision de la caméra (frustum) et à au moins 2 chunks du joueur est régénéré
   avec un agencement différent (même sortie, même couloir garanti). Déclenche un petit pic de

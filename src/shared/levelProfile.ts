@@ -17,8 +17,6 @@ export interface LevelProfile {
   pillarProbability: number;
   /** Distance minimale (en cellules) entre le spawn et la sortie de ce level. */
   exitMinDistanceCells: number;
-  /** Probabilité [0..1] qu'une cellule porte un piège glitch. */
-  glitchProbability: number;
   /** Probabilité [0..1] qu'un bord actuellement ouvert cache un mur-piège (surgit au contact). */
   wallTrapProbability: number;
   /** Probabilité [0..1] qu'une cellule porte un amas de mobilier (chaises, bureaux, meubles). */
@@ -40,10 +38,6 @@ const MAX_PILLAR_PROBABILITY = 0.12;
 const BASE_EXIT_DISTANCE_CELLS = 10;
 const EXIT_DISTANCE_PER_DEPTH = 3;
 const MAX_EXIT_DISTANCE_CELLS = 30;
-
-const BASE_GLITCH_PROBABILITY = 0.015;
-const GLITCH_PROBABILITY_PER_DEPTH = 0.003;
-const MAX_GLITCH_PROBABILITY = 0.08;
 
 const BASE_WALL_TRAP_PROBABILITY = 0.008;
 const WALL_TRAP_PROBABILITY_PER_DEPTH = 0.0015;
@@ -76,7 +70,6 @@ export function createLevelProfile(depth: number, runSeed: string): LevelProfile
     noiseFrequency: 0.12,
     pillarProbability: Math.min(MAX_PILLAR_PROBABILITY, BASE_PILLAR_PROBABILITY + depth * PILLAR_PROBABILITY_PER_DEPTH),
     exitMinDistanceCells: Math.min(MAX_EXIT_DISTANCE_CELLS, BASE_EXIT_DISTANCE_CELLS + depth * EXIT_DISTANCE_PER_DEPTH),
-    glitchProbability: Math.min(MAX_GLITCH_PROBABILITY, BASE_GLITCH_PROBABILITY + depth * GLITCH_PROBABILITY_PER_DEPTH),
     wallTrapProbability: Math.min(MAX_WALL_TRAP_PROBABILITY, BASE_WALL_TRAP_PROBABILITY + depth * WALL_TRAP_PROBABILITY_PER_DEPTH),
     propClusterProbability: PROP_CLUSTER_PROBABILITY,
     collectibleProbability: COLLECTIBLE_PROBABILITY,

@@ -90,9 +90,12 @@ fi
 
 if [ "$SKIP_BUILD" = 0 ]; then
   say "Compilation du front (tsc + vite)"
-  as_owner npm run build
+  # Ancien build supprimé d'abord : si la compilation échoue, on le voit (sinon l'ancienne
+  # version continuait d'être servie sans le moindre message).
+  rm -rf dist
+  as_owner npm run build || fail "La compilation du front a échoué (voir les erreurs ci-dessus) : le site n'est PAS à jour."
   [ -f dist/index.html ] || fail "La compilation n'a pas produit dist/index.html."
-  ok "front compilé (dist/)"
+  ok "front compilé (dist/) — vérifie en jeu l'identifiant affiché dans le menu d'inventaire / les options"
 
   say "Bundle du serveur (esbuild)"
   as_owner npm --prefix server run build
@@ -117,10 +120,16 @@ else
   grep -q '^RUN_TOKEN_SECRET=' "$ENV_FILE" || warn "RUN_TOKEN_SECRET manque dans $ENV_FILE"
   ok "server/.env existe déjà : conservé tel quel"
 fi
+# Jeton de relecture du journal de debug (?debug=1) : ajouté s'il manque.
+if ! grep -q '^DEBUG_LOG_TOKEN=' "$ENV_FILE"; then
+  echo "DEBUG_LOG_TOKEN=$(node -e "console.log(require('crypto').randomBytes(16).toString('hex'))")" >>"$ENV_FILE"
+  ok "DEBUG_LOG_TOKEN ajouté à server/.env"
+fi
+DEBUG_TOKEN="$(grep '^DEBUG_LOG_TOKEN=' "$ENV_FILE" | cut -d= -f2)"
 
 # --- 4. Droits et redémarrage ------------------------------------------------------------------------------------
 say "Droits des fichiers et redémarrage"
-mkdir -p "$SITE_DIR/tmp" "$SITE_DIR/server/data" "$SITE_DIR/server/backups"
+mkdir -p "$SITE_DIR/tmp" "$SITE_DIR/server/data" "$SITE_DIR/server/backups" "$SITE_DIR/server/logs"
 touch "$SITE_DIR/tmp/restart.txt" # Passenger redémarre l'application quand ce fichier change
 if [ "$(id -u)" = 0 ]; then
   chown -R "$OWNER" "$SITE_DIR"
@@ -136,4 +145,6 @@ ok "droits d'accès restreints (base, sauvegardes, configuration)"
 ok "application redémarrée"
 
 printf '\n\033[1mTerminé.\033[0m Ouvre https://%s\n' "$DOMAIN"
+echo "Mode debug (journal envoyé au serveur) : https://$DOMAIN/?debug=1"
+echo "Relire le journal du jour : https://$DOMAIN/api/debug-log?token=$DEBUG_TOKEN"
 echo "S'il reste une page d'erreur : voir la section « Dépannage » de docs/DEPLOIEMENT-PLESK.md."

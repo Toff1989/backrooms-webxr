@@ -1,7 +1,29 @@
+import { execSync } from "node:child_process";
 import { defineConfig } from "vite";
 import mkcert from "vite-plugin-mkcert";
 
+/**
+ * Identifiant de build affiché en jeu (inventaire, options, journal de debug) : commit git
+ * s'il est disponible (un déploiement Plesk n'a pas toujours le dossier .git) + date/heure
+ * de compilation. Permet de vérifier en un coup d'œil quelle version tourne sur le casque.
+ */
+function buildId(): string {
+  let commit = process.env["BUILD_COMMIT"] ?? "";
+  if (!commit) {
+    try {
+      commit = execSync("git rev-parse --short HEAD", { stdio: ["ignore", "pipe", "ignore"] }).toString().trim();
+    } catch {
+      commit = "";
+    }
+  }
+  const date = new Date().toISOString().slice(0, 16).replace("T", " ");
+  return commit ? `${commit} ${date}` : date;
+}
+
 export default defineConfig({
+  define: {
+    __BUILD_ID__: JSON.stringify(buildId()),
+  },
   plugins: [mkcert()],
   assetsInclude: ["**/*.glb", "**/*.ktx2"],
   server: {

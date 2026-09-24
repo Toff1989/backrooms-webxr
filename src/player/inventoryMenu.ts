@@ -238,6 +238,21 @@ export class InventoryMenu extends UiPanel {
     this.invalidate();
   }
 
+  /**
+   * Case d'inventaire (index global) visée par le pointeur de cette main, ou touchée par sa
+   * paume : un objet lâché là y est rangé (réorganisation par glisser-déposer).
+   */
+  slotIndexFor(hand: Hand): number | null {
+    let slot = this.hoverSlot.get(hand) ?? null;
+    if (slot === null && this.containsPoint(hand.palm)) {
+      const local = this.mesh.worldToLocal(hand.palm.clone());
+      const px = (local.x / this.widthMeters + 0.5) * this.canvas.width;
+      const py = (0.5 - local.y / this.heightMeters) * this.canvas.height;
+      slot = this.slotAt(px, py);
+    }
+    return slot === null ? null : this.page * SLOTS_PER_PAGE + slot;
+  }
+
   private takeSlot(hand: Hand, slot: number): void {
     const entry = this.entriesOnPage()[slot];
     if (!entry || hand.holding) return;
@@ -379,7 +394,7 @@ export class InventoryMenu extends UiPanel {
       ctx.fillStyle = "#9fe39f";
       ctx.fillText(this.statusMessage, 40, 480);
     } else {
-      ctx.font = "24px monospace";
+      ctx.font = "21px monospace";
       ctx.fillStyle = "#a79d86";
       ctx.fillText(this.store.count === 0 ? t("inv.empty") : t("inv.aim"), 40, 480);
       ctx.fillText(t("inv.store"), 40, 514);
@@ -412,5 +427,8 @@ export class InventoryMenu extends UiPanel {
     );
     ctx.fillStyle = "#7d7563";
     ctx.fillText(t("inv.footer"), width / 2, 680);
+    ctx.textAlign = "right";
+    ctx.font = "15px monospace";
+    ctx.fillText(`build ${__BUILD_ID__}`, width - 12, 698);
   }
 }

@@ -35,9 +35,12 @@ const THUMB_JOINTS = ["thumb-metacarpal", "thumb-phalanx-proximal", "thumb-phala
 
 /**
  * Position de l'armature dans l'espace "grip" WebXR (origine au centre des doigts repliés,
- * -Z vers le pouce le long de la manette, +X = dos de la main droite / -X gauche) : les axes
- * du modèle coïncident déjà avec ceux du grip, seul un décalage place la paume sur la manette.
+ * -Z le long de la poignée, incliné de ~45° vers le haut sur Quest ; +X = dos de la main
+ * droite / -X gauche). Le modèle a les doigts selon -Y : tel quel, ils pointaient vers le
+ * bas. Une rotation de 45° autour de X les aligne sur la direction de visée (vers l'avant),
+ * paume tournée vers l'intérieur, pouce en haut — la pose des mains de Saints & Sinners.
  */
+const GRIP_ROTATION_X = THREE.MathUtils.degToRad(45);
 const GRIP_OFFSET: Record<Handedness, THREE.Vector3> = {
   right: new THREE.Vector3(-0.008, 0.045, -0.012),
   left: new THREE.Vector3(0.008, 0.045, -0.012),
@@ -58,17 +61,28 @@ export class HandModel {
   private readonly thumb: FingerChain;
   private readonly indexTip: THREE.Object3D;
 
-  private constructor(root: THREE.Object3D, handedness: Handedness) {
+  private readonly basePosition: THREE.Vector3;
+
+  private constructor(root: THREE.Object3D, handedness: Handedness, ghost: boolean) {
     this.root = root;
     root.position.copy(GRIP_OFFSET[handedness]);
+    this.basePosition = GRIP_OFFSET[handedness].clone();
+    root.rotation.x = GRIP_ROTATION_X;
 
     const byName = new Map<string, THREE.Object3D>();
     root.traverse((object) => {
       byName.set(object.name, object);
       if (object instanceof THREE.SkinnedMesh) {
-        const material = new THREE.MeshStandardMaterial({ color: GLOVE_COLOR, roughness: 0.78, metalness: 0.02 });
-        applyVhsEffect(material);
-        object.material = material;
+        if (ghost) {
+          // Main fantôme (Saints & Sinners) : position réelle de la manette quand la main
+          // visible est retenue par un objet lourd ou bloqué.
+          object.material = new THREE.MeshBasicMaterial({ color: 0xcfe0ff, transparent: true, opacity: 0.18, depthWrite: false, fog: false });
+          object.renderOrder = 5;
+        } else {
+          const material = new THREE.MeshStandardMaterial({ color: GLOVE_COLOR, roughness: 0.78, metalness: 0.02 });
+          applyVhsEffect(material);
+          object.material = material;
+        }
         object.frustumCulled = false;
       }
     });
@@ -93,9 +107,15 @@ export class HandModel {
     this.indexTip = this.index.bones[this.index.bones.length - 1]!;
   }
 
-  static async load(handedness: Handedness): Promise<HandModel> {
+  static async load(handedness: Handedness, ghost = false): Promise<HandModel> {
     const gltf = await gltfLoader.loadAsync(handedness === "left" ? leftHandUrl : rightHandUrl);
-    return new HandModel(gltf.scene, handedness);
+    return new HandModel(gltf.scene, handedness, ghost);
+  }
+
+  /** Décale la main (espace grip) : la paume se pose sur le point saisi de l'objet. */
+  setAnchorOffset(localOffset: THREE.Vector3 | null): void {
+    this.root.position.copy(this.basePosition);
+    if (localOffset) this.root.position.add(localOffset);
   }
 
   /** Pose des doigts : index (gâchette), majeur/annulaire/auriculaire (grip), pouce, chacun de 0 (ouvert) à 1 (replié). */

@@ -134,6 +134,18 @@ bash /var/www/vhosts/tondomaine.tld/backrooms.tondomaine.tld/backrooms/scripts/p
 
 ---
 
+## Vérifier la version et récupérer les journaux
+
+- **Version** : l'identifiant de build (commit + date de compilation) est affiché en bas à droite
+  du menu d'inventaire (Y) et dans le panneau d'options de la page. S'il n'a pas changé après une
+  mise à jour, la compilation a échoué : relance `scripts/plesk-install.sh --update` en SSH et lis
+  les erreurs (le script supprime désormais l'ancien `dist/` avant de compiler).
+- **Journal de debug** : ouvre le jeu avec `https://tondomaine.tld/?debug=1`, joue normalement ;
+  le casque envoie un journal toutes les 5 s dans `server/logs/debug-AAAA-MM-JJ.jsonl`.
+  Relecture : `https://tondomaine.tld/api/debug-log?token=<DEBUG_LOG_TOKEN>` (jeton dans
+  `server/.env`, affiché à la fin du script d'installation) ; `&day=AAAA-MM-JJ` pour un autre jour,
+  `&lines=5000` pour plus de lignes.
+
 ## Dépannage
 
 Commence toujours par ces deux commandes : elles montrent presque toujours la cause.

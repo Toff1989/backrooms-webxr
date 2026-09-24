@@ -4,6 +4,7 @@ import { CollisionGroups, RAPIER, type PhysicsWorld } from "../physics/physicsWo
 import { WALL_HEIGHT, WALL_THICKNESS } from "../shared/constants";
 import type { WallSegment } from "../shared/chunkLayout";
 import { getWallMaterial } from "./materials";
+import { worldSound } from "./worldSound";
 
 /** Marge autour du mur : il ne surgit jamais tant que le joueur se tient dans son emprise. */
 const PLAYER_CLEARANCE = 0.35;
@@ -20,8 +21,6 @@ const IMPACT_CORRUPTION = 0.3;
 
 const WARNING_VOLUME = 0.4;
 const IMPACT_VOLUME = 0.55;
-const REF_DISTANCE = 2;
-const MAX_DISTANCE = 12;
 
 export interface WallTrapUpdateResult {
   corruptionDelta: number;
@@ -42,7 +41,7 @@ export class WallTrap {
   readonly group: THREE.Group;
 
   private readonly mesh: THREE.Mesh;
-  private readonly sound: THREE.PositionalAudio;
+  private readonly soundPosition: THREE.Vector3;
   private readonly segment: WallSegment;
   private readonly centerX: number;
   private readonly centerZ: number;
@@ -85,11 +84,8 @@ export class WallTrap {
     impactBuffer ??= createImpactBuffer(listener.context);
     this.warningBuffer = warningBuffer;
     this.impactBuffer = impactBuffer;
-    this.sound = new THREE.PositionalAudio(listener);
-    this.sound.setRefDistance(REF_DISTANCE);
-    this.sound.setMaxDistance(MAX_DISTANCE);
-    this.sound.position.set(this.centerX, WALL_HEIGHT / 2, this.centerZ);
-    this.group.add(this.sound);
+    // Son joué par le groupe de voix partagées (voir worldSound.ts), pas une voix par mur.
+    this.soundPosition = new THREE.Vector3(this.centerX, WALL_HEIGHT / 2, this.centerZ);
 
     // Collider plein mur, désactivé tant que le mur n'est pas dressé (voir `setSolid`).
     this.body = physics.world.createRigidBody(RAPIER.RigidBodyDesc.fixed());
@@ -189,7 +185,6 @@ export class WallTrap {
   }
 
   dispose(): void {
-    this.sound.stop();
     this.mesh.geometry.dispose();
     this.physics.world.removeRigidBody(this.body);
   }
@@ -200,12 +195,7 @@ export class WallTrap {
   }
 
   private playOneShot(buffer: AudioBuffer, volume: number): void {
-    if (this.sound.context.state !== "running") return;
-    if (this.sound.isPlaying) this.sound.stop();
-    this.sound.setBuffer(buffer);
-    this.sound.setVolume(volume);
-    this.sound.setLoop(false);
-    this.sound.play();
+    worldSound.playAt(buffer, this.soundPosition, volume);
   }
 }
 

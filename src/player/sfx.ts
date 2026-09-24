@@ -1,14 +1,14 @@
 import * as THREE from "three";
-import { bandpass, brownNoise, createSamples, fadeEdges, highpass, lowpass, normalize, queueWarmup, reverb, toBuffer } from "../assets/audio/synth";
+import { bandpass, createSamples, fadeEdges, highpass, lowpass, normalize, queueWarmup, toBuffer } from "../assets/audio/synth";
 
-const SOUND_NAMES = ["store", "take", "grab", "click", "denied", "teleport", "battery"] as const;
+const SOUND_NAMES = ["store", "take", "grab", "click", "denied", "battery"] as const;
 type SoundName = (typeof SOUND_NAMES)[number];
 
 /**
  * Sons d'interaction générés procéduralement (pas de fichier audio), volontairement
  * diégétiques et sourds plutôt que des bips : froissement de sac (rangement / sortie),
  * contact mat (saisie), déclic mécanique (lampe, menu), cognement étouffé (refus),
- * arrachement grave (téléporteur).
+ * pile glissée dans la lampe.
  */
 export class Sfx {
   private readonly buffers = new Map<SoundName, AudioBuffer>();
@@ -110,26 +110,6 @@ function createBuffer(context: BaseAudioContext, name: SoundName): AudioBuffer {
         }
       }
       highpass(data, sampleRate, 500);
-      break;
-    }
-    case "teleport": {
-      // Arrachement : aspiration de bruit grave qui monte, coupure nette, grésillement résiduel.
-      data = createSamples(sampleRate, 2.2);
-      const rush = brownNoise(createSamples(sampleRate, 2.2));
-      const cutAt = Math.floor(sampleRate * 0.55);
-      for (let i = 0; i < data.length; i++) {
-        const t = i / sampleRate;
-        if (i < cutAt) {
-          const p = i / cutAt;
-          data[i] = rush[i]! * p * p * 1.4 + Math.sin(2 * Math.PI * (30 + p * 40) * t) * p * 0.8;
-        } else {
-          const tail = (i - cutAt) / sampleRate;
-          const gate = Math.random() < 0.4 ? 1 : 0;
-          data[i] = (Math.random() * 2 - 1) * gate * 0.35 * Math.exp(-tail * 3) + Math.sin(2 * Math.PI * 38 * t) * Math.exp(-tail * 2) * 0.6;
-        }
-      }
-      lowpass(data, sampleRate, 1600);
-      reverb(data, sampleRate, 0.4, 1.6);
       break;
     }
   }

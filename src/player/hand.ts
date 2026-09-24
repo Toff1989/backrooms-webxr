@@ -38,6 +38,8 @@ export class Hand {
   holding: Grabbable | null = null;
 
   private model: HandModel | null = null;
+  private ghost: HandModel | null = null;
+  private ghostAttachedTo: THREE.Object3D | null = null;
   private attachedTo: THREE.Object3D | null = null;
   private readonly history: PoseSample[] = [];
   private readonly body: RAPIER.RigidBody;
@@ -54,6 +56,12 @@ export class Hand {
     HandModel.load(input.handedness)
       .then((model) => {
         this.model = model;
+      })
+      .catch(() => {});
+    HandModel.load(input.handedness, true)
+      .then((ghost) => {
+        ghost.root.visible = false;
+        this.ghost = ghost;
       })
       .catch(() => {});
 
@@ -88,6 +96,10 @@ export class Hand {
       grip.add(model.root);
       this.attachedTo = grip;
     }
+    if (this.ghost && grip && this.ghostAttachedTo !== grip) {
+      grip.add(this.ghost.root);
+      this.ghostAttachedTo = grip;
+    }
     if (!grip || !this.tracked) {
       this.history.length = 0;
       this.velocity.set(0, 0, 0);
@@ -113,9 +125,29 @@ export class Hand {
       const index = holding ? 1 : REST_INDEX + (1 - REST_INDEX) * this.input.trigger.value;
       const thumb = holding ? 0.9 : Math.max(this.input.thumbDown ? 0.85 : 0.45, grip * 0.6);
       model.setPose(index, grip, thumb);
+      this.ghost?.setPose(index, grip, thumb);
     }
 
     this.recordVelocity(time);
+  }
+
+  /**
+   * Objet tenu : la main visible se pose sur `worldPoint` (point saisi de l'objet) ; si elle
+   * s'écarte de la manette de plus de 3 cm, la main fantôme apparaît à la vraie position.
+   */
+  setHeldAnchor(worldPoint: THREE.Vector3 | null): void {
+    if (!this.model) return;
+    if (!worldPoint) {
+      this.model.setAnchorOffset(null);
+      if (this.ghost) this.ghost.root.visible = false;
+      return;
+    }
+    this.scratch.subVectors(worldPoint, this.palm);
+    const separation = this.scratch.length();
+    this.scratch.applyQuaternion(this.deltaQuat.copy(this.quaternion).invert());
+    // Au-delà de 40 cm (objet en train d'être arraché), la main revient à la manette.
+    this.model.setAnchorOffset(separation < 0.4 ? this.scratch : null);
+    if (this.ghost) this.ghost.root.visible = separation > 0.03 && separation < 0.4;
   }
 
   /** Oublie l'historique de vitesse (téléportation / rotation du rig : ce n'est pas un geste de lancer). */

@@ -5,6 +5,7 @@ import Fastify from "fastify";
 import cors from "@fastify/cors";
 import rateLimit from "@fastify/rate-limit";
 import fastifyStatic from "@fastify/static";
+import { registerDebugLogRoutes } from "./routes/debugLog.js";
 import { registerLeaderboardRoute, registerRunRoutes } from "./routes/run.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -29,6 +30,7 @@ app.register(
     await api.register(rateLimit, { max: 60, timeWindow: "1 minute" });
     registerRunRoutes(api);
     registerLeaderboardRoute(api);
+    registerDebugLogRoutes(api);
   },
   { prefix: "/api" },
 );

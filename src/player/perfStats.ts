@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { DEBUG_ENABLED, log } from "../debug/debugLog";
 
 /** Durée de la frame visée (Quest : 72 Hz). Au-delà de 1,5×, la frame est un à-coup. */
 const TARGET_FRAME_MS = 1000 / 72;
@@ -24,11 +25,11 @@ export interface HitchRecord {
  * - détection des à-coups (frame > 1,5 × 13,9 ms) avec, pour chacun, les sections en cause
  *   et les événements de la frame (chargement de chunk, compilation de shader...) ;
  * - graphe des 144 dernières frames dans un petit panneau sous le HUD ;
- * - journal accessible depuis la console (`__perf.hitches`, `__perf.dump()`), et chaque
- *   à-coup est aussi écrit en `console.warn` (visible via chrome://inspect avec le casque).
+ * - journal accessible depuis la console (`__perf.hitches`, `__perf.dump()`) ; à-coups et
+ *   statistiques par seconde envoyés au serveur (voir `debug/debugLog.ts`).
  */
 export class PerfStats {
-  static readonly enabled = typeof window !== "undefined" && new URLSearchParams(window.location.search).has("debug");
+  static readonly enabled = DEBUG_ENABLED;
 
   readonly hitches: HitchRecord[] = [];
   private fps = 0;
@@ -48,6 +49,18 @@ export class PerfStats {
   private readonly graphCanvas: HTMLCanvasElement | null = null;
   private readonly graphTexture: THREE.CanvasTexture | null = null;
   private graphTimer = 0;
+  /** Agrégats de la seconde en cours, envoyés au journal de debug. */
+  private secFrames = 0;
+  private secFrameSum = 0;
+  private secFrameMax = 0;
+  private secCpuSum = 0;
+  private secCalls = 0;
+  private secTriangles = 0;
+  private secHitches = 0;
+  private readonly secSections = new Map<string, number>();
+  private secTimer = 0;
+  /** Informations de contexte ajoutées à chaque statistique (position, audio...). */
+  extra: () => Record<string, unknown> = () => ({});
 
   constructor(
     private readonly renderer: THREE.WebGLRenderer,
@@ -134,8 +147,17 @@ export class PerfStats {
       const record: HitchRecord = { at: this.elapsed, frameMs, cpuMs, sections, events: [...this.events] };
       this.hitches.push(record);
       if (this.hitches.length > MAX_LOG) this.hitches.shift();
-      console.warn(`[perf] à-coup ${frameMs.toFixed(1)} ms (CPU ${cpuMs.toFixed(1)} ms)`, sections, record.events);
+      this.secHitches++;
+      log("hitch", { frameMs: Math.round(frameMs * 10) / 10, cpuMs: Math.round(cpuMs * 10) / 10, sections, events: record.events });
     }
+
+    this.secFrames++;
+    this.secFrameSum += frameMs;
+    this.secFrameMax = Math.max(this.secFrameMax, frameMs);
+    this.secCpuSum += cpuMs;
+    for (const [name, ms] of this.sections) this.secSections.set(name, (this.secSections.get(name) ?? 0) + ms);
+    this.secTimer += deltaSeconds;
+    if (this.secTimer >= 1) this.flushSecond();
 
     this.graphTimer += deltaSeconds;
     if (this.graphTimer > 0.25) {
@@ -144,10 +166,44 @@ export class PerfStats {
     }
   }
 
+  /** Statistiques de la seconde écoulée -> journal de debug. */
+  private flushSecond(): void {
+    const frames = Math.max(1, this.secFrames);
+    const sections: Record<string, number> = {};
+    for (const [name, ms] of this.secSections) sections[name] = Math.round((ms / frames) * 100) / 100;
+    const memoryInfo = (performance as Performance & { memory?: { usedJSHeapSize: number } }).memory;
+    log("stats", {
+      fps: Math.round((this.secFrames * 1000) / Math.max(1, this.secFrameSum)),
+      frameAvg: Math.round((this.secFrameSum / frames) * 10) / 10,
+      frameMax: Math.round(this.secFrameMax * 10) / 10,
+      cpuAvg: Math.round((this.secCpuSum / frames) * 10) / 10,
+      sections,
+      drawCalls: Math.round(this.secCalls / frames),
+      triangles: Math.round(this.secTriangles / frames),
+      geometries: this.renderer.info.memory.geometries,
+      textures: this.renderer.info.memory.textures,
+      programs: this.renderer.info.programs?.length ?? 0,
+      heapMB: memoryInfo ? Math.round(memoryInfo.usedJSHeapSize / 1048576) : undefined,
+      hitches: this.secHitches,
+      ...this.extra(),
+    });
+    this.secFrames = 0;
+    this.secFrameSum = 0;
+    this.secFrameMax = 0;
+    this.secCpuSum = 0;
+    this.secCalls = 0;
+    this.secTriangles = 0;
+    this.secHitches = 0;
+    this.secSections.clear();
+    this.secTimer = 0;
+  }
+
   /** Deux lignes pour le HUD (lit puis remet à zéro les compteurs du rendu). */
   readAndReset(): string | null {
     if (!PerfStats.enabled) return null;
     const { render, memory } = this.renderer.info;
+    this.secCalls += render.calls;
+    this.secTriangles += render.triangles;
     const last = this.hitches[this.hitches.length - 1];
     const worst = last ? ` · dernier ${last.frameMs.toFixed(0)}ms ${Object.keys(last.sections)[0] ?? ""}${last.events[0] ? " " + last.events[0] : ""}` : "";
     const line = `FPS ${this.fps.toFixed(0)} DC ${render.calls} TRI ${(render.triangles / 1000).toFixed(0)}k GEO ${memory.geometries} TEX ${memory.textures} À-COUPS ${this.hitchCount}${worst}`;

@@ -87,15 +87,17 @@ export class CollectionStore {
     this.listeners.add(listener);
   }
 
-  add(entry: CollectionEntry): void {
+  /** Range un objet ; `index` : case précise où le poser (lâché sur une case), sinon en tête. */
+  add(entry: CollectionEntry, index: number | null = null): void {
     if (this.has(entry.id)) return;
     const stored = { ...entry, collectedAt: entry.collectedAt || Date.now() };
     if (stored.fragment === undefined && LORE_KINDS.has(stored.kind) && this.nextFragment < LORE_FRAGMENT_COUNT) {
       stored.fragment = this.nextFragment++;
       void set(LORE_KEY, this.nextFragment).catch(() => {});
     }
-    // Les nouveaux objets arrivent en tête de l'inventaire (le joueur réorganise ensuite).
-    this.entries.unshift(stored);
+    // Par défaut en tête de l'inventaire ; lâché sur une case : à cette place.
+    if (index === null) this.entries.unshift(stored);
+    else this.entries.splice(Math.min(Math.max(0, index), this.entries.length), 0, stored);
     this.persist();
   }
 

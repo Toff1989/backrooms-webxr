@@ -33,8 +33,6 @@ export interface ChunkLayout {
   /** Boîtes de collision des piliers, séparées de `wallSegments` : un pilier se rend en cube
    * (InstancedMesh), pas en plan de mur — seule la collision partage le même type de boîte. */
   pillarObstacles: WallSegment[];
-  /** Emplacements des pièges glitch (pas de collision, juste un déclenchement par proximité). */
-  glitchTrapPositions: Array<{ x: number; z: number }>;
   /** Bords actuellement ouverts choisis comme mur-piège (fiche : "mur qui surgit"). Pas de
    * collision tant qu'il n'a pas surgi — voir WallTrap, qui gère l'apparition temporaire. */
   wallTrapCandidates: WallSegment[];
@@ -97,7 +95,6 @@ export function generateChunkLayout(
   const wallSegments: WallSegment[] = [];
   const pillarPositions: Array<{ x: number; z: number }> = [];
   const pillarObstacles: WallSegment[] = [];
-  const glitchTrapPositions: Array<{ x: number; z: number }> = [];
   const wallTrapCandidates: WallSegment[] = [];
   const propPlacements: PropPlacement[] = [];
   const propObstacles: WallSegment[] = [];
@@ -154,8 +151,6 @@ export function generateChunkLayout(
           minZ: pillarCenterZ - PILLAR_SIZE / 2,
           maxZ: pillarCenterZ + PILLAR_SIZE / 2,
         });
-      } else if (!inClearance && coordinateHash01(seedInt, cellX, cellZ, 71) < profile.glitchProbability) {
-        glitchTrapPositions.push({ x: originX + CELL_SIZE / 2, z: originZ + CELL_SIZE / 2 });
       } else if (!inClearance && coordinateHash01(seedInt, cellX, cellZ, 89) < profile.propClusterProbability) {
         generatePropCluster(seedInt, cellX, cellZ, originX, originZ, propPlacements, propObstacles);
       } else if (!inClearance && coordinateHash01(seedInt, cellX, cellZ, 201) < profile.collectibleProbability) {
@@ -179,7 +174,6 @@ export function generateChunkLayout(
     wallSegments,
     pillarPositions,
     pillarObstacles,
-    glitchTrapPositions,
     wallTrapCandidates,
     propPlacements,
     propObstacles,

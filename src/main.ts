@@ -3,6 +3,7 @@ import { VRButton } from "three/addons/webxr/VRButton.js";
 import { AmbientHum } from "./assets/audio/ambientHum";
 import { getLanguage, onLanguageChange, setLanguage, t, type Language } from "./i18n";
 import { runWarmupStep } from "./assets/audio/synth";
+import { installDebugLog, log } from "./debug/debugLog";
 import { PhysicsWorld } from "./physics/physicsWorld";
 import { CamcorderHud } from "./player/camcorderHud";
 import { ComfortVignette } from "./player/comfortVignette";
@@ -28,6 +29,8 @@ import { Poltergeist } from "./world/poltergeist";
 import { initMaterials } from "./world/materials";
 import { endRun, reportLevel, startRun, type RunSessionInfo } from "./world/runSession";
 import { updateVhsTime } from "./world/vhsMaterial";
+
+installDebugLog();
 
 const appRoot = document.getElementById("app");
 if (!appRoot) throw new Error("#app introuvable dans index.html");
@@ -93,6 +96,22 @@ const ambientHum = new AmbientHum(audioListener, scene);
 const flashlight = new Flashlight(camera);
 const perfStats = new PerfStats(renderer, camera);
 setPerf(perfStats);
+perfStats.extra = () => {
+  let awakeBodies = 0;
+  physics.world.bodies.forEach((body) => {
+    if (body.isDynamic() && !body.isSleeping()) awakeBodies++;
+  });
+  return {
+    xr: renderer.xr.isPresenting,
+    audio: audioListener.context.state,
+    depth: levelManager.depth,
+    pos: [Math.round(player.headWorld.x * 10) / 10, Math.round(player.headWorld.z * 10) / 10],
+    grabbables: grabbables.all.size,
+    awakeBodies,
+    corruption: Math.round(corruption.value * 100) / 100,
+    flashlight: flashlight.on,
+  };
+};
 const atmosphere = new Atmosphere(scene, hemisphere, ambient);
 const poltergeist = new Poltergeist(scene, audioListener, grabbables);
 
@@ -141,7 +160,9 @@ const pointer = new UiPointer(hands, scene, [inventoryMenu, endRunScreen]);
 
 grabSystem = new GrabSystem(physics, grabbables, hands, sfx, {
   isOverInventory: (hand) => inventoryMenu.visible && (inventoryMenu.containsPoint(hand.palm) || pointer.frame(hand).target === inventoryMenu),
-  store: (item) => collectionStore.add(item),
+  inventorySlotAt: (hand) => inventoryMenu.slotIndexFor(hand),
+  store: (item, slotIndex) => collectionStore.add(item, slotIndex ?? null),
+  head: () => ({ position: player.headWorld, forward: camera.getWorldDirection(new THREE.Vector3()) }),
 }, scene);
 
 /** Place le joueur au spawn du level courant (changement de level, nouvelle run). */
@@ -176,10 +197,41 @@ function beginNewRun(restartLocallyOnFailure: boolean): void {
 
 beginNewRun(false);
 
+/**
+ * Son : les navigateurs (dont celui du Quest) ne démarrent l'audio que pendant un geste de
+ * l'utilisateur. L'événement "sessionstart" n'en est pas toujours un : on relance donc le
+ * contexte audio à chaque geste (clic sur "Entrer en VR", gâchette/grip en VR) tant qu'il
+ * n'est pas actif. Chaque tentative est journalisée en mode debug.
+ */
+function resumeAudio(reason: string): void {
+  const context = audioListener.context;
+  if (context.state === "running") return;
+  context
+    .resume()
+    .then(() => log("audio", { action: "resume", reason, state: context.state }))
+    .catch((error: unknown) => log("audio", { action: "resume-failed", reason, state: context.state, error: String(error) }));
+}
+for (const type of ["pointerdown", "keydown", "touchstart"]) document.addEventListener(type, () => resumeAudio(type), { capture: true });
+audioListener.context.addEventListener("statechange", () => log("audio", { action: "statechange", state: audioListener.context.state }));
+
 renderer.xr.addEventListener("sessionstart", () => {
+  resumeAudio("sessionstart");
   ambientHum.start();
   levelManager.onSessionStart();
+  const session = renderer.xr.getSession();
+  if (session) {
+    for (const type of ["selectstart", "squeezestart"] as const) session.addEventListener(type, () => resumeAudio(`xr-${type}`));
+    log("xr", {
+      action: "sessionstart",
+      frameRate: session.frameRate,
+      supportedFrameRates: session.supportedFrameRates ? [...session.supportedFrameRates] : undefined,
+      foveation: renderer.xr.getFoveation(),
+      inputs: [...session.inputSources].map((source) => `${source.handedness}:${source.profiles[0] ?? "?"}`),
+      audio: audioListener.context.state,
+    });
+  }
 });
+renderer.xr.addEventListener("sessionend", () => log("xr", { action: "sessionend" }));
 
 /** Panneau d'options HTML (aperçu écran, avant d'entrer en VR) : textes traduits + choix de langue. */
 function translateOptions(): void {
@@ -195,6 +247,9 @@ document.querySelector<HTMLSelectElement>("#language-select")?.addEventListener(
 });
 onLanguageChange(translateOptions);
 translateOptions();
+// Version affichée (options + inventaire) : permet de vérifier que le casque charge bien le dernier build.
+const buildLabel = document.querySelector<HTMLElement>("#build-id");
+if (buildLabel) buildLabel.textContent = `build ${__BUILD_ID__}`;
 
 const vignetteToggle = document.querySelector<HTMLInputElement>("#vignette-toggle");
 vignetteToggle?.addEventListener("change", () => {
@@ -214,8 +269,6 @@ function syncHands(time: number): void {
   for (const hand of hands) hand.update(time);
 }
 
-const GLITCH_HAPTIC_INTENSITY = 0.6;
-const GLITCH_HAPTIC_DURATION_MS = 120;
 const WALL_TRAP_WARNING_HAPTIC_INTENSITY = 0.35;
 const WALL_TRAP_WARNING_HAPTIC_DURATION_MS = 90;
 const WALL_TRAP_POP_HAPTIC_INTENSITY = 1;
@@ -223,8 +276,6 @@ const WALL_TRAP_POP_HAPTIC_DURATION_MS = 180;
 /** Charge rendue par une pile ramassée (fraction de la batterie de la lampe). */
 const BATTERY_RECHARGE = 0.45;
 const handPalms = hands.map((hand) => hand.palm);
-const TELEPORT_HAPTIC_INTENSITY = 1;
-const TELEPORT_HAPTIC_DURATION_MS = 260;
 
 renderer.setAnimationLoop((timestamp) => {
   perfStats.beginFrame(timestamp);
@@ -259,6 +310,7 @@ renderer.setAnimationLoop((timestamp) => {
     grabSystem.step(stepSeconds);
   });
   grabbables.sync(player.headWorld);
+  grabSystem.updateVisuals();
   perfStats.end("physique");
 
   perfStats.begin("monde");
@@ -269,38 +321,15 @@ renderer.setAnimationLoop((timestamp) => {
     sfx.play("battery", 0.6);
   }
   if (levelUpdate.corruptionDelta > 0) corruption.add(levelUpdate.corruptionDelta);
-  if (levelUpdate.glitchTrapJustTriggered) {
-    triggerHapticPulse(renderer, GLITCH_HAPTIC_INTENSITY, GLITCH_HAPTIC_DURATION_MS);
-    atmosphere.triggerFlicker(0.5);
-    vhsOverlay.triggerTrackingLoss(0.35);
-  }
   if (levelUpdate.wallTrapJustWarned) triggerHapticPulse(renderer, WALL_TRAP_WARNING_HAPTIC_INTENSITY, WALL_TRAP_WARNING_HAPTIC_DURATION_MS);
   if (levelUpdate.wallTrapJustPopped) {
     triggerHapticPulse(renderer, WALL_TRAP_POP_HAPTIC_INTENSITY, WALL_TRAP_POP_HAPTIC_DURATION_MS);
     atmosphere.triggerFlicker(0.4);
   }
 
-  if (levelUpdate.teleportDestination) {
-    player.teleport(levelUpdate.teleportDestination);
-    syncHands(elapsedSeconds);
-    grabSystem.onTeleport();
-    if (levelUpdate.teleportKind === "loop") {
-      // Boucle : presque rien, un simple accroc de bande — le joueur doit reconnaître l'endroit.
-      vhsOverlay.triggerTrackingLoss(0.45);
-      corruption.add(0.15);
-    } else {
-      corruption.add(0.8);
-      vhsOverlay.triggerTrackingLoss(1);
-      vhsOverlay.signalLoss(0.35);
-      flashlight.cut(0.6);
-      atmosphere.triggerFlicker(1.2);
-      sfx.play("teleport", 0.8);
-      triggerHapticPulse(renderer, TELEPORT_HAPTIC_INTENSITY, TELEPORT_HAPTIC_DURATION_MS);
-    }
-  }
-
   if (levelManager.hasReachedExit(player.headWorld)) {
     levelManager.descend();
+    log("level", { action: "descend", depth: levelManager.depth });
     respawn();
     vhsOverlay.blueScreen(1.4, [t("blue.level", { n: levelManager.depth })]);
     corruption.add(1);
@@ -335,6 +364,3 @@ renderer.setAnimationLoop((timestamp) => {
   perfStats.end("rendu");
   perfStats.endFrame(deltaSeconds);
 });
-
-
-

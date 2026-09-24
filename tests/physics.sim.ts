@@ -134,7 +134,7 @@ const landed = can.body.translation();
 check("la canette ne traverse pas le mur", landed.z > -6 + 0.075 - 0.01, `z=${landed.z.toFixed(2)} (mur à z=-6)`);
 check("la canette retombe au sol sans le traverser", landed.y > -0.01 && landed.y < 0.3, `y=${landed.y.toFixed(3)}`);
 
-// ---------- 3. Saisie à distance : gâchette (rayon) + grip, l'objet vient dans la main ----------
+// ---------- 3. Saisie à distance : gâchette (rayon) + grip (verrou) + coup de poignet vers soi ----------
 const book = registry.createCollectible({ ...item, id: "sim-book" }, canTemplate.clone(), canTemplate, new THREE.Vector3(5, 0.02, -1), new THREE.Quaternion());
 grip.position.set(5, 1.2, 1);
 rightInput.targetRay.position.copy(grip.position);
@@ -143,7 +143,14 @@ rightInput.targetRay.lookAt(grip.position.clone().multiplyScalar(2).sub(new THRE
 squeeze = [0];
 for (let i = 0; i < 5; i++) tick();
 squeeze = [0, 1];
-for (let i = 0; i < 72; i++) tick();
+tick();
+// Coup de poignet : la main recule vivement vers le joueur (+z, à l'opposé de l'objet).
+for (let i = 0; i < 6; i++) {
+  grip.position.z += 0.05;
+  rightInput.targetRay.position.copy(grip.position);
+  tick();
+}
+for (let i = 0; i < 90; i++) tick();
 check("saisie à distance", hand.holding === book, `holding=${hand.holding === book ? "objet visé" : hand.holding ? "autre" : "rien"}`);
 
 // ---------- 4. A/X range l'objet tenu dans l'inventaire ----------
@@ -169,6 +176,28 @@ for (let i = 0; i < 72; i++) {
 }
 check("objet tenu bloqué par le mur", grabbedBrick && minBrickZ > -5.93 - 0.02, `z min=${minBrickZ.toFixed(2)} (face du mur -5.93)`);
 check("lâché quand la main passe trop loin derrière le mur", hand.holding === null, `holding=${hand.holding ? "encore" : "lâché"}`);
+
+// ---------- 5b. Prise au point de contact : une barre saisie par un bout reste tenue par ce bout ----------
+squeeze = [];
+tick();
+{
+  const rodTemplate = boxTemplate(1.0, 0.04, 0.04);
+  const rod = registry.createCollectible({ ...item, id: "sim-rod" }, rodTemplate.clone(), rodTemplate, new THREE.Vector3(-6, 0.02, 0), new THREE.Quaternion());
+  for (let i = 0; i < 30; i++) tick();
+  // Paume juste au-dessus de l'extrémité +X de la barre.
+  grip.position.set(-6 + 0.45 + 0.035, 0.1, 0.01);
+  for (let i = 0; i < 3; i++) tick();
+  squeeze = [1];
+  tick();
+  const grabbedRod = hand.holding === rod;
+  grip.position.y = 1.2;
+  for (let i = 0; i < 60; i++) tick();
+  const r = rod.body.translation();
+  const centerToPalm = Math.hypot(r.x - hand.palm.x, r.y - hand.palm.y, r.z - hand.palm.z);
+  check("barre tenue par le bout saisi (pas recentrée)", grabbedRod && centerToPalm > 0.35, `centre-paume=${centerToPalm.toFixed(2)} m`);
+  squeeze = [];
+  tick();
+}
 
 // ---------- 6. Meuble trop lourd : d'une main, on le traîne mais on ne le soulève pas ----------
 squeeze = [];
