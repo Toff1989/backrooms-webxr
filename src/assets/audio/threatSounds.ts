@@ -183,3 +183,19 @@ export function createCaughtBuffer(context: BaseAudioContext): AudioBuffer {
   lowpass(data, sampleRate, 6000);
   return toBuffer(context, fadeEdges(normalize(data, 0.85), sampleRate, 0.02));
 }
+
+/** Caméra-tête figée par la lampe : grésillement de bande, décrochages, sifflement aigu bref. */
+export function createCameraStaticBuffer(context: BaseAudioContext): AudioBuffer {
+  const sampleRate = context.sampleRate;
+  const seconds = 0.7;
+  const data = createSamples(sampleRate, seconds);
+  let gate = 1;
+  for (let i = 0; i < data.length; i++) {
+    const t = i / sampleRate;
+    if (i % Math.floor(sampleRate * 0.03) === 0) gate = Math.random() < 0.65 ? 1 : 0.1;
+    const whine = Math.sin(2 * Math.PI * (3100 + Math.sin(t * 40) * 200) * t) * 0.15;
+    data[i] = ((Math.random() * 2 - 1) * 0.6 + whine) * gate * Math.sin((Math.PI * t) / seconds);
+  }
+  bandpass(data, sampleRate, 2400, 0.7);
+  return toBuffer(context, fadeEdges(normalize(data, 0.6), sampleRate));
+}

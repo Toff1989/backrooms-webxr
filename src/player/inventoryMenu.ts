@@ -9,7 +9,7 @@ import type { Hand } from "./hand";
 import type { Sfx } from "./sfx";
 
 const WIDTH = 0.64;
-const HEIGHT = 0.44;
+const HEIGHT = 0.49;
 const PX_PER_M = 1600;
 
 const COLUMNS = 5;
@@ -33,16 +33,18 @@ const MENU_DROP = 0.14;
 const MENU_TILT = THREE.MathUtils.degToRad(14);
 const STOP_CONFIRM_SECONDS = 3;
 
-type ButtonId = "prev" | "next" | "sort" | "height" | "lang" | "stop" | "close";
+type ButtonId = "prev" | "next" | "sort" | "height" | "lang" | "vignette" | "stop" | "close";
 
+/** Rangée 1 : inventaire et fin de run. Rangée 2 : options du jeu (langue, confort, hauteur). */
 const BUTTONS: Record<ButtonId, Rect> = {
   prev: { x: 40, y: 556, w: 70, h: 64 },
   next: { x: 120, y: 556, w: 70, h: 64 },
-  sort: { x: 200, y: 556, w: 130, h: 64 },
-  height: { x: 340, y: 556, w: 130, h: 64 },
-  lang: { x: 480, y: 556, w: 80, h: 64 },
-  stop: { x: 570, y: 556, w: 220, h: 64 },
-  close: { x: 800, y: 556, w: 184, h: 64 },
+  sort: { x: 200, y: 556, w: 190, h: 64 },
+  stop: { x: 400, y: 556, w: 300, h: 64 },
+  close: { x: 710, y: 556, w: 274, h: 64 },
+  lang: { x: 40, y: 632, w: 330, h: 60 },
+  vignette: { x: 380, y: 632, w: 330, h: 60 },
+  height: { x: 720, y: 632, w: 264, h: 60 },
 };
 
 const rarityLabel = (rarity: CollectionEntry["rarity"]): string => t(`rarity.${rarity}`);
@@ -57,6 +59,9 @@ export interface InventoryMenuActions {
   takeOut(hand: Hand, entry: CollectionEntry): void;
   recalibrateHeight(): void;
   stopRec(): void;
+  /** Vignette de confort : état courant, et bascule (renvoie le nouvel état). */
+  vignetteEnabled(): boolean;
+  toggleVignette(): boolean;
 }
 
 /**
@@ -202,6 +207,9 @@ export class InventoryMenu extends UiPanel {
       case "lang":
         setLanguage(getLanguage() === "fr" ? "en" : "fr");
         this.showStatus(t("inv.langStatus"));
+        break;
+      case "vignette":
+        this.showStatus(this.actions.toggleVignette() ? t("inv.vignetteOnStatus") : t("inv.vignetteOffStatus"));
         break;
       case "stop":
         if (this.stopArmedUntil) {
@@ -406,6 +414,9 @@ export class InventoryMenu extends UiPanel {
     drawButton(ctx, BUTTONS.sort, t("inv.sort"), { hovered: hoveredButtons.has("sort") });
     drawButton(ctx, BUTTONS.height, t("inv.height"), { hovered: hoveredButtons.has("height") });
     drawButton(ctx, BUTTONS.lang, t("inv.lang"), { hovered: hoveredButtons.has("lang") });
+    drawButton(ctx, BUTTONS.vignette, this.actions.vignetteEnabled() ? t("inv.vignetteOn") : t("inv.vignetteOff"), {
+      hovered: hoveredButtons.has("vignette"),
+    });
     drawButton(ctx, BUTTONS.stop, this.stopArmedUntil ? t("inv.confirm") : t("inv.stop"), {
       hovered: hoveredButtons.has("stop"),
       accent: "#ff6b5a",
@@ -423,12 +434,12 @@ export class InventoryMenu extends UiPanel {
         ? t("perks.none")
         : t("perks.line", { battery, decay, compass: perks.beaconSteadiness > 0 ? t("perks.compass") : "" }),
       width / 2,
-      646,
+      720,
     );
     ctx.fillStyle = "#7d7563";
-    ctx.fillText(t("inv.footer"), width / 2, 680);
+    ctx.fillText(t("inv.footer"), width / 2, 752);
     ctx.textAlign = "right";
     ctx.font = "15px monospace";
-    ctx.fillText(`build ${__BUILD_ID__}`, width - 12, 698);
+    ctx.fillText(`build ${__BUILD_ID__}`, width - 20, 774);
   }
 }

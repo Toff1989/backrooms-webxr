@@ -204,13 +204,14 @@ tests/physics.sim.ts         Simulation physique sans rendu (`npm run test:physi
   qui agonisent sur le front, bourdonnement qui s'éteint). ~30 s de noir complet (seule la lampe
   éclaire), puis les tubes redémarrent un à un, starters qui claquent. Même champ calculé sur
   CPU (audio, visibilité) et GPU (néons du plafond, éclairage ambiant des surfaces).
-- **Le Cadreur** (`cadreur.ts`, `cadreurModel.ts`, dès la profondeur 1) : mannequin sans
-  visage qui te filme avec une vieille caméra 8 mm (LED REC rouge visible dans le noir). Il ne
-  bouge que lorsqu'il n'est pas vu : hors du champ, derrière un mur, ou dans le noir (seule la
-  lampe le fige alors). Il suit la trace exacte du joueur et apparaît derrière lui ; on
-  l'entend (moteur de caméra, pas feutrés qui s'arrêtent quand on se retourne). S'il te
-  rattrape : « SIGNAL PERDU », réveil un niveau plus bas, ce que tu tenais est perdu. La
-  Coupure l'appelle s'il n'est pas déjà là. Poses figées : phase de marche + IK des bras.
+- **Le Cadreur** (`cadreur.ts`, `cadreurModel.ts`, dès la profondeur 1) : monstre humanoïde
+  voûté, plus grand qu'un homme, dont la tête est une vieille caméra 8 mm (LED REC rouge
+  visible dans le noir), bras trop longs et ballants. Démarche Mixamo rendue malsaine : il
+  boite, s'arrête net puis repart d'un coup, la tête-caméra tressaute et reste braquée sur le
+  joueur. Il suit la trace exacte du joueur et apparaît derrière lui. Sous tes yeux il avance
+  lentement ; hors de vue (dos tourné, mur, noir) il accélère ; pris dans le faisceau de la
+  lampe, il se fige et sa caméra grésille. S'il te rattrape : « SIGNAL PERDU », réveil un
+  niveau plus bas, ce que tu tenais est perdu. La Coupure l'appelle s'il n'est pas déjà là.
 - **Tester les menaces** : `?force=coupure,cadreur` (cumulable avec `?debug=1`) les déclenche
   au bout de quelques secondes, dès le niveau 0.
 - **Labyrinthe dynamique** (`chunkStreamer.ts`) : toutes les 6 à 12 secondes, un chunk chargé mais

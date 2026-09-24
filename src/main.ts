@@ -92,6 +92,25 @@ const hands = [new Hand(input.left, physics), new Hand(input.right, physics)];
 const sfx = new Sfx(audioListener);
 
 const comfortVignette = new ComfortVignette(camera);
+/** Vignette de confort : réglable dans les options (écran) et dans le menu du casque, mémorisée. */
+const VIGNETTE_KEY = "backrooms-vr:vignette";
+const vignetteToggle = document.querySelector<HTMLInputElement>("#vignette-toggle");
+function loadVignettePreference(): boolean {
+  try {
+    return localStorage.getItem(VIGNETTE_KEY) !== "off";
+  } catch {
+    return true;
+  }
+}
+function setVignette(enabled: boolean): void {
+  comfortVignette.enabled = enabled;
+  if (vignetteToggle) vignetteToggle.checked = enabled;
+  try {
+    localStorage.setItem(VIGNETTE_KEY, enabled ? "on" : "off");
+  } catch {
+    // Stockage indisponible : réglage valable pour cette session seulement.
+  }
+}
 const vhsOverlay = new VhsOverlay(camera);
 const hud = new CamcorderHud(camera);
 const ambientHum = new AmbientHum(audioListener, scene);
@@ -154,6 +173,11 @@ const inventoryMenu = new InventoryMenu(
     },
     recalibrateHeight: () => player.recalibrate(),
     stopRec: () => endRunScreen.show(levelManager.depth),
+    vignetteEnabled: () => comfortVignette.enabled,
+    toggleVignette: () => {
+      setVignette(!comfortVignette.enabled);
+      return comfortVignette.enabled;
+    },
   },
   sfx,
 );
@@ -266,10 +290,8 @@ translateOptions();
 const buildLabel = document.querySelector<HTMLElement>("#build-id");
 if (buildLabel) buildLabel.textContent = `build ${__BUILD_ID__}`;
 
-const vignetteToggle = document.querySelector<HTMLInputElement>("#vignette-toggle");
-vignetteToggle?.addEventListener("change", () => {
-  comfortVignette.enabled = vignetteToggle.checked;
-});
+vignetteToggle?.addEventListener("change", () => setVignette(vignetteToggle.checked));
+setVignette(loadVignettePreference());
 
 window.addEventListener("resize", () => {
   camera.aspect = window.innerWidth / window.innerHeight;

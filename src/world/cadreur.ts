@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { createCarpetStepBuffer, createCaughtBuffer, createTapeMotorBuffer, createZoomBuffer } from "../assets/audio/threatSounds";
+import { createCameraStaticBuffer, createCarpetStepBuffer, createCaughtBuffer, createTapeMotorBuffer, createZoomBuffer } from "../assets/audio/threatSounds";
 import { queueWarmup } from "../assets/audio/synth";
 import { log } from "../debug/debugLog";
 import { CollisionGroups, RAPIER, type PhysicsWorld } from "../physics/physicsWorld";
@@ -28,11 +28,11 @@ const LIT_THRESHOLD = 0.3;
 /** Si près qu'on le devine même dans le noir. */
 const TOUCH_VISIBLE_DISTANCE = 1.4;
 const MAX_SEE_DISTANCE = 40;
-/** Il reste figé un instant après avoir quitté le regard (évite les saccades en bord de champ). */
+/** Il garde son allure un instant après avoir quitté le regard (évite les à-coups en bord de champ). */
 const OBSERVE_GRACE = 0.25;
-/** Une nouvelle pose figée tous les 0,7 m parcourus. */
-const POSE_STRIDE = 0.7;
 const SIGHTING_COOLDOWN = 5;
+/** Vitesse sous les yeux du joueur (m/s) : lente, il marche vers toi. */
+const WATCHED_SPEED = 0.6;
 
 export interface CadreurContext {
   head: THREE.Vector3;
@@ -56,14 +56,16 @@ interface TrailPoint {
 }
 
 /**
- * Le Cadreur : une silhouette sans visage qui te filme. Il ne bouge que lorsqu'on ne le voit
- * pas — hors du champ de vision, caché par un mur, ou dans le noir (seule la lampe le fige
- * alors). Il suit exactement le chemin du joueur (sa trace), apparaît derrière lui au bout
- * d'un couloir déjà parcouru ; quand il est proche et à découvert, il coupe droit vers lui.
+ * Le Cadreur : un monstre à tête de caméra qui te filme. Il suit exactement le chemin du
+ * joueur (sa trace), apparaît derrière lui au bout d'un couloir déjà parcouru ; quand il est
+ * proche et à découvert, il coupe droit vers lui.
+ * - Sous les yeux du joueur, il avance lentement, en boitant, par à-coups.
+ * - Hors de vue (dos tourné, derrière un mur, dans le noir), il accélère.
+ * - Pris dans le faisceau de la lampe, il se fige — la tête-caméra tressaute et grésille.
  *
- * On l'entend plus qu'on ne le voit : le moteur de sa caméra qui ronronne, des pas feutrés
- * sur la moquette qui s'arrêtent dès qu'on se retourne, et le zoom qui se resserre quand on
- * le découvre. S'il atteint le joueur : coupure, réveil un niveau plus bas, les mains vides.
+ * On l'entend avant de le voir : le moteur de sa caméra qui ronronne, ses pas sur la moquette,
+ * le zoom qui se resserre quand on le découvre. S'il atteint le joueur : coupure, réveil un
+ * niveau plus bas, les mains vides.
  */
 export class Cadreur {
   private rig: CadreurRig | null = null;
@@ -75,9 +77,8 @@ export class Cadreur {
   private observedGrace = 0;
   private lastObserved = -Infinity;
   private elapsed = 0;
-  private sinceStep = 0;
-  private sincePose = 0;
-  private walkPhase = 0;
+  private frozenSeconds = 0;
+  private staticTimer = 0;
   private readonly motor: THREE.PositionalAudio;
   private readonly voice: THREE.PositionalAudio;
   private readonly caughtAudio: THREE.Audio;
@@ -85,6 +86,7 @@ export class Cadreur {
   private motorBuffer: AudioBuffer | null = null;
   private zoomBuffer: AudioBuffer | null = null;
   private readonly steps: AudioBuffer[] = [];
+  private staticBuffer: AudioBuffer | null = null;
   private readonly ray = new RAPIER.Ray({ x: 0, y: 0, z: 0 }, { x: 0, y: 0, z: 1 });
   private readonly forward = new THREE.Vector3();
   private readonly cameraPosition = new THREE.Vector3();
@@ -108,6 +110,7 @@ export class Cadreur {
     queueWarmup(() => (this.motorBuffer = createTapeMotorBuffer(listener.context)));
     queueWarmup(() => (this.caughtBuffer = createCaughtBuffer(listener.context)));
     queueWarmup(() => (this.zoomBuffer = createZoomBuffer(listener.context)));
+    queueWarmup(() => (this.staticBuffer = createCameraStaticBuffer(listener.context)));
     queueWarmup(() => {
       for (let i = 0; i < 4; i++) this.steps.push(createCarpetStepBuffer(listener.context));
     });
@@ -154,8 +157,8 @@ export class Cadreur {
 
     context.camera.getWorldDirection(this.forward);
     context.camera.getWorldPosition(this.cameraPosition);
-    const observed = this.isObserved(context);
-    if (observed) {
+    const sight = this.sight(context);
+    if (sight.seen) {
       if (this.elapsed - this.lastObserved > SIGHTING_COOLDOWN) {
         events.sighted = true;
         this.play(this.zoomBuffer, 0.9);
@@ -165,8 +168,20 @@ export class Cadreur {
       this.observedGrace = OBSERVE_GRACE;
     } else {
       this.observedGrace -= deltaSeconds;
-      if (this.observedGrace <= 0) this.advance(deltaSeconds, context);
     }
+    const watched = this.observedGrace > 0;
+    const hunting = Math.min(2.3, 1.25 + context.depth * 0.1);
+    this.frozenSeconds = sight.flashlit ? this.frozenSeconds + deltaSeconds : 0;
+    const speed = sight.flashlit ? 0 : watched ? WATCHED_SPEED : hunting;
+    this.advance(deltaSeconds, speed, watched, context);
+    if (sight.flashlit) {
+      // Pris dans la lampe : la caméra grésille par salves.
+      this.staticTimer -= deltaSeconds;
+      if (this.staticTimer <= 0) {
+        this.staticTimer = 0.5 + Math.random() * 0.9;
+        this.play(this.staticBuffer, 0.7);
+      }
+    } else this.staticTimer = 0;
 
     const distance = this.distanceTo(context.head);
     if (distance < CATCH_DISTANCE) {
@@ -192,8 +207,8 @@ export class Cadreur {
 
     const rig = this.rig;
     rig.root.visible = distance < MAX_SEE_DISTANCE + 5;
-    // REC : clignote une fois par seconde.
-    rig.led.visible = this.elapsed % 1 < 0.6;
+    // REC : clignote une fois par seconde ; affolée quand la lampe le fige.
+    rig.led.visible = this.frozenSeconds > 0 ? Math.random() < 0.5 : this.elapsed % 1 < 0.6;
     return events;
   }
 
@@ -236,13 +251,14 @@ export class Cadreur {
       if (length > SPAWN_MAX_BEHIND + 10) break;
       this.position.set(b.x, 0, b.z);
       // Jamais sous les yeux du joueur : il apparaît hors de vue, derrière un angle.
-      if (this.isObserved(context)) continue;
+      if (this.sight(context).seen) continue;
       this.trailIndex = i;
       this.stalking = true;
       this.observedGrace = 0;
       this.lastObserved = this.elapsed;
-      this.sincePose = POSE_STRIDE;
-      this.faceAndPose(context.head);
+      const next = this.trail[i] ?? b;
+      this.rig!.root.position.copy(this.position);
+      this.rig!.root.rotation.y = Math.atan2(next.x - b.x, next.z - b.z);
       this.rig!.root.visible = true;
       if (this.motorBuffer && this.motor.context.state === "running") {
         this.motor.setBuffer(this.motorBuffer);
@@ -262,19 +278,23 @@ export class Cadreur {
     if (this.motor.isPlaying) this.motor.stop();
   }
 
-  /** Vu = dans le champ, à découvert (pas derrière un mur) et éclairé (néons ou lampe). */
-  private isObserved(context: CadreurContext): boolean {
+  /**
+   * `seen` : dans le champ, à découvert (pas derrière un mur) et éclairé (néons ou lampe).
+   * `flashlit` : pris dans le faisceau de la lampe (il se fige).
+   */
+  private sight(context: CadreurContext): { seen: boolean; flashlit: boolean } {
+    const none = { seen: false, flashlit: false };
     this.tmp.set(this.position.x, 1.3, this.position.z).sub(this.cameraPosition);
     const distance = this.tmp.length();
-    if (distance > MAX_SEE_DISTANCE) return false;
+    if (distance > MAX_SEE_DISTANCE) return none;
     const facing = this.tmp.normalize().dot(this.forward);
-    if (facing < VIEW_COS) return false;
-    const lit =
-      context.lightAt(this.position.x, this.position.z) > LIT_THRESHOLD ||
-      (context.flashlight && facing > FLASHLIGHT_COS && distance < FLASHLIGHT_RANGE) ||
-      distance < TOUCH_VISIBLE_DISTANCE;
-    if (!lit) return false;
-    return this.clearLine(this.cameraPosition, this.position.x, 1.3, this.position.z) || this.clearLine(this.cameraPosition, this.position.x, 1.75, this.position.z);
+    if (facing < VIEW_COS) return none;
+    const flashlit = context.flashlight && facing > FLASHLIGHT_COS && distance < FLASHLIGHT_RANGE;
+    const lit = flashlit || context.lightAt(this.position.x, this.position.z) > LIT_THRESHOLD || distance < TOUCH_VISIBLE_DISTANCE;
+    if (!lit) return none;
+    const clear =
+      this.clearLine(this.cameraPosition, this.position.x, 1.3, this.position.z) || this.clearLine(this.cameraPosition, this.position.x, 1.9, this.position.z);
+    return clear ? { seen: true, flashlit } : none;
   }
 
   private clearLine(from: THREE.Vector3, x: number, y: number, z: number): boolean {
@@ -288,55 +308,46 @@ export class Cadreur {
     return this.physics.world.castRay(this.ray, length, true, undefined, CollisionGroups.queryWalls) === null;
   }
 
-  /** Avance hors de vue : le long de la trace, ou droit sur le joueur s'il est proche et à découvert. */
-  private advance(deltaSeconds: number, context: CadreurContext): void {
-    const speed = Math.min(2.3, 1.25 + context.depth * 0.1);
-    let budget = speed * deltaSeconds;
+  /** Avance au rythme de sa marche : le long de la trace, ou droit sur le joueur s'il est proche et à découvert. */
+  private advance(deltaSeconds: number, speed: number, watched: boolean, context: CadreurContext): void {
+    const rig = this.rig!;
     const head = context.head;
+    const step = rig.update(deltaSeconds, speed, head);
+    if (step.footstep) this.play(this.steps[Math.floor(Math.random() * this.steps.length)] ?? null, watched ? 0.8 : 0.55);
+    let budget = step.distance;
+    if (budget <= 0) return;
     const direct =
       this.distanceTo(head) < DIRECT_CHASE_DISTANCE && this.clearLine(this.tmp.set(this.position.x, 1.2, this.position.z), head.x, 1.2, head.z);
-    let moved = 0;
+    let headingX = 0;
+    let headingZ = 0;
     while (budget > 1e-4) {
-      let target: TrailPoint;
-      if (direct || this.trailIndex >= this.trail.length) target = { x: head.x, z: head.z };
-      else target = this.trail[this.trailIndex]!;
+      const target: TrailPoint = direct || this.trailIndex >= this.trail.length ? { x: head.x, z: head.z } : this.trail[this.trailIndex]!;
       const dx = target.x - this.position.x;
       const dz = target.z - this.position.z;
       const gap = Math.hypot(dx, dz);
+      if (gap > 1e-4) {
+        headingX = dx / gap;
+        headingZ = dz / gap;
+      }
       if (gap <= budget) {
         this.position.x = target.x;
         this.position.z = target.z;
         budget -= gap;
-        moved += gap;
         if (direct || this.trailIndex >= this.trail.length) break;
         this.trailIndex++;
       } else {
-        this.position.x += (dx / gap) * budget;
-        this.position.z += (dz / gap) * budget;
-        moved += budget;
+        this.position.x += headingX * budget;
+        this.position.z += headingZ * budget;
         budget = 0;
       }
     }
     if (direct) this.trailIndex = this.trail.length;
-
-    this.sinceStep += moved;
-    this.sincePose += moved;
-    if (this.sinceStep > 0.62) {
-      this.sinceStep = 0;
-      this.play(this.steps[Math.floor(Math.random() * this.steps.length)] ?? null, 0.55);
-    }
-    this.faceAndPose(head);
-  }
-
-  /** Toujours tourné vers le joueur ; nouvelle pose figée tous les `POSE_STRIDE` mètres. */
-  private faceAndPose(head: THREE.Vector3): void {
-    const rig = this.rig!;
     rig.root.position.copy(this.position);
-    rig.root.rotation.y = Math.atan2(head.x - this.position.x, head.z - this.position.z);
-    if (this.sincePose >= POSE_STRIDE) {
-      this.sincePose = 0;
-      this.walkPhase = (this.walkPhase + 0.31 + Math.random() * 0.2) % 1;
-      rig.pose(this.walkPhase, Math.random());
+    if (headingX !== 0 || headingZ !== 0) {
+      // Le corps se tourne vers où il marche (la tête-caméra, elle, reste sur le joueur).
+      const wanted = Math.atan2(headingX, headingZ);
+      const delta = THREE.MathUtils.euclideanModulo(wanted - rig.root.rotation.y + Math.PI, Math.PI * 2) - Math.PI;
+      rig.root.rotation.y += delta * Math.min(1, deltaSeconds * 6);
     }
   }
 

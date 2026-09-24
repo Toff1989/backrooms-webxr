@@ -18,7 +18,7 @@
   "inv.store": "Release a held item on a slot (or A/X, or behind your shoulder) to store it.",
   "inv.height": "HEIGHT",
   "inv.heightStatus": "Height recalibrated to your current position.",
-  "inv.lang": "FR",
+  "inv.lang": "LANGUAGE: ENGLISH",
   "inv.langStatus": "Language: English.",
   "inv.confirm": "CONFIRM?",
   "inv.stop": "■ STOP REC",
@@ -70,5 +70,9 @@
   "sort.name": "by name",
   "inv.picked": "Item selected — trigger on another slot to place it there (same slot: cancel).",
   "inv.moved": "Item moved.",
-  "hud.signal": "SIGNAL"
+  "hud.signal": "SIGNAL",
+  "inv.vignetteOn": "VIGNETTE: ON",
+  "inv.vignetteOff": "VIGNETTE: OFF",
+  "inv.vignetteOnStatus": "Comfort vignette on (edges darken while moving).",
+  "inv.vignetteOffStatus": "Comfort vignette off."
 }

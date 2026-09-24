@@ -18,7 +18,7 @@
   "inv.store": "Relâchez un objet tenu sur une case (ou A/X, ou derrière l'épaule) pour le ranger.",
   "inv.height": "HAUT.",
   "inv.heightStatus": "Hauteur recalée sur votre position actuelle.",
-  "inv.lang": "EN",
+  "inv.lang": "LANGUE : FRANÇAIS",
   "inv.langStatus": "Langue : français.",
   "inv.confirm": "CONFIRMER ?",
   "inv.stop": "■ STOP REC",
@@ -70,5 +70,9 @@
   "sort.name": "par nom",
   "inv.picked": "Objet sélectionné — gâchette sur une autre case pour l'y placer (même case : annuler).",
   "inv.moved": "Objet déplacé.",
-  "hud.signal": "SIGNAL"
+  "hud.signal": "SIGNAL",
+  "inv.vignetteOn": "VIGNETTE : OUI",
+  "inv.vignetteOff": "VIGNETTE : NON",
+  "inv.vignetteOnStatus": "Vignette de confort activée (bords assombris en mouvement).",
+  "inv.vignetteOffStatus": "Vignette de confort désactivée."
 }
