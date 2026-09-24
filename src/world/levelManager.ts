@@ -1,11 +1,11 @@
 import * as THREE from "three";
+import type { PhysicsWorld } from "../physics/physicsWorld";
 import { CELL_SIZE } from "../shared/constants";
 import { getExitWorldPosition } from "../shared/exit";
 import { createLevelProfile, type LevelProfile } from "../shared/levelProfile";
-import type { WallSegment } from "../shared/chunkLayout";
-import type { CollectibleInstance } from "./collectible";
 import { ChunkStreamer } from "./chunkStreamer";
 import { ExitBeacon } from "./exitBeacon";
+import type { GrabbableRegistry } from "./grabbable";
 
 /** Distance (m) sous laquelle le joueur est considéré comme ayant atteint la sortie. */
 const EXIT_REACHED_DISTANCE = 1.1;
@@ -46,11 +46,14 @@ export class LevelManager {
   constructor(
     private readonly scene: THREE.Scene,
     private readonly audioListener: THREE.AudioListener,
+    physics: PhysicsWorld,
+    grabbables: GrabbableRegistry,
+    isItemStored: (id: string) => boolean,
     initialRunSeed: string,
   ) {
     this.runSeed = initialRunSeed;
     this.profile = createLevelProfile(this.depth, this.runSeed);
-    this.chunkStreamer = new ChunkStreamer(scene, audioListener, this.profile);
+    this.chunkStreamer = new ChunkStreamer(scene, audioListener, physics, grabbables, isItemStored, this.profile);
     this.chunkStreamer.primeArea(SPAWN_LOCAL_POSITION);
 
     const exitPosition = getExitWorldPosition(this.profile);
@@ -67,22 +70,11 @@ export class LevelManager {
     this.chunkStreamer.onSessionStart();
   }
 
+  /** `playerPosition` : position XZ de la tête du joueur (pas l'origine du rig). */
   update(playerPosition: THREE.Vector3, camera: THREE.Camera, elapsedSeconds: number, deltaSeconds: number): LevelUpdateResult {
     const streamerResult = this.chunkStreamer.update(playerPosition, camera, elapsedSeconds, deltaSeconds);
     this.exitBeacon.update(elapsedSeconds);
     return streamerResult;
-  }
-
-  collectNearbyWallSegments(playerPosition: THREE.Vector3, target: WallSegment[]): void {
-    this.chunkStreamer.collectNearbyWallSegments(playerPosition, target);
-  }
-
-  tryHoldCollectible(worldPosition: THREE.Vector3, maxDistance: number): CollectibleInstance | null {
-    return this.chunkStreamer.tryHoldCollectible(worldPosition, maxDistance);
-  }
-
-  adoptDroppedCollectible(collectible: CollectibleInstance): void {
-    this.chunkStreamer.adoptDroppedCollectible(collectible);
   }
 
   hasReachedExit(playerPosition: THREE.Vector3): boolean {
@@ -94,11 +86,7 @@ export class LevelManager {
   /** Passage au level suivant : nouveau profil (même seed de run, difficulté accrue), monde reconstruit. */
   descend(): THREE.Vector3 {
     this.depth += 1;
-    this.profile = createLevelProfile(this.depth, this.runSeed);
-    this.chunkStreamer.setProfile(this.profile);
-    this.chunkStreamer.primeArea(SPAWN_LOCAL_POSITION);
-    if (this.sessionStarted) this.chunkStreamer.onSessionStart();
-    this.rebuildExitBeacon();
+    this.rebuild();
     return SPAWN_LOCAL_POSITION.clone();
   }
 
@@ -110,15 +98,17 @@ export class LevelManager {
   restartRun(runSeed: string): THREE.Vector3 {
     this.runSeed = runSeed;
     this.depth = 0;
-    this.profile = createLevelProfile(this.depth, this.runSeed);
-    this.chunkStreamer.setProfile(this.profile);
-    this.chunkStreamer.primeArea(SPAWN_LOCAL_POSITION);
-    if (this.sessionStarted) this.chunkStreamer.onSessionStart();
-    this.rebuildExitBeacon();
+    this.rebuild();
     return SPAWN_LOCAL_POSITION.clone();
   }
 
-  private rebuildExitBeacon(): void {
+  private rebuild(): void {
+    this.profile = createLevelProfile(this.depth, this.runSeed);
+    this.chunkStreamer.depth = this.depth;
+    this.chunkStreamer.setProfile(this.profile);
+    this.chunkStreamer.primeArea(SPAWN_LOCAL_POSITION);
+    if (this.sessionStarted) this.chunkStreamer.onSessionStart();
+
     this.exitBeacon.dispose();
     this.scene.remove(this.exitBeacon.group);
     const exitPosition = getExitWorldPosition(this.profile);

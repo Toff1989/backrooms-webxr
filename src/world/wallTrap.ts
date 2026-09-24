@@ -1,7 +1,11 @@
 import * as THREE from "three";
+import { CollisionGroups, RAPIER, type PhysicsWorld } from "../physics/physicsWorld";
 import { WALL_HEIGHT, WALL_THICKNESS } from "../shared/constants";
 import type { WallSegment } from "../shared/chunkLayout";
 import { getWallMaterial } from "./materials";
+
+/** Marge autour du mur : il ne surgit jamais tant que le joueur se tient dans son emprise. */
+const PLAYER_CLEARANCE = 0.35;
 
 type Phase = "idle" | "warning" | "rising" | "hold" | "receding" | "cooldown";
 
@@ -46,8 +50,14 @@ export class WallTrap {
 
   private phase: Phase = "idle";
   private phaseElapsed = 0;
+  private readonly body: RAPIER.RigidBody;
+  private readonly collider: RAPIER.Collider;
 
-  constructor(segment: WallSegment, listener: THREE.AudioListener) {
+  constructor(
+    segment: WallSegment,
+    listener: THREE.AudioListener,
+    private readonly physics: PhysicsWorld,
+  ) {
     this.segment = segment;
     this.centerX = (segment.minX + segment.maxX) / 2;
     this.centerZ = (segment.minZ + segment.maxZ) / 2;
@@ -76,6 +86,29 @@ export class WallTrap {
     this.sound.setMaxDistance(MAX_DISTANCE);
     this.sound.position.set(this.centerX, WALL_HEIGHT / 2, this.centerZ);
     this.group.add(this.sound);
+
+    // Collider plein mur, désactivé tant que le mur n'est pas dressé (voir `setSolid`).
+    this.body = physics.world.createRigidBody(RAPIER.RigidBodyDesc.fixed());
+    this.collider = physics.world.createCollider(
+      RAPIER.ColliderDesc.cuboid(width / 2, WALL_HEIGHT / 2, depth / 2)
+        .setTranslation(this.centerX, WALL_HEIGHT / 2, this.centerZ)
+        .setCollisionGroups(CollisionGroups.static)
+        .setEnabled(false),
+      this.body,
+    );
+  }
+
+  private setSolid(solid: boolean): void {
+    this.collider.setEnabled(solid);
+  }
+
+  private overlapsPlayer(playerPosition: THREE.Vector3): boolean {
+    return (
+      playerPosition.x > this.segment.minX - PLAYER_CLEARANCE &&
+      playerPosition.x < this.segment.maxX + PLAYER_CLEARANCE &&
+      playerPosition.z > this.segment.minZ - PLAYER_CLEARANCE &&
+      playerPosition.z < this.segment.maxZ + PLAYER_CLEARANCE
+    );
   }
 
   update(playerPosition: THREE.Vector3, deltaSeconds: number): WallTrapUpdateResult {
@@ -99,10 +132,12 @@ export class WallTrap {
         break;
 
       case "warning":
-        if (this.phaseElapsed >= WARNING_DURATION) {
+        // Jamais surgir sur le joueur : on attend qu'il sorte de l'emprise du mur.
+        if (this.phaseElapsed >= WARNING_DURATION && !this.overlapsPlayer(playerPosition)) {
           this.phase = "rising";
           this.phaseElapsed = 0;
           this.mesh.visible = true;
+          this.setSolid(true);
           this.playOneShot(this.impactBuffer, IMPACT_VOLUME);
           corruptionDelta = IMPACT_CORRUPTION;
           justPopped = true;
@@ -133,6 +168,7 @@ export class WallTrap {
           this.phase = "cooldown";
           this.phaseElapsed = 0;
           this.mesh.visible = false;
+          this.setSolid(false);
         }
         break;
       }
@@ -148,14 +184,10 @@ export class WallTrap {
     return { corruptionDelta, justWarned, justPopped };
   }
 
-  /** Segment de collision actif uniquement pendant que le mur est réellement dressé. */
-  getActiveSegment(): WallSegment | null {
-    return this.phase === "rising" || this.phase === "hold" ? this.segment : null;
-  }
-
   dispose(): void {
     this.sound.stop();
     this.mesh.geometry.dispose();
+    this.physics.world.removeRigidBody(this.body);
   }
 
   private setRiseFraction(t: number): void {

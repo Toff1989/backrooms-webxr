@@ -1,30 +1,40 @@
 import * as THREE from "three";
 
-const CANVAS_WIDTH = 512;
-const CANVAS_HEIGHT = 140;
-const UPDATE_INTERVAL_SECONDS = 0.5;
-// Petit panneau tassé dans le coin bas-gauche du champ de vision (viseur caméscope),
-// pas un bloc flottant au centre de la vue.
-const PANEL_WIDTH = 0.22;
+const CANVAS_WIDTH = 1024;
+const CANVAS_HEIGHT = 170;
+const UPDATE_INTERVAL_SECONDS = 0.25;
+/**
+ * Bandeau façon viseur de caméscope, en haut du champ de vision (confortable à lire sans
+ * baisser les yeux) : texte blanc cerné de noir sur fond transparent, pas de bloc opaque.
+ */
+const PANEL_WIDTH = 0.36;
 const PANEL_HEIGHT = (CANVAS_HEIGHT / CANVAS_WIDTH) * PANEL_WIDTH;
-const PANEL_POSITION = new THREE.Vector3(-0.35, -0.3, -0.55);
+const PANEL_POSITION = new THREE.Vector3(0, 0.155, -0.5);
 
 interface BatteryLike {
   level: number;
 }
 
+export interface HudStatus {
+  depth: number;
+  crouching: boolean;
+  sprinting: boolean;
+  flashlight: boolean;
+  items: number;
+}
+
 /**
- * Overlay caméscope (panneau 3D fixé à la tête) : REC clignotant, horodatage de la run,
- * indicateur batterie, profondeur actuelle. La profondeur reste à 0 tant que les levels
- * (étape 4 de la roadmap) ne sont pas branchés ; `depth` est déjà exposé pour ça.
+ * Overlay caméscope fixé à la tête : REC clignotant, horodatage de la run, batterie,
+ * profondeur, et l'état du corps (accroupi, sprint, lampe) pour que les bascules de
+ * boutons soient toujours visibles.
  */
 export class CamcorderHud {
-  depth = 0;
+  status: HudStatus = { depth: 0, crouching: false, sprinting: false, flashlight: false, items: 0 };
 
   private readonly ctx: CanvasRenderingContext2D;
   private readonly texture: THREE.CanvasTexture;
   private elapsedSeconds = 0;
-  private timeSinceRedraw = 0;
+  private timeSinceRedraw = Infinity;
   private battery: BatteryLike | null = null;
 
   constructor(camera: THREE.Camera) {
@@ -38,21 +48,28 @@ export class CamcorderHud {
     this.texture = new THREE.CanvasTexture(canvas);
     this.texture.colorSpace = THREE.SRGBColorSpace;
 
-    const material = new THREE.MeshBasicMaterial({
-      map: this.texture,
-      transparent: true,
-      depthTest: false,
-      depthWrite: false,
-    });
-    const geometry = new THREE.PlaneGeometry(PANEL_WIDTH, PANEL_HEIGHT);
-    const mesh = new THREE.Mesh(geometry, material);
+    const mesh = new THREE.Mesh(
+      new THREE.PlaneGeometry(PANEL_WIDTH, PANEL_HEIGHT),
+      new THREE.MeshBasicMaterial({ map: this.texture, transparent: true, depthTest: false, depthWrite: false, fog: false }),
+    );
     mesh.position.copy(PANEL_POSITION);
     mesh.renderOrder = 997;
     mesh.frustumCulled = false;
     camera.add(mesh);
 
-    this.redraw();
-    this.tryInitBattery();
+    const nav = navigator as Navigator & { getBattery?: () => Promise<BatteryLike> };
+    nav
+      .getBattery?.()
+      .then((battery) => {
+        this.battery = battery;
+      })
+      .catch(() => {});
+  }
+
+  /** Remet le compteur REC à zéro (nouvelle run). */
+  resetClock(): void {
+    this.elapsedSeconds = 0;
+    this.timeSinceRedraw = Infinity;
   }
 
   update(deltaSeconds: number): void {
@@ -63,51 +80,49 @@ export class CamcorderHud {
     this.redraw();
   }
 
-  private tryInitBattery(): void {
-    const nav = navigator as Navigator & { getBattery?: () => Promise<BatteryLike> };
-    nav
-      .getBattery?.()
-      .then((battery) => {
-        this.battery = battery;
-      })
-      .catch(() => {
-        this.battery = null;
-      });
+  private text(value: string, x: number, y: number, align: CanvasTextAlign, color = "#f4f1e8"): void {
+    const ctx = this.ctx;
+    ctx.textAlign = align;
+    ctx.lineWidth = 7;
+    ctx.strokeStyle = "rgba(0, 0, 0, 0.85)";
+    ctx.strokeText(value, x, y);
+    ctx.fillStyle = color;
+    ctx.fillText(value, x, y);
   }
 
   private redraw(): void {
     const ctx = this.ctx;
     ctx.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+    ctx.textBaseline = "middle";
+    ctx.lineJoin = "round";
 
-    ctx.fillStyle = "rgba(0, 0, 0, 0.45)";
-    ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+    ctx.font = "bold 44px monospace";
+    const blink = Math.floor(this.elapsedSeconds * 1.2) % 2 === 0;
+    if (blink) {
+      ctx.beginPath();
+      ctx.arc(34, 46, 15, 0, Math.PI * 2);
+      ctx.fillStyle = "#ff3b30";
+      ctx.fill();
+      ctx.lineWidth = 4;
+      ctx.strokeStyle = "rgba(0,0,0,0.8)";
+      ctx.stroke();
+    }
+    this.text("REC", 60, 48, "left");
+
+    const total = Math.floor(this.elapsedSeconds);
+    const hours = Math.floor(total / 3600);
+    const minutes = Math.floor((total % 3600) / 60);
+    const seconds = total % 60;
+    this.text(`${hours}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`, CANVAS_WIDTH / 2, 48, "center");
+
+    const level = this.battery ? Math.round(this.battery.level * 100) : null;
+    this.text(level === null ? "BAT --" : `BAT ${level}%`, CANVAS_WIDTH - 20, 48, "right", level !== null && level < 20 ? "#ff6b5a" : "#f4f1e8");
 
     ctx.font = "bold 34px monospace";
-    ctx.textBaseline = "middle";
-
-    const blink = Math.floor(this.elapsedSeconds) % 2 === 0;
-    ctx.fillStyle = blink ? "#ff3b30" : "rgba(255, 59, 48, 0.35)";
-    ctx.beginPath();
-    ctx.arc(34, 40, 12, 0, Math.PI * 2);
-    ctx.fill();
-
-    ctx.fillStyle = "#f2f2f2";
-    ctx.fillText("REC", 56, 42);
-
-    const minutes = Math.floor(this.elapsedSeconds / 60)
-      .toString()
-      .padStart(2, "0");
-    const seconds = Math.floor(this.elapsedSeconds % 60)
-      .toString()
-      .padStart(2, "0");
-    ctx.fillText(`${minutes}:${seconds}`, 200, 42);
-
-    const batteryLabel = this.battery ? `${Math.round(this.battery.level * 100)}%` : "--%";
-    ctx.fillText(`BAT ${batteryLabel}`, 360, 42);
-
-    ctx.font = "22px monospace";
-    ctx.fillStyle = "#cfcfcf";
-    ctx.fillText(`PROFONDEUR ${this.depth}`, 24, 96);
+    this.text(`NIV ${this.status.depth}`, 20, 120, "left", "#ffe89a");
+    this.text(`SAC ${this.status.items}`, 200, 120, "left");
+    const flags = [this.status.crouching ? "ACCROUPI" : "", this.status.sprinting ? "SPRINT" : "", this.status.flashlight ? "LAMPE" : ""].filter(Boolean).join("  ");
+    this.text(flags, CANVAS_WIDTH - 20, 120, "right", "#b9e0ff");
 
     this.texture.needsUpdate = true;
   }

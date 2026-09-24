@@ -1,5 +1,6 @@
 import { get, set } from "idb-keyval";
 import type { CollectiblePlacement } from "../shared/chunkLayout";
+import { COLLECTIBLE_KINDS } from "../shared/collectibles";
 
 const STORAGE_KEY = "backrooms-vr:collection";
 
@@ -17,21 +18,27 @@ export interface CollectionEntry {
   collectedAt: number;
 }
 
+const KNOWN_KINDS = new Set<string>(COLLECTIBLE_KINDS);
+
 /**
- * Collection persistante (fiche projet étape 6, "Persistance") : seule cette liste
- * survit entre les runs (IndexedDB via `idb-keyval`) — la progression (profondeur,
- * position) repart de zéro à chaque run, voir `LevelManager`. Chargée une fois au
- * démarrage puis tenue à jour en mémoire, pour que le menu poignet n'ait jamais besoin
- * de relire le disque pendant une run.
+ * Inventaire persistant (fiche projet étape 6, "Persistance") : ce que le joueur a rangé
+ * dans son inventaire survit entre les runs (IndexedDB via `idb-keyval`) — la progression
+ * (profondeur, position) repart de zéro à chaque run. Un objet sorti de l'inventaire (en
+ * main, puis posé/jeté dans le monde) n'en fait plus partie tant qu'il n'y est pas remis :
+ * laissé au sol quand on change de level, il est perdu.
  */
 export class CollectionStore {
   private entries: CollectionEntry[] = [];
   private readonly ready: Promise<void>;
+  private readonly listeners = new Set<() => void>();
 
   constructor() {
     this.ready = get<CollectionEntry[]>(STORAGE_KEY)
       .then((stored) => {
-        this.entries = stored ?? [];
+        // Anciennes versions du jeu (formes primitives "key"/"doll"...) : ignorées plutôt que de
+        // planter le chargement de modèles inexistants.
+        this.entries = (stored ?? []).filter((entry) => KNOWN_KINDS.has(entry.kind));
+        this.emit();
       })
       .catch(() => {
         this.entries = [];
@@ -50,14 +57,40 @@ export class CollectionStore {
     return this.entries.length;
   }
 
-  /** Ajoute une entrée et persiste immédiatement (best-effort : jamais bloquant pour le gameplay si l'écriture échoue). */
+  has(id: string): boolean {
+    return this.entries.some((entry) => entry.id === id);
+  }
+
+  onChange(listener: () => void): void {
+    this.listeners.add(listener);
+  }
+
   add(entry: CollectionEntry): void {
-    this.entries.push(entry);
+    if (this.has(entry.id)) return;
+    this.entries.push({ ...entry, collectedAt: entry.collectedAt || Date.now() });
+    this.persist();
+  }
+
+  /** Retire (sort de l'inventaire) et renvoie l'entrée, pour la reposer telle quelle si elle y revient. */
+  remove(id: string): CollectionEntry | null {
+    const index = this.entries.findIndex((entry) => entry.id === id);
+    if (index < 0) return null;
+    const [entry] = this.entries.splice(index, 1);
+    this.persist();
+    return entry ?? null;
+  }
+
+  private persist(): void {
+    this.emit();
     void set(STORAGE_KEY, this.entries).catch(() => {});
+  }
+
+  private emit(): void {
+    for (const listener of this.listeners) listener();
   }
 }
 
-/** Construit l'entrée à persister à partir des infos générées au placement (voir `chunkLayout.ts`) + du contexte de ramassage. */
+/** Données d'inventaire d'un objet trouvé dans le monde (horodatage posé au rangement). */
 export function toCollectionEntry(placement: CollectiblePlacement, depth: number): CollectionEntry {
   return {
     id: placement.id,
@@ -69,6 +102,6 @@ export function toCollectionEntry(placement: CollectiblePlacement, depth: number
     nameEn: placement.nameEn,
     descriptionFr: placement.descriptionFr,
     descriptionEn: placement.descriptionEn,
-    collectedAt: Date.now(),
+    collectedAt: 0,
   };
 }

@@ -1,13 +1,15 @@
 import * as THREE from "three";
 import type { NoiseFunction2D } from "simplex-noise";
+import { CollisionGroups, RAPIER, type PhysicsWorld } from "../physics/physicsWorld";
 import { generateChunkLayout, type ChunkLayout, type WallSegment } from "../shared/chunkLayout";
 import { CHUNK_SIZE, STREAM_RADIUS_CHUNKS, WALL_HEIGHT } from "../shared/constants";
 import type { LevelProfile } from "../shared/levelProfile";
 import { createSeededNoise2D } from "../shared/noise";
 import { buildChunkGroup } from "./chunkMesh";
-import { CollectibleInstance, COLLECTIBLE_PHYSICS_RADIUS, spawnCollectible } from "./collectible";
+import { spawnCollectibleModel } from "./collectibleLoader";
+import { toCollectionEntry } from "./collection";
 import { GlitchTrap } from "./glitchTrap";
-import { PhysicsBody } from "./physics";
+import type { GrabbableRegistry } from "./grabbable";
 import { spawnProp } from "./propLoader";
 import { WallTrap } from "./wallTrap";
 
@@ -17,30 +19,16 @@ const REGEN_MAX_INTERVAL_SECONDS = 12;
 const REGEN_MIN_DISTANCE_CHUNKS = 2;
 /** Corruption ajoutée quand un chunk hors champ se régénère (masque discrètement le changement). */
 const REGEN_CORRUPTION_PULSE = 0.1;
-
-/** Physique légère du mobilier (voir `physics.ts`) : un meuble bousculé glisse/tombe avant de se stabiliser.
- * Le rayon de bousculade doit dépasser la distance de blocage (PLAYER_RADIUS + PROP_PHYSICS_RADIUS,
- * voir `collectNearbyWallSegments`), sinon la collision empêche le joueur de jamais l'atteindre. */
-const PROP_PHYSICS_RADIUS = 0.35;
-const PROP_NUDGE_RADIUS = 0.75;
-const PROP_NUDGE_STRENGTH = 1.2;
-
-interface PropPhysicsEntry {
-  object: THREE.Object3D;
-  body: PhysicsBody;
-}
+/** Les objets de collection apparaissent posés, légèrement au-dessus du sol (la physique les fait retomber). */
+const COLLECTIBLE_SPAWN_HEIGHT = 0.05;
 
 interface LoadedChunk {
   group: THREE.Group;
-  /** Conteneur séparé pour le mobilier : chargement asynchrone, géométrie/matériaux
-   * partagés entre instances (jamais disposés au déchargement d'un chunk, contrairement
-   * à `group`). */
-  propsGroup: THREE.Group;
-  propPhysics: PropPhysicsEntry[];
+  /** Corps fixe portant les colliders des murs et piliers du chunk. */
+  staticBody: RAPIER.RigidBody;
   layout: ChunkLayout;
   glitchTraps: GlitchTrap[];
   wallTraps: WallTrap[];
-  collectibles: CollectibleInstance[];
   epoch: number;
   bounds: THREE.Box3;
 }
@@ -55,11 +43,14 @@ export interface ChunkStreamerUpdateResult {
 /**
  * Charge/décharge les chunks autour du joueur (rayon de 2 chunks, fiche projet étape 2),
  * anime les pièges glitch et régénère périodiquement un chunk hors champ de vision pour
- * un labyrinthe dynamique (étape 5 : "régénération à intervalle aléatoire des chunks
- * hors du champ de vision"). La disposition (murs/piliers/pièges) est régénérée à la
- * volée depuis la seed à chaque chargement : rien n'est persisté.
+ * un labyrinthe dynamique (étape 5). Chaque chunk ajoute ses murs/piliers au monde
+ * physique Rapier et fait apparaître son mobilier et ses objets de collection comme des
+ * corps dynamiques (voir `GrabbableRegistry`).
  */
 export class ChunkStreamer {
+  /** Profondeur courante, pour horodater les objets de collection trouvés. */
+  depth = 0;
+
   private readonly loaded = new Map<string, LoadedChunk>();
   private noise2D: NoiseFunction2D;
   private profile: LevelProfile;
@@ -69,11 +60,14 @@ export class ChunkStreamer {
   private regenTimer = randomRegenInterval();
   private readonly frustum = new THREE.Frustum();
   private readonly frustumMatrix = new THREE.Matrix4();
-  private readonly physicsWallScratch: WallSegment[] = [];
 
   constructor(
     private readonly scene: THREE.Scene,
     private readonly audioListener: THREE.AudioListener,
+    private readonly physics: PhysicsWorld,
+    private readonly grabbables: GrabbableRegistry,
+    /** Vrai si l'objet est déjà rangé dans l'inventaire (ne pas le refaire apparaître). */
+    private readonly isItemStored: (id: string) => boolean,
     profile: LevelProfile,
   ) {
     this.profile = profile;
@@ -83,6 +77,7 @@ export class ChunkStreamer {
   /** Change de level : décharge tout le monde courant, repart à vide sur le nouveau profil/seed. */
   setProfile(profile: LevelProfile): void {
     for (const key of [...this.loaded.keys()]) this.unloadChunk(key);
+    this.grabbables.removeAllNotHeld();
     this.profile = profile;
     this.noise2D = createSeededNoise2D(profile.seed);
     this.currentChunkX = Number.NaN;
@@ -121,13 +116,6 @@ export class ChunkStreamer {
     let wallTrapJustWarned = false;
     let wallTrapJustPopped = false;
 
-    // Uniquement les murs/piliers/pièges (jamais les objets dynamiques eux-mêmes, voir
-    // `collectStaticWallSegments`) : sinon un objet se retrouverait dans sa propre liste
-    // de collision (distance ~0 → écarté d'un coup plein rayon par `resolveWallCollisions`,
-    // chaque frame — l'objet est alors "éjecté" à grande vitesse au lieu de simplement
-    // glisser). Les objets ne se bousculent pas entre eux, seulement contre le décor fixe.
-    this.collectStaticWallSegments(playerPosition, this.physicsWallScratch);
-
     for (const chunk of this.loaded.values()) {
       for (const trap of chunk.glitchTraps) {
         const result = trap.update(playerPosition, elapsedSeconds, deltaSeconds);
@@ -140,113 +128,11 @@ export class ChunkStreamer {
         wallTrapJustWarned = wallTrapJustWarned || result.justWarned;
         wallTrapJustPopped = wallTrapJustPopped || result.justPopped;
       }
-      for (const collectible of chunk.collectibles) collectible.update(deltaSeconds, playerPosition, this.physicsWallScratch);
-      for (const entry of chunk.propPhysics) {
-        if (entry.body.isSettled) {
-          const dx = entry.object.position.x - playerPosition.x;
-          const dz = entry.object.position.z - playerPosition.z;
-          if (Math.hypot(dx, dz) < PROP_NUDGE_RADIUS) entry.body.nudgeFrom(entry.object, playerPosition, PROP_NUDGE_STRENGTH);
-        }
-        entry.body.update(entry.object, deltaSeconds, this.physicsWallScratch);
-      }
     }
 
     corruptionDelta += this.updateDynamicMaze(camera, deltaSeconds);
 
     return { corruptionDelta, glitchTrapJustTriggered, wallTrapJustWarned, wallTrapJustPopped };
-  }
-
-  /** Murs + piliers + murs-pièges actifs uniquement (décor fixe) : c'est la liste contre
-   * laquelle les objets dynamiques (mobilier, collection) résolvent leur propre physique
-   * (voir `update`). Ne doit JAMAIS inclure d'objet dynamique, sinon un objet se
-   * retrouverait dans sa propre liste de collision. */
-  private collectStaticWallSegments(playerPosition: THREE.Vector3, target: WallSegment[]): void {
-    target.length = 0;
-    const chunkX = Math.floor(playerPosition.x / CHUNK_SIZE);
-    const chunkZ = Math.floor(playerPosition.z / CHUNK_SIZE);
-
-    for (let dx = -1; dx <= 1; dx++) {
-      for (let dz = -1; dz <= 1; dz++) {
-        const chunk = this.loaded.get(chunkKey(chunkX + dx, chunkZ + dz));
-        if (!chunk) continue;
-        for (const segment of chunk.layout.wallSegments) target.push(segment);
-        for (const segment of chunk.layout.pillarObstacles) target.push(segment);
-        for (const trap of chunk.wallTraps) {
-          const segment = trap.getActiveSegment();
-          if (segment) target.push(segment);
-        }
-      }
-    }
-  }
-
-  /**
-   * Remplit `target` avec les obstacles pour le *joueur* : décor fixe (voir
-   * `collectStaticWallSegments`) + mobilier + objets de collection, dérivés de leur
-   * position *actuelle* (pas d'une boîte figée à la génération) : une fois bousculés par
-   * la physique légère (`physics.ts`), leur collision doit suivre leur position réelle.
-   * Un objet en main (`isGrabbable()` faux le temps de la saisie) ne bloque pas le joueur.
-   * Réservé au joueur : ne jamais passer cette liste à la résolution physique d'un objet
-   * dynamique lui-même (voir le commentaire dans `update`).
-   */
-  collectNearbyWallSegments(playerPosition: THREE.Vector3, target: WallSegment[]): void {
-    this.collectStaticWallSegments(playerPosition, target);
-    const chunkX = Math.floor(playerPosition.x / CHUNK_SIZE);
-    const chunkZ = Math.floor(playerPosition.z / CHUNK_SIZE);
-
-    for (let dx = -1; dx <= 1; dx++) {
-      for (let dz = -1; dz <= 1; dz++) {
-        const chunk = this.loaded.get(chunkKey(chunkX + dx, chunkZ + dz));
-        if (!chunk) continue;
-        for (const entry of chunk.propPhysics) {
-          target.push(squareSegment(entry.object.position.x, entry.object.position.z, PROP_PHYSICS_RADIUS));
-        }
-        for (const collectible of chunk.collectibles) {
-          if (!collectible.isGrabbable()) continue;
-          target.push(squareSegment(collectible.group.position.x, collectible.group.position.z, COLLECTIBLE_PHYSICS_RADIUS));
-        }
-      }
-    }
-  }
-
-  /**
-   * Cherche l'objet de collection ramassable le plus proche (distance XZ) à portée de
-   * `worldPosition` — appelé au `squeezestart` d'un contrôleur XR. Ne fait que le
-   * retourner (voir `CollectibleInstance.beginHold`) : c'est l'appelant qui décide,
-   * au relâchement, entre ramassage définitif et simple dépose (manipulation en main
-   * avant/après ramassage, voir `main.ts`).
-   */
-  tryHoldCollectible(worldPosition: THREE.Vector3, maxDistance: number): CollectibleInstance | null {
-    let best: CollectibleInstance | null = null;
-    let bestDistanceSq = maxDistance * maxDistance;
-
-    for (const chunk of this.loaded.values()) {
-      for (const collectible of chunk.collectibles) {
-        if (!collectible.isGrabbable()) continue;
-        const dx = worldPosition.x - collectible.group.position.x;
-        const dz = worldPosition.z - collectible.group.position.z;
-        const distanceSq = dx * dx + dz * dz;
-        if (distanceSq < bestDistanceSq) {
-          bestDistanceSq = distanceSq;
-          best = collectible;
-        }
-      }
-    }
-
-    return best;
-  }
-
-  /**
-   * Après une dépose (`CollectibleInstance.endHold` + `dropWithPhysics`) : réinscrit
-   * l'instance dans le chunk qui couvre sa position d'atterrissage, pour qu'elle
-   * continue à être mise à jour (chute/stabilisation) et reste trouvable/ramassable.
-   * Silencieux si ce chunk n'est plus chargé (le joueur a marché très loin en la tenant).
-   */
-  adoptDroppedCollectible(collectible: CollectibleInstance): void {
-    const chunkX = Math.floor(collectible.group.position.x / CHUNK_SIZE);
-    const chunkZ = Math.floor(collectible.group.position.z / CHUNK_SIZE);
-    const chunk = this.loaded.get(chunkKey(chunkX, chunkZ));
-    if (!chunk || chunk.collectibles.includes(collectible)) return;
-    chunk.collectibles.push(collectible);
   }
 
   private streamAround(chunkX: number, chunkZ: number): void {
@@ -271,8 +157,7 @@ export class ChunkStreamer {
     if (this.regenTimer > 0) return 0;
 
     // En session XR, les matrices caméra ne sont resynchronisées que dans renderer.render() —
-    // appelé après cette mise à jour. Si elles ne sont pas encore prêtes (première frame),
-    // on retente au prochain intervalle plutôt que de planter la boucle de rendu.
+    // si elles ne sont pas encore prêtes (première frame), on retente plus tard.
     if (!camera.projectionMatrix || !camera.matrixWorldInverse) return 0;
 
     this.regenTimer = randomRegenInterval();
@@ -312,6 +197,10 @@ export class ChunkStreamer {
     const group = buildChunkGroup(layout, originX, originZ, CHUNK_SIZE);
     this.scene.add(group);
 
+    const staticBody = this.physics.world.createRigidBody(RAPIER.RigidBodyDesc.fixed());
+    for (const segment of layout.wallSegments) this.addBoxCollider(staticBody, segment);
+    for (const segment of layout.pillarObstacles) this.addBoxCollider(staticBody, segment);
+
     const glitchTraps = layout.glitchTrapPositions.map((position) => {
       const trap = new GlitchTrap(position.x, position.z, this.audioListener, layout.wallSegments);
       this.scene.add(trap.group);
@@ -320,45 +209,55 @@ export class ChunkStreamer {
     });
 
     const wallTraps = layout.wallTrapCandidates.map((segment) => {
-      const trap = new WallTrap(segment, this.audioListener);
+      const trap = new WallTrap(segment, this.audioListener, this.physics);
       this.scene.add(trap.group);
       return trap;
     });
 
-    const bounds = new THREE.Box3(
-      new THREE.Vector3(originX, 0, originZ),
-      new THREE.Vector3(originX + CHUNK_SIZE, WALL_HEIGHT, originZ + CHUNK_SIZE),
-    );
+    const bounds = new THREE.Box3(new THREE.Vector3(originX, 0, originZ), new THREE.Vector3(originX + CHUNK_SIZE, WALL_HEIGHT, originZ + CHUNK_SIZE));
 
-    const propsGroup = new THREE.Group();
-    propsGroup.name = `chunk-props-${chunkX}-${chunkZ}`;
-    this.scene.add(propsGroup);
-
-    const loadedChunk: LoadedChunk = { group, propsGroup, propPhysics: [], layout, glitchTraps, wallTraps, collectibles: [], epoch, bounds };
+    const loadedChunk: LoadedChunk = { group, staticBody, layout, glitchTraps, wallTraps, epoch, bounds };
     this.loaded.set(key, loadedChunk);
 
     for (const placement of layout.propPlacements) {
       spawnProp(placement.kind)
-        .then((prop) => {
+        .then(({ model, template }) => {
           // Le chunk a pu être déchargé/régénéré pendant le chargement asynchrone du modèle.
           if (this.loaded.get(key) !== loadedChunk) return;
-          prop.position.set(placement.x, 0, placement.z);
-          prop.rotation.y = placement.rotationY;
-          propsGroup.add(prop);
-          loadedChunk.propPhysics.push({ object: prop, body: new PhysicsBody(0, PROP_PHYSICS_RADIUS) });
+          this.grabbables.createProp(placement.kind, model, template, placement.x, placement.z, placement.rotationY);
         })
         .catch(() => {});
     }
 
+    const depth = this.depth;
     for (const placement of layout.collectiblePlacements) {
-      spawnCollectible(placement, this.audioListener)
-        .then((collectible) => {
+      if (this.isItemStored(placement.id) || this.grabbables.isItemAlive(placement.id)) continue;
+      spawnCollectibleModel(placement.kind)
+        .then(({ model, template }) => {
           if (this.loaded.get(key) !== loadedChunk) return;
-          this.scene.add(collectible.group);
-          loadedChunk.collectibles.push(collectible);
+          if (this.isItemStored(placement.id) || this.grabbables.isItemAlive(placement.id)) return;
+          this.grabbables.createCollectible(
+            toCollectionEntry(placement, depth),
+            model,
+            template,
+            new THREE.Vector3(placement.x, COLLECTIBLE_SPAWN_HEIGHT, placement.z),
+            new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), placement.rotationY),
+          );
         })
         .catch(() => {});
     }
+  }
+
+  private addBoxCollider(body: RAPIER.RigidBody, segment: WallSegment): void {
+    const halfX = (segment.maxX - segment.minX) / 2;
+    const halfZ = (segment.maxZ - segment.minZ) / 2;
+    this.physics.world.createCollider(
+      RAPIER.ColliderDesc.cuboid(halfX, WALL_HEIGHT / 2, halfZ)
+        .setTranslation(segment.minX + halfX, WALL_HEIGHT / 2, segment.minZ + halfZ)
+        .setFriction(0.6)
+        .setCollisionGroups(CollisionGroups.static),
+      body,
+    );
   }
 
   private unloadChunk(key: string): void {
@@ -366,9 +265,11 @@ export class ChunkStreamer {
     if (!chunk) return;
     this.scene.remove(chunk.group);
     disposeGroup(chunk.group);
-    // Le mobilier partage géométrie/matériaux entre instances (voir propLoader.ts) :
-    // on le retire de la scène sans rien disposer.
-    this.scene.remove(chunk.propsGroup);
+    // Les objets suivent leur position réelle, pas leur chunk d'origine : un meuble
+    // transporté ailleurs survit au déchargement de son chunk de départ.
+    const { min, max } = chunk.bounds;
+    this.grabbables.removeInArea(min.x, max.x, min.z, max.z);
+    this.physics.world.removeRigidBody(chunk.staticBody);
     for (const trap of chunk.glitchTraps) {
       this.scene.remove(trap.group);
       trap.dispose();
@@ -376,10 +277,6 @@ export class ChunkStreamer {
     for (const trap of chunk.wallTraps) {
       this.scene.remove(trap.group);
       trap.dispose();
-    }
-    for (const collectible of chunk.collectibles) {
-      this.scene.remove(collectible.group);
-      collectible.dispose();
     }
     this.loaded.delete(key);
   }
@@ -391,11 +288,6 @@ function randomRegenInterval(): number {
 
 function chunkKey(chunkX: number, chunkZ: number): string {
   return `${chunkX},${chunkZ}`;
-}
-
-/** Petite boîte englobante carrée autour d'une position, pour réutiliser `resolveWallCollisions` (cercle/AABB) avec des objets ponctuels (mobilier, collection). */
-function squareSegment(x: number, z: number, radius: number): WallSegment {
-  return { minX: x - radius, maxX: x + radius, minZ: z - radius, maxZ: z + radius };
 }
 
 function parseChunkKey(key: string): [number, number] {

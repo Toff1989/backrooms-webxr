@@ -19,6 +19,9 @@ export const SPAWN_CLEARANCE_CELLS = 2;
 /** Rayon (en cellules) autour de la sortie toujours dégagé. */
 export const EXIT_CLEARANCE_CELLS = 1;
 
-/** Vitesse de déplacement fluide (m/s, voir `player/locomotion.ts`) — partagée avec la
- * validation anti-triche serveur (étape 7) : borne physique de vitesse max du joueur. */
+/** Vitesse de marche au stick (m/s, voir `player/playerController.ts`). */
 export const PLAYER_MOVE_SPEED = 2.2;
+
+/** Vitesse de sprint (clic du stick gauche) : c'est la vitesse max du joueur, utilisée par la
+ * validation anti-triche serveur (étape 7) comme borne physique de temps de passage. */
+export const PLAYER_SPRINT_SPEED = 3.4;

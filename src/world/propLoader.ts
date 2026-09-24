@@ -47,8 +47,8 @@ function loadTemplate(kind: PropKind): Promise<THREE.Object3D> {
   return cached;
 }
 
-/** Instancie un meuble à sa propre position/rotation ; géométrie et matériaux restent partagés. */
-export async function spawnProp(kind: PropKind): Promise<THREE.Object3D> {
+/** Instancie un meuble ; géométrie et matériaux restent partagés avec le template (retourné pour la forme physique). */
+export async function spawnProp(kind: PropKind): Promise<{ model: THREE.Object3D; template: THREE.Object3D }> {
   const template = await loadTemplate(kind);
-  return template.clone(true);
+  return { model: template.clone(true), template };
 }

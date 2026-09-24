@@ -138,8 +138,8 @@ function loadTemplate(kind: CollectibleKind): Promise<THREE.Object3D> {
   return cached;
 }
 
-/** Instancie un objet de collection ; géométrie et matériaux restent partagés avec le template. */
-export async function spawnCollectibleModel(kind: CollectibleKind): Promise<THREE.Object3D> {
+/** Instancie un objet de collection ; géométrie et matériaux restent partagés avec le template (retourné pour la forme physique). */
+export async function spawnCollectibleModel(kind: CollectibleKind): Promise<{ model: THREE.Object3D; template: THREE.Object3D }> {
   const template = await loadTemplate(kind);
-  return template.clone(true);
+  return { model: template.clone(true), template };
 }

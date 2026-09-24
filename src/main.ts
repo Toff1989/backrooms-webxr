@@ -1,20 +1,24 @@
 import * as THREE from "three";
 import { VRButton } from "three/addons/webxr/VRButton.js";
 import { AmbientHum } from "./assets/audio/ambientHum";
-import { triggerHapticPulse } from "./player/haptics";
+import { PhysicsWorld } from "./physics/physicsWorld";
 import { CamcorderHud } from "./player/camcorderHud";
 import { ComfortVignette } from "./player/comfortVignette";
-import { ControllerRig } from "./player/controllerRig";
 import { EndRunScreen } from "./player/endRunScreen";
-import { GrabInteraction } from "./player/grabInteraction";
-import { Locomotion } from "./player/locomotion";
-import { StopRecControl } from "./player/stopRecControl";
+import { Flashlight } from "./player/flashlight";
+import { GrabSystem } from "./player/grabSystem";
+import { Hand } from "./player/hand";
+import { triggerHapticPulse } from "./player/haptics";
+import { InventoryMenu } from "./player/inventoryMenu";
+import { PlayerController } from "./player/playerController";
+import { Sfx } from "./player/sfx";
 import { VhsOverlay } from "./player/vhsOverlay";
-import { WristMenu } from "./player/wristMenu";
-import type { WallSegment } from "./shared/chunkLayout";
-import { CollectionStore, toCollectionEntry } from "./world/collection";
-import { PLAYER_RADIUS, resolveWallCollisions } from "./world/collision";
+import { XrInput } from "./player/xrInput";
+import { UiPointer } from "./ui/uiPointer";
+import { Atmosphere } from "./world/atmosphere";
+import { CollectionStore } from "./world/collection";
 import { corruption } from "./world/corruption";
+import { GrabbableRegistry } from "./world/grabbable";
 import { LevelManager, SPAWN_LOCAL_POSITION } from "./world/levelManager";
 import { endRun, reportLevel, startRun, type RunSessionInfo } from "./world/runSession";
 import { updateVhsTime } from "./world/vhsMaterial";
@@ -25,11 +29,13 @@ if (!appRoot) throw new Error("#app introuvable dans index.html");
 // Teinte proche du noir, légèrement chaude (cohérente avec la teinte jaunâtre délavée du look VHS).
 const BACKGROUND_COLOR = 0x0a0805;
 
+const physics = await PhysicsWorld.create();
+
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(BACKGROUND_COLOR);
 scene.fog = new THREE.FogExp2(BACKGROUND_COLOR, 0.035);
 
-const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.05, 60);
+const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.03, 60);
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -39,98 +45,109 @@ renderer.outputColorSpace = THREE.SRGBColorSpace;
 appRoot.appendChild(renderer.domElement);
 document.body.appendChild(VRButton.createButton(renderer));
 
-const playerRig = new THREE.Group();
-playerRig.name = "player-rig";
-playerRig.position.copy(SPAWN_LOCAL_POSITION);
-playerRig.add(camera);
-scene.add(playerRig);
+const player = new PlayerController(renderer, camera, physics);
+scene.add(player.rig);
 
-scene.add(new THREE.HemisphereLight(0xfff3cf, 0x171512, 0.9));
-scene.add(new THREE.AmbientLight(0xfff0c0, 0.25));
+const hemisphere = new THREE.HemisphereLight(0xfff3cf, 0x171512, 0.9);
+const ambient = new THREE.AmbientLight(0xfff0c0, 0.25);
+scene.add(hemisphere, ambient);
 
 const audioListener = new THREE.AudioListener();
 camera.add(audioListener);
+
+const collectionStore = new CollectionStore();
+const grabbables = new GrabbableRegistry(scene, physics);
 
 /**
  * Étape 7 : la vraie seed de run vient du serveur (`POST /run/start`), mais le premier
  * rendu ne doit jamais attendre l'aller-retour réseau — on démarre sur une seed locale
  * temporaire, remplacée dès que le serveur répond (voir `LevelManager.restartRun`). Si
- * le serveur est injoignable, le jeu reste jouable indéfiniment sur cette seed locale
- * (aucune fonctionnalité de jeu ne dépend du classement).
+ * le serveur est injoignable, le jeu reste jouable sur une seed locale.
  */
 const LOCAL_FALLBACK_SEED = "local-offline";
-const levelManager = new LevelManager(scene, audioListener, LOCAL_FALLBACK_SEED);
+const levelManager = new LevelManager(scene, audioListener, physics, grabbables, (id) => collectionStore.has(id), LOCAL_FALLBACK_SEED);
+player.teleport(SPAWN_LOCAL_POSITION);
+
+const input = new XrInput(renderer, player.body);
+const hands = [new Hand(input.left, physics), new Hand(input.right, physics)];
+const sfx = new Sfx(audioListener);
+
+const comfortVignette = new ComfortVignette(camera);
+const vhsOverlay = new VhsOverlay(camera);
+const hud = new CamcorderHud(camera);
+const ambientHum = new AmbientHum(audioListener);
+const flashlight = new Flashlight(camera);
+const atmosphere = new Atmosphere(scene, hemisphere, ambient);
 
 let currentSession: RunSessionInfo | null = null;
 
-const locomotion = new Locomotion(renderer, camera, playerRig);
-const comfortVignette = new ComfortVignette(camera);
-const vhsOverlay = new VhsOverlay(camera);
-const camcorderHud = new CamcorderHud(camera);
-const ambientHum = new AmbientHum(audioListener);
+// Déclarée avant les menus : leurs actions y font référence (appelées plus tard, au clic).
+let grabSystem: GrabSystem;
 
-const controllerRig = new ControllerRig(renderer, playerRig);
-const collectionStore = new CollectionStore();
-const wristMenu = new WristMenu(renderer, controllerRig, collectionStore);
-const GRAB_RADIUS = 0.4;
-// Ramassage confirmé seulement si l'objet est relâché près du corps (le "sac par-dessus
-// l'épaule" de la fiche) ; relâché plus loin, il tombe simplement (physique légère).
-const COLLECT_CONFIRM_RADIUS = 0.5;
-const releasePosition = new THREE.Vector3();
-new GrabInteraction(renderer, controllerRig, {
-  onGrabAttempt: (controller, worldPosition) => {
-    const instance = levelManager.tryHoldCollectible(worldPosition, GRAB_RADIUS);
-    if (instance) instance.beginHold(controller);
-    return instance;
+const inventoryMenu = new InventoryMenu(
+  collectionStore,
+  camera,
+  player.body,
+  {
+    takeOut: (hand, entry) => {
+      collectionStore.remove(entry.id);
+      grabSystem.takeIntoHand(hand, entry, () => collectionStore.add(entry));
+    },
+    recalibrateHeight: () => player.recalibrate(),
+    stopRec: () => endRunScreen.show(levelManager.depth),
   },
-  onRelease: (_controller, instance) => {
-    releasePosition.copy(instance.endHold(scene));
-    const dx = releasePosition.x - playerRig.position.x;
-    const dz = releasePosition.z - playerRig.position.z;
-    if (Math.hypot(dx, dz) < COLLECT_CONFIRM_RADIUS) {
-      collectionStore.add(toCollectionEntry(instance.placement, levelManager.depth));
-      wristMenu.notifyCollectionChanged();
-      instance.beginCollect();
-    } else {
-      instance.dropWithPhysics();
-      levelManager.adoptDroppedCollectible(instance);
-    }
-  },
-});
+  sfx,
+);
 
 const endRunScreen = new EndRunScreen(
-  renderer,
   camera,
+  player.body,
+  sfx,
   (pseudo) => {
     if (!currentSession) return Promise.reject(new Error("Pas de session de run active"));
     return endRun(currentSession, pseudo);
   },
-  () => {
-    stopRecControl.enabled = true;
-    beginNewRun();
-  },
+  () => beginNewRun(true),
 );
 
-const stopRecControl = new StopRecControl(renderer, () => {
-  stopRecControl.enabled = false;
-  endRunScreen.show(levelManager.depth);
+const pointer = new UiPointer(hands, scene, [inventoryMenu, endRunScreen]);
+
+grabSystem = new GrabSystem(physics, grabbables, hands, sfx, {
+  isOverInventory: (hand) => inventoryMenu.visible && (inventoryMenu.containsPoint(hand.palm) || pointer.frame(hand).target === inventoryMenu),
+  store: (item) => collectionStore.add(item),
 });
 
-/** Démarre une run côté serveur (seed + token) ; jouable en local si le serveur est injoignable (voir `runSession.ts`). */
-function beginNewRun(): void {
+/** Place le joueur au spawn du level courant (changement de level, nouvelle run). */
+function respawn(): void {
+  player.teleport(SPAWN_LOCAL_POSITION);
+  syncHands(timer.getElapsed());
+  grabSystem.onTeleport();
+  atmosphere.setDepth(levelManager.depth);
+  atmosphere.triggerFlicker(0.8);
+}
+
+/**
+ * Démarre une run côté serveur (seed + token). Serveur injoignable : on reste jouable en
+ * local — et sur "nouvelle run", on repart quand même sur une seed locale fraîche.
+ */
+function beginNewRun(restartLocallyOnFailure: boolean): void {
   startRun()
     .then((session) => {
       currentSession = session;
-      const spawnPosition = levelManager.restartRun(session.seed);
-      playerRig.position.copy(spawnPosition);
-      camcorderHud.depth = levelManager.depth;
+      levelManager.restartRun(session.seed);
+      hud.resetClock();
+      respawn();
     })
     .catch(() => {
       currentSession = null;
+      if (!restartLocallyOnFailure) return;
+      levelManager.restartRun(`local-${Date.now()}`);
+      hud.resetClock();
+      respawn();
     });
 }
 
-beginNewRun();
+beginNewRun(false);
 
 renderer.xr.addEventListener("sessionstart", () => {
   ambientHum.start();
@@ -148,8 +165,12 @@ window.addEventListener("resize", () => {
   renderer.setSize(window.innerWidth, window.innerHeight);
 });
 
-const nearbyWallSegments: WallSegment[] = [];
 const timer = new THREE.Timer();
+
+function syncHands(time: number): void {
+  player.rig.updateMatrixWorld(true);
+  for (const hand of hands) hand.update(time);
+}
 
 const GLITCH_HAPTIC_INTENSITY = 0.6;
 const GLITCH_HAPTIC_DURATION_MS = 120;
@@ -163,31 +184,64 @@ renderer.setAnimationLoop((timestamp) => {
   const deltaSeconds = Math.min(timer.getDelta(), 0.1);
   const elapsedSeconds = timer.getElapsed();
 
-  const movementIntensity = locomotion.update(deltaSeconds);
-  const levelUpdate = levelManager.update(playerRig.position, camera, elapsedSeconds, deltaSeconds);
-  levelManager.collectNearbyWallSegments(playerRig.position, nearbyWallSegments);
-  resolveWallCollisions(playerRig.position, PLAYER_RADIUS, nearbyWallSegments);
+  // Pose de tête de cette frame (sinon celle de la frame précédente, recopiée au rendu).
+  if (renderer.xr.isPresenting) renderer.xr.updateCamera(camera);
+  input.update();
 
+  // Y : inventaire, B : lampe (contrôles type Saints & Sinners, voir README).
+  if (input.left.secondary.justPressed) inventoryMenu.toggle();
+  if (input.right.secondary.justPressed) {
+    flashlight.toggle();
+    sfx.play("click", 0.3);
+  }
+
+  player.update(deltaSeconds, input);
+  syncHands(elapsedSeconds);
+  if (player.teleported) grabSystem.onTeleport();
+
+  pointer.update();
+  inventoryMenu.update(deltaSeconds, hands, (hand) => pointer.frame(hand).target === inventoryMenu);
+  endRunScreen.update(hands);
+  grabSystem.update(elapsedSeconds, pointer);
+
+  physics.step(deltaSeconds, (stepSeconds) => {
+    for (const hand of hands) hand.applyKinematicTarget();
+    grabSystem.step(stepSeconds);
+  });
+  grabbables.sync();
+
+  const levelUpdate = levelManager.update(player.headWorld, camera, elapsedSeconds, deltaSeconds);
   if (levelUpdate.corruptionDelta > 0) corruption.add(levelUpdate.corruptionDelta);
-  if (levelUpdate.glitchTrapJustTriggered) triggerHapticPulse(renderer, GLITCH_HAPTIC_INTENSITY, GLITCH_HAPTIC_DURATION_MS);
+  if (levelUpdate.glitchTrapJustTriggered) {
+    triggerHapticPulse(renderer, GLITCH_HAPTIC_INTENSITY, GLITCH_HAPTIC_DURATION_MS);
+    atmosphere.triggerFlicker(0.5);
+  }
   if (levelUpdate.wallTrapJustWarned) triggerHapticPulse(renderer, WALL_TRAP_WARNING_HAPTIC_INTENSITY, WALL_TRAP_WARNING_HAPTIC_DURATION_MS);
-  if (levelUpdate.wallTrapJustPopped) triggerHapticPulse(renderer, WALL_TRAP_POP_HAPTIC_INTENSITY, WALL_TRAP_POP_HAPTIC_DURATION_MS);
+  if (levelUpdate.wallTrapJustPopped) {
+    triggerHapticPulse(renderer, WALL_TRAP_POP_HAPTIC_INTENSITY, WALL_TRAP_POP_HAPTIC_DURATION_MS);
+    atmosphere.triggerFlicker(0.4);
+  }
 
-  if (levelManager.hasReachedExit(playerRig.position)) {
-    const spawnPosition = levelManager.descend();
-    playerRig.position.copy(spawnPosition);
-    camcorderHud.depth = levelManager.depth;
+  if (levelManager.hasReachedExit(player.headWorld)) {
+    levelManager.descend();
+    respawn();
     corruption.add(1);
     if (currentSession) reportLevel(currentSession, levelManager.depth);
   }
   corruption.update(deltaSeconds);
 
-  comfortVignette.update(movementIntensity, deltaSeconds);
+  hud.status = {
+    depth: levelManager.depth,
+    crouching: player.crouching,
+    sprinting: player.sprinting,
+    flashlight: flashlight.on,
+    items: collectionStore.count,
+  };
+  comfortVignette.update(player.movementIntensity, deltaSeconds);
   vhsOverlay.update(elapsedSeconds, corruption.value);
-  camcorderHud.update(deltaSeconds);
-  wristMenu.update(!endRunScreen.isVisible);
-  stopRecControl.update(deltaSeconds);
-  endRunScreen.update();
+  hud.update(deltaSeconds);
+  flashlight.update(deltaSeconds, corruption.value);
+  atmosphere.update(deltaSeconds, corruption.value);
   updateVhsTime(elapsedSeconds);
   renderer.render(scene, camera);
 });

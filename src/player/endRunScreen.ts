@@ -1,245 +1,188 @@
 import * as THREE from "three";
 import { generatePseudoSuggestion, PSEUDO_ADJECTIVE_COUNT, PSEUDO_NOUN_COUNT } from "../shared/pseudoGenerator";
+import { drawButton, drawPanelBackground, inRect, UiPanel, wrapText, type PressButton, type Rect } from "../ui/uiPanel";
 import type { LeaderboardEntry } from "../world/runSession";
+import type { Hand } from "./hand";
+import type { Sfx } from "./sfx";
 
-const CANVAS_WIDTH = 512;
-const CANVAS_HEIGHT = 576;
-const PANEL_WIDTH = 0.5;
-const PANEL_HEIGHT = (CANVAS_HEIGHT / CANVAS_WIDTH) * PANEL_WIDTH;
-const PANEL_POSITION = new THREE.Vector3(0, 0, -0.9);
+const WIDTH = 0.56;
+const HEIGHT = 0.38;
+const PX_PER_M = 1830;
+const DISTANCE = 0.75;
+const LEADERBOARD_ROWS = 7;
 
-/** Index du bouton de clic du thumbstick (voir `wristMenu.ts`). */
-const STICK_CLICK_BUTTON_INDEX = 2;
-const TRIGGER_BUTTON_INDEX = 0;
-const LEADERBOARD_ROWS = 8;
+type Phase = "review" | "submitting" | "result" | "error";
+type ButtonId = "adjective" | "noun" | "submit" | "restart";
 
-type Phase = "hidden" | "review" | "submitting" | "result" | "error";
+const BUTTONS: Record<ButtonId, Rect> = {
+  adjective: { x: 60, y: 330, w: 420, h: 70 },
+  noun: { x: 545, y: 330, w: 420, h: 70 },
+  submit: { x: 212, y: 440, w: 600, h: 84 },
+  restart: { x: 262, y: 580, w: 500, h: 76 },
+};
 
 /**
- * Écran de fin de run (fiche projet étape 7 : "Fin de run : saisie du pseudo → envoi du
- * score au classement"). Pas de clavier virtuel : le pseudo est choisi parmi des
- * suggestions générées, qu'on fait défiler (clic thumbstick gauche/droit) puis qu'on
- * valide (gâchette droite) — cohérent avec l'absence de raycaster UI dans ce projet
- * (voir `wristMenu.ts`, même limitation). Panneau fixé à la tête, visible seulement une
- * fois affiché (`show`), pour ne jamais gêner l'exploration normale.
+ * Écran de fin de run (fiche projet étape 7 : "saisie du pseudo → envoi du score au
+ * classement"). Pas de clavier virtuel : le pseudo se compose en faisant défiler un
+ * adjectif et un nom au pointeur (gâchette), puis on l'envoie ; A valide aussi.
  */
-export class EndRunScreen {
-  private readonly ctx: CanvasRenderingContext2D;
-  private readonly texture: THREE.CanvasTexture;
-  private readonly mesh: THREE.Mesh;
-
-  private phase: Phase = "hidden";
+export class EndRunScreen extends UiPanel {
+  private phase: Phase = "review";
   private depthReached = 0;
   private adjectiveIndex = 0;
   private nounIndex = 0;
   private suffix = 0;
   private leaderboard: LeaderboardEntry[] = [];
   private errorMessage = "";
-
-  private leftStickButtonReady = true;
-  private rightStickButtonReady = true;
-  private triggerReady = true;
+  private readonly hovered = new Map<Hand, ButtonId | null>();
 
   constructor(
-    private readonly renderer: THREE.WebGLRenderer,
-    camera: THREE.Camera,
+    private readonly camera: THREE.Camera,
+    parent: THREE.Object3D,
+    private readonly sfx: Sfx,
     private readonly onConfirmPseudo: (pseudo: string) => Promise<{ leaderboard: LeaderboardEntry[] }>,
     private readonly onStartNewRun: () => void,
   ) {
-    const canvas = document.createElement("canvas");
-    canvas.width = CANVAS_WIDTH;
-    canvas.height = CANVAS_HEIGHT;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) throw new Error("Contexte 2D indisponible pour l'écran de fin de run");
-    this.ctx = ctx;
-
-    this.texture = new THREE.CanvasTexture(canvas);
-    this.texture.colorSpace = THREE.SRGBColorSpace;
-
-    const material = new THREE.MeshBasicMaterial({ map: this.texture, transparent: true, depthTest: false, depthWrite: false });
-    this.mesh = new THREE.Mesh(new THREE.PlaneGeometry(PANEL_WIDTH, PANEL_HEIGHT), material);
-    this.mesh.position.copy(PANEL_POSITION);
-    this.mesh.renderOrder = 999;
-    this.mesh.frustumCulled = false;
-    this.mesh.visible = false;
-    camera.add(this.mesh);
+    super(WIDTH, HEIGHT, PX_PER_M);
+    this.group.name = "end-run-screen";
+    parent.add(this.group);
   }
 
-  get isVisible(): boolean {
-    return this.phase !== "hidden";
-  }
-
-  /** "STOP REC" confirmé (voir `StopRecControl`) : ouvre l'écran sur une suggestion de pseudo. */
   show(depthReached: number): void {
     this.depthReached = depthReached;
     this.adjectiveIndex = Math.floor(Math.random() * PSEUDO_ADJECTIVE_COUNT);
     this.nounIndex = Math.floor(Math.random() * PSEUDO_NOUN_COUNT);
     this.suffix = Math.floor(Math.random() * 10000);
     this.phase = "review";
-    this.mesh.visible = true;
-    this.redraw();
+    const head = this.camera.position;
+    const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(this.camera.quaternion);
+    forward.y = 0;
+    if (forward.lengthSq() < 1e-6) forward.set(0, 0, -1);
+    forward.normalize();
+    this.group.position.set(head.x + forward.x * DISTANCE, head.y - 0.05, head.z + forward.z * DISTANCE);
+    this.group.rotation.set(0, Math.atan2(-forward.x, -forward.z), 0);
+    this.group.visible = true;
+    this.invalidate();
   }
 
-  update(): void {
-    if (this.phase === "hidden") return;
-
-    const session = this.renderer.xr.getSession();
-    if (!session) return;
-
-    let leftStickPressed = false;
-    let rightStickPressed = false;
-    let triggerPressed = false;
-    for (const source of session.inputSources) {
-      const buttons = source.gamepad?.buttons;
-      if (!buttons) continue;
-      if (source.handedness === "left") leftStickPressed = buttons[STICK_CLICK_BUTTON_INDEX]?.pressed ?? false;
-      else if (source.handedness === "right") {
-        rightStickPressed = buttons[STICK_CLICK_BUTTON_INDEX]?.pressed ?? false;
-        triggerPressed = buttons[TRIGGER_BUTTON_INDEX]?.pressed ?? false;
-      }
-    }
-
-    if (this.phase === "review") {
-      if (leftStickPressed && this.leftStickButtonReady) {
-        this.leftStickButtonReady = false;
-        this.adjectiveIndex += 1;
-        this.redraw();
-      } else if (!leftStickPressed) this.leftStickButtonReady = true;
-
-      if (rightStickPressed && this.rightStickButtonReady) {
-        this.rightStickButtonReady = false;
-        this.nounIndex += 1;
-        this.redraw();
-      } else if (!rightStickPressed) this.rightStickButtonReady = true;
-
-      if (triggerPressed && this.triggerReady) {
-        this.triggerReady = false;
-        this.confirmPseudo();
-      } else if (!triggerPressed) this.triggerReady = true;
-      return;
-    }
-
-    if (this.phase === "result" || this.phase === "error") {
-      if (triggerPressed && this.triggerReady) {
-        this.triggerReady = false;
-        this.hide();
-        this.onStartNewRun();
-      } else if (!triggerPressed) this.triggerReady = true;
+  /** Raccourci : A (main droite) valide / relance. */
+  update(hands: Hand[]): void {
+    if (!this.visible) return;
+    for (const hand of hands) {
+      if (hand.input.handedness !== "right" || !hand.input.primary.justPressed) continue;
+      if (this.phase === "review") this.submit();
+      else if (this.phase === "result" || this.phase === "error") this.restart();
     }
   }
 
-  private hide(): void {
-    this.phase = "hidden";
-    this.mesh.visible = false;
+  onHover(hand: Hand, px: number | null, py: number | null): void {
+    const button = px === null || py === null ? null : this.buttonAt(px, py);
+    if (this.hovered.get(hand) === button) return;
+    if (button) hand.pulse(0.08, 10);
+    this.hovered.set(hand, button);
+    this.invalidate();
+  }
+
+  onPress(_hand: Hand, px: number, py: number, button: PressButton): boolean {
+    if (button !== "trigger") return true;
+    const id = this.buttonAt(px, py);
+    if (!id) return true;
+    this.sfx.play("click", 0.4);
+    if (id === "adjective") this.adjectiveIndex += 1;
+    else if (id === "noun") this.nounIndex += 1;
+    else if (id === "submit") this.submit();
+    else if (id === "restart") this.restart();
+    this.invalidate();
+    return true;
+  }
+
+  private buttonAt(px: number, py: number): ButtonId | null {
+    const visible: ButtonId[] = this.phase === "review" ? ["adjective", "noun", "submit"] : this.phase === "submitting" ? [] : ["restart"];
+    return visible.find((id) => inRect(BUTTONS[id], px, py)) ?? null;
   }
 
   private currentPseudo(): string {
     return generatePseudoSuggestion(this.adjectiveIndex, this.nounIndex, this.suffix);
   }
 
-  private confirmPseudo(): void {
+  private submit(): void {
+    if (this.phase !== "review") return;
     this.phase = "submitting";
-    this.redraw();
+    this.invalidate();
     this.onConfirmPseudo(this.currentPseudo())
       .then(({ leaderboard }) => {
         this.leaderboard = leaderboard;
         this.phase = "result";
-        this.redraw();
+        this.invalidate();
       })
       .catch(() => {
-        this.errorMessage = "Envoi impossible — score gardé en local uniquement.";
+        this.errorMessage = "Envoi impossible (serveur injoignable) — score non classé.";
         this.phase = "error";
-        this.redraw();
+        this.invalidate();
       });
   }
 
-  private redraw(): void {
-    const ctx = this.ctx;
-    ctx.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
-    ctx.fillStyle = "rgba(6, 5, 4, 0.92)";
-    ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
-    ctx.strokeStyle = "rgba(255, 242, 176, 0.3)";
-    ctx.lineWidth = 4;
-    ctx.strokeRect(2, 2, CANVAS_WIDTH - 4, CANVAS_HEIGHT - 4);
+  private restart(): void {
+    this.group.visible = false;
+    this.onStartNewRun();
+  }
 
-    ctx.textBaseline = "top";
-    ctx.fillStyle = "#f2f2f2";
-    ctx.font = "bold 30px monospace";
-    ctx.fillText("FIN DE L'ENREGISTREMENT", 24, 24);
+  protected draw(ctx: CanvasRenderingContext2D): void {
+    const width = this.canvas.width;
+    drawPanelBackground(ctx, width, this.canvas.height);
+    const hovered = new Set(this.hovered.values());
 
-    ctx.font = "20px monospace";
-    ctx.fillStyle = "#cfcfcf";
-    ctx.fillText(`Profondeur atteinte : ${this.depthReached}`, 24, 68);
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillStyle = "#ff6b5a";
+    ctx.font = "bold 40px monospace";
+    ctx.fillText("■ FIN DE L'ENREGISTREMENT", width / 2, 60);
+    ctx.fillStyle = "#f2e8cf";
+    ctx.font = "30px monospace";
+    ctx.fillText(`Profondeur atteinte : ${this.depthReached}`, width / 2, 116);
 
     if (this.phase === "review") {
-      ctx.font = "16px monospace";
-      ctx.fillStyle = "#8a8a8a";
-      ctx.fillText("Pseudo suggéré :", 24, 120);
-      ctx.font = "bold 26px monospace";
+      ctx.font = "24px monospace";
+      ctx.fillStyle = "#a79d86";
+      ctx.fillText("Votre pseudo pour le classement :", width / 2, 180);
+      ctx.font = "bold 40px monospace";
       ctx.fillStyle = "#ffe89a";
-      ctx.fillText(this.currentPseudo(), 24, 150);
-
-      ctx.font = "15px monospace";
-      ctx.fillStyle = "#8a8a8a";
-      ctx.fillText("Stick gauche (clic) : mot précédent    Stick droit (clic) : mot suivant", 24, 200);
-      ctx.fillText("Gâchette droite : valider et envoyer au classement", 24, 224);
+      ctx.fillText(this.currentPseudo(), width / 2, 250);
+      drawButton(ctx, BUTTONS.adjective, "↻ AUTRE ADJECTIF", { hovered: hovered.has("adjective") });
+      drawButton(ctx, BUTTONS.noun, "↻ AUTRE NOM", { hovered: hovered.has("noun") });
+      drawButton(ctx, BUTTONS.submit, "ENVOYER AU CLASSEMENT (A)", { hovered: hovered.has("submit"), accent: "#9fe39f" });
     } else if (this.phase === "submitting") {
-      ctx.font = "20px monospace";
-      ctx.fillStyle = "#cfcfcf";
-      ctx.fillText("Envoi au classement…", 24, 130);
+      ctx.font = "30px monospace";
+      ctx.fillStyle = "#cfc5ad";
+      ctx.fillText("Envoi au classement…", width / 2, 300);
     } else if (this.phase === "error") {
-      ctx.font = "18px monospace";
+      ctx.font = "26px monospace";
       ctx.fillStyle = "#e06a5a";
-      wrapText(ctx, this.errorMessage, 24, 130, CANVAS_WIDTH - 48, 24);
-      ctx.font = "15px monospace";
-      ctx.fillStyle = "#8a8a8a";
-      ctx.fillText("Gâchette droite : nouvelle run", 24, 190);
-    } else if (this.phase === "result") {
-      ctx.font = "bold 20px monospace";
-      ctx.fillStyle = "#7fe87f";
-      ctx.fillText(`Score envoyé : ${this.currentPseudo()}`, 24, 100);
-
-      ctx.font = "16px monospace";
-      ctx.fillStyle = "#a8a8a8";
-      ctx.fillText("CLASSEMENT", 24, 140);
-
-      let y = 168;
-      const rows = this.leaderboard.slice(0, LEADERBOARD_ROWS);
-      if (rows.length === 0) {
-        ctx.fillStyle = "#8a8a8a";
-        ctx.fillText("Aucune entrée pour l'instant.", 24, y);
-      }
-      rows.forEach((entry, index) => {
-        ctx.fillStyle = index === 0 ? "#ffe89a" : "#cfcfcf";
-        ctx.font = "16px monospace";
-        ctx.fillText(`${(index + 1).toString().padStart(2, "0")}. ${entry.pseudo}`, 24, y);
-        ctx.fillStyle = "#8a8a8a";
-        ctx.fillText(`Niv. ${entry.depth}`, CANVAS_WIDTH - 120, y);
-        y += 26;
-      });
-
-      ctx.font = "15px monospace";
-      ctx.fillStyle = "#8a8a8a";
-      ctx.fillText("Gâchette droite : nouvelle run", 24, CANVAS_HEIGHT - 32);
-    }
-
-    this.texture.needsUpdate = true;
-  }
-}
-
-function wrapText(ctx: CanvasRenderingContext2D, text: string, x: number, y: number, maxWidth: number, lineHeight: number): void {
-  const words = text.split(" ");
-  let line = "";
-  let cursorY = y;
-  for (const word of words) {
-    const testLine = line ? `${line} ${word}` : word;
-    if (ctx.measureText(testLine).width > maxWidth && line) {
-      ctx.fillText(line, x, cursorY);
-      line = word;
-      cursorY += lineHeight;
+      ctx.textAlign = "left";
+      wrapText(ctx, this.errorMessage, 80, 260, width - 160, 32, 3);
+      ctx.textAlign = "center";
+      drawButton(ctx, BUTTONS.restart, "NOUVELLE RUN (A)", { hovered: hovered.has("restart") });
     } else {
-      line = testLine;
+      ctx.font = "bold 26px monospace";
+      ctx.fillStyle = "#9fe39f";
+      ctx.fillText(`Score envoyé : ${this.currentPseudo()}`, width / 2, 170);
+      ctx.textAlign = "left";
+      ctx.font = "24px monospace";
+      this.leaderboard.slice(0, LEADERBOARD_ROWS).forEach((entry, index) => {
+        const y = 222 + index * 46;
+        ctx.fillStyle = index === 0 ? "#ffe89a" : "#e2d8bf";
+        ctx.fillText(`${String(index + 1).padStart(2, "0")}. ${entry.pseudo}`, 120, y);
+        ctx.fillStyle = "#a79d86";
+        ctx.textAlign = "right";
+        ctx.fillText(`niv. ${entry.depth}`, width - 120, y);
+        ctx.textAlign = "left";
+      });
+      if (this.leaderboard.length === 0) {
+        ctx.fillStyle = "#a79d86";
+        ctx.fillText("Aucune entrée pour l'instant.", 120, 240);
+      }
+      ctx.textAlign = "center";
+      drawButton(ctx, BUTTONS.restart, "NOUVELLE RUN (A)", { hovered: hovered.has("restart") });
     }
   }
-  if (line) ctx.fillText(line, x, cursorY);
 }
