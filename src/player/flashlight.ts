@@ -42,6 +42,7 @@ export class Flashlight {
   capacity = 1;
   /** Lampe d'appoint tenue en main (objet de collection) : position et direction du faisceau. */
   private handTorch: { position: THREE.Vector3; direction: THREE.Vector3; warm: boolean } | null = null;
+  private readonly torchState = { position: new THREE.Vector3(), direction: new THREE.Vector3(0, 0, -1), warm: false };
   private readonly camera: THREE.Camera;
 
   constructor(camera: THREE.Camera) {
@@ -63,7 +64,15 @@ export class Flashlight {
    * `warm` : lampe ancienne, lumière plus chaude qui vacille. null : retour à la lampe frontale.
    */
   setHandTorch(source: { position: THREE.Vector3; direction: THREE.Vector3; warm: boolean } | null): void {
-    this.handTorch = source;
+    // Copie : l'appelant passe souvent des vecteurs de travail réutilisés dans la même frame.
+    if (!source) {
+      this.handTorch = null;
+      return;
+    }
+    this.torchState.position.copy(source.position);
+    this.torchState.direction.copy(source.direction).normalize();
+    this.torchState.warm = source.warm;
+    this.handTorch = this.torchState;
   }
 
   /** Vrai si la lampe éclaire réellement (allumée et pas en micro-coupure). */

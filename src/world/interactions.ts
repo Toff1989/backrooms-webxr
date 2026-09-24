@@ -58,6 +58,7 @@ const POKE_COOLDOWN = 0.7;
 const IMPACT_MIN_SPEED = 1.2;
 
 const tmp = new THREE.Vector3();
+const torchPosition = new THREE.Vector3();
 const tmp2 = new THREE.Vector3();
 
 /** Tirage déterministe [0..1) propre à un objet (identifiant de collection, sinon position de départ). */
@@ -748,10 +749,18 @@ const digitalWatch = dial(128, 1, (ctx, _g, w) => {
   ctx.fillText(`${String(Math.floor(total / 60)).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`, 64, 64);
 });
 
-/** Lampe trouvée : allumée en main, le faisceau part de la main (sans pile). Lâchée, elle s'éteint. */
+/**
+ * Lampe trouvée : elle s'allume dès qu'on la prend en main (gâchette : éteindre / rallumer), le
+ * faisceau part de la main, dans la direction pointée, sans pile. Lâchée, elle s'éteint.
+ */
 function handTorch(warm: boolean): Factory {
   return (g, w, system) => {
     let on = false;
+    const light = (): void => {
+      on = true;
+      system.torchOwner = g;
+      w.audio.playAt("metalClick", g.object.position, 0.5);
+    };
     const off = (): void => {
       on = false;
       if (system.torchOwner === g) {
@@ -760,14 +769,16 @@ function handTorch(warm: boolean): Factory {
       }
     };
     return {
+      grab: () => {
+        if (!on) light();
+      },
       use: () => {
-        w.audio.playAt("metalClick", g.object.position, 0.5);
-        if (on) {
-          off();
+        if (!on) {
+          light();
           return;
         }
-        on = true;
-        system.torchOwner = g;
+        w.audio.playAt("metalClick", g.object.position, 0.5);
+        off();
       },
       update: () => {
         if (!on) return;
@@ -776,7 +787,8 @@ function handTorch(warm: boolean): Factory {
           off();
           return;
         }
-        w.flashlight.setHandTorch({ position: tmp.copy(hand.palm).addScaledVector(hand.aimDirection, 0.12), direction: hand.aimDirection, warm });
+        torchPosition.copy(hand.palm).addScaledVector(hand.aimDirection, 0.12);
+        w.flashlight.setHandTorch({ position: torchPosition, direction: hand.aimDirection, warm });
       },
       dispose: off,
     };
