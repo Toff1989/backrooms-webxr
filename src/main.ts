@@ -12,7 +12,7 @@ import { GrabSystem } from "./player/grabSystem";
 import { Hand } from "./player/hand";
 import { triggerHapticPulse } from "./player/haptics";
 import { InventoryMenu } from "./player/inventoryMenu";
-import { PerfStats } from "./player/perfStats";
+import { PerfStats, setPerf } from "./player/perfStats";
 import { PlayerController } from "./player/playerController";
 import { Sfx } from "./player/sfx";
 import { VhsOverlay } from "./player/vhsOverlay";
@@ -91,7 +91,8 @@ const vhsOverlay = new VhsOverlay(camera);
 const hud = new CamcorderHud(camera);
 const ambientHum = new AmbientHum(audioListener, scene);
 const flashlight = new Flashlight(camera);
-const perfStats = new PerfStats(renderer);
+const perfStats = new PerfStats(renderer, camera);
+setPerf(perfStats);
 const atmosphere = new Atmosphere(scene, hemisphere, ambient);
 const poltergeist = new Poltergeist(scene, audioListener, grabbables);
 
@@ -226,6 +227,7 @@ const TELEPORT_HAPTIC_INTENSITY = 1;
 const TELEPORT_HAPTIC_DURATION_MS = 260;
 
 renderer.setAnimationLoop((timestamp) => {
+  perfStats.beginFrame(timestamp);
   timer.update(timestamp);
   const deltaSeconds = Math.min(timer.getDelta(), 0.1);
   const elapsedSeconds = timer.getElapsed();
@@ -240,6 +242,7 @@ renderer.setAnimationLoop((timestamp) => {
     sfx.play(flashlight.toggle() ? "click" : "denied", 0.3);
   }
 
+  perfStats.begin("joueur");
   player.update(deltaSeconds, input);
   syncHands(elapsedSeconds);
   if (player.teleported) grabSystem.onTeleport();
@@ -248,14 +251,19 @@ renderer.setAnimationLoop((timestamp) => {
   inventoryMenu.update(deltaSeconds, hands, (hand) => pointer.frame(hand).target === inventoryMenu);
   endRunScreen.update(hands);
   grabSystem.update(elapsedSeconds, pointer);
+  perfStats.end("joueur");
 
+  perfStats.begin("physique");
   physics.step(deltaSeconds, (stepSeconds) => {
     for (const hand of hands) hand.applyKinematicTarget();
     grabSystem.step(stepSeconds);
   });
   grabbables.sync(player.headWorld);
+  perfStats.end("physique");
 
+  perfStats.begin("monde");
   const levelUpdate = levelManager.update(player.headWorld, handPalms, camera, elapsedSeconds, deltaSeconds, corruption.value);
+  perfStats.end("monde");
   if (levelUpdate.batteriesPicked > 0) {
     flashlight.recharge(BATTERY_RECHARGE * levelUpdate.batteriesPicked);
     sfx.play("battery", 0.6);
@@ -309,6 +317,7 @@ renderer.setAnimationLoop((timestamp) => {
     battery: flashlight.battery,
     debug: perfStats.readAndReset(),
   };
+  perfStats.begin("effets");
   comfortVignette.update(player.movementIntensity, deltaSeconds);
   vhsOverlay.update(elapsedSeconds, corruption.value, deltaSeconds);
   hud.update(deltaSeconds);
@@ -318,8 +327,11 @@ renderer.setAnimationLoop((timestamp) => {
   ambientHum.update(deltaSeconds, player.headWorld, levelUpdate.darkness, levelManager.depth, atmosphere.level);
   updateVhsTime(elapsedSeconds);
   runWarmupStep();
-  perfStats.beginFrame(deltaSeconds);
+  perfStats.end("effets");
+  perfStats.begin("rendu");
   renderer.render(scene, camera);
+  perfStats.end("rendu");
+  perfStats.endFrame(deltaSeconds);
 });
 
 

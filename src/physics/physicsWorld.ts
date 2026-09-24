@@ -1,3 +1,4 @@
+import { perf } from "../player/perfStats";
 import RAPIER from "@dimforge/rapier3d-compat";
 import { WALL_HEIGHT } from "../shared/constants";
 
@@ -36,7 +37,8 @@ export const CollisionGroups = {
 /** Pas de simulation borné : suit la cadence du casque (72/90 Hz) sans sauts, coupé en deux sur un gros à-coup. */
 const MIN_STEP = 1 / 120;
 const MAX_STEP = 1 / 45;
-const FLOOR_HALF_EXTENT = 5000;
+/** Demi-côté des dalles sol/plafond : couvre largement la zone chargée (5 chunks de 20 m). */
+const BOUNDS_HALF_EXTENT = 80;
 
 /**
  * Monde physique Rapier (moteur rigide WASM) : sol et plafond infinis (un seul collider
@@ -46,24 +48,35 @@ const FLOOR_HALF_EXTENT = 5000;
  */
 export class PhysicsWorld {
   readonly world: RAPIER.World;
+  private readonly bounds: RAPIER.RigidBody;
 
   private constructor() {
     this.world = new RAPIER.World({ x: 0, y: -9.81, z: 0 });
 
     const bounds = this.world.createRigidBody(RAPIER.RigidBodyDesc.fixed());
+    // Dalles de sol/plafond de taille raisonnable, recentrées sur le joueur (`recenter`) : une
+    // boîte de 10 km donnait des contacts imprécis en flottants 32 bits — les meubles lourds
+    // tremblaient sur le sol sans jamais s'endormir.
+    this.bounds = bounds;
     this.world.createCollider(
-      RAPIER.ColliderDesc.cuboid(FLOOR_HALF_EXTENT, 0.5, FLOOR_HALF_EXTENT)
-        .setTranslation(0, -0.5, 0)
+      // Épaisse (5 m) : un objet qui apparaît enfoncé est toujours repoussé vers le haut.
+      RAPIER.ColliderDesc.cuboid(BOUNDS_HALF_EXTENT, 5, BOUNDS_HALF_EXTENT)
+        .setTranslation(0, -5, 0)
         .setFriction(0.9)
         .setCollisionGroups(CollisionGroups.static),
       bounds,
     );
     this.world.createCollider(
-      RAPIER.ColliderDesc.cuboid(FLOOR_HALF_EXTENT, 0.5, FLOOR_HALF_EXTENT)
+      RAPIER.ColliderDesc.cuboid(BOUNDS_HALF_EXTENT, 0.5, BOUNDS_HALF_EXTENT)
         .setTranslation(0, WALL_HEIGHT + 0.5, 0)
         .setCollisionGroups(CollisionGroups.static),
       bounds,
     );
+  }
+
+  /** Recentre les dalles sol/plafond sous le joueur (à chaque changement de chunk). */
+  recenter(x: number, z: number): void {
+    this.bounds.setTranslation({ x, y: 0, z }, true);
   }
 
   static async create(): Promise<PhysicsWorld> {
@@ -82,7 +95,9 @@ export class PhysicsWorld {
     this.world.timestep = stepSeconds;
     for (let i = 0; i < steps; i++) {
       beforeStep(stepSeconds);
+      perf?.begin("rapier");
       this.world.step();
+      perf?.end("rapier");
     }
   }
 }

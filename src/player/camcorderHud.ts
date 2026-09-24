@@ -118,7 +118,7 @@ export class CamcorderHud {
     this.text(flags, CANVAS_WIDTH - 20, 120, "right", "#b9e0ff");
 
     if (this.status.debug) {
-      ctx.font = "bold 28px monospace";
+      ctx.font = "bold 21px monospace";
       this.text(this.status.debug, 20, 185, "left", "#9dff9d");
     }
 

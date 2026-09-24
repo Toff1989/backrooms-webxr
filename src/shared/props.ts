@@ -23,3 +23,15 @@ export function pickPropKind(roll: number): PropKind {
   }
   return PROP_KIND_WEIGHTS[PROP_KIND_WEIGHTS.length - 1]!.kind;
 }
+
+/**
+ * Rayon d'encombrement au sol (m, cercle englobant approximatif du modèle) : sert à espacer
+ * les meubles d'un amas — sans lui, des chaises naissaient dans les bureaux, la physique les
+ * éjectait et elles glissaient sans fin (corps jamais endormis, coût CPU permanent).
+ */
+export const PROP_FOOTPRINT_RADIUS: Record<PropKind, number> = {
+  chair: 0.33,
+  schoolDesk: 0.5,
+  officeDesk: 0.75,
+  cabinet: 0.55,
+};

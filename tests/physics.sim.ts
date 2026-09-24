@@ -57,6 +57,8 @@ for (let i = 0; i < 72 * 3; i++) {
   const penetration = projection.isInside ? 0.25 + distance : 0.25 - distance;
   maxPenetration = Math.max(maxPenetration, penetration);
 }
+// Une seconde sans marcher : la chaise (née endormie, poussée puis basculée) finit de retomber.
+for (let i = 0; i < 72; i++) physics.step(DT, () => {});
 const chairEnd = chair.body.translation();
 check("marche dans la chaise : pas de traversée", maxPenetration < 0.08, `pénétration max ${maxPenetration.toFixed(3)} m`);
 check("la chaise est poussée", chairEnd.z < -1.6, `chaise z ${(-1.5).toFixed(2)} → ${chairEnd.z.toFixed(2)}`);

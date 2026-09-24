@@ -6,6 +6,7 @@ import { CELL_SIZE, CHUNK_CELLS, CHUNK_SIZE, STREAM_RADIUS_CHUNKS, WALL_HEIGHT }
 import type { LevelProfile } from "../shared/levelProfile";
 import { createSeededNoise2D } from "../shared/noise";
 import { coordinateHash01, stringSeedToInt } from "../shared/rng";
+import { perf } from "../player/perfStats";
 import { BatteryPickup } from "./batteryPickup";
 import { buildChunkGroup } from "./chunkMesh";
 import { spawnCollectibleModel } from "./collectibleLoader";
@@ -45,6 +46,11 @@ const MAX_LOOP_SHARE = 0.3;
 const TELEPORT_MIN_JUMP = 12;
 /** Marge (m) autour des obstacles pour la destination (le joueur n'apparaît jamais dans un meuble). */
 const TELEPORT_CLEARANCE = 0.6;
+/** Travail de streaming par frame : chargement/déchargement étalés pour éviter les à-coups. */
+const LOADS_PER_FRAME = 1;
+const UNLOADS_PER_FRAME = 2;
+/** Meubles/objets créés par frame (corps physiques à enveloppe convexe). */
+const SPAWNS_PER_FRAME = 3;
 /** Les objets de collection apparaissent posés, légèrement au-dessus du sol (la physique les fait retomber). */
 const COLLECTIBLE_SPAWN_HEIGHT = 0.05;
 
@@ -83,6 +89,10 @@ export class ChunkStreamer {
   depth = 0;
 
   private readonly loaded = new Map<string, LoadedChunk>();
+  /** Chunks à charger (clé -> epoch), traités quelques-uns par frame, les plus proches d'abord. */
+  private readonly pendingLoads = new Map<string, number>();
+  private readonly pendingUnloads = new Set<string>();
+  private readonly spawnQueue: Array<() => void> = [];
   /** Piles déjà ramassées dans ce level (ne réapparaissent pas au rechargement du chunk). */
   private readonly pickedBatteries = new Set<string>();
   private noise2D: NoiseFunction2D;
@@ -110,6 +120,9 @@ export class ChunkStreamer {
   /** Change de level : décharge tout le monde courant, repart à vide sur le nouveau profil/seed. */
   setProfile(profile: LevelProfile): void {
     for (const key of [...this.loaded.keys()]) this.unloadChunk(key);
+    this.pendingLoads.clear();
+    this.pendingUnloads.clear();
+    this.spawnQueue.length = 0;
     this.grabbables.removeAllNotHeld();
     this.profile = profile;
     this.noise2D = createSeededNoise2D(profile.seed);
@@ -126,6 +139,8 @@ export class ChunkStreamer {
     this.currentChunkX = chunkX;
     this.currentChunkZ = chunkZ;
     this.streamAround(chunkX, chunkZ);
+    this.physics.recenter((chunkX + 0.5) * CHUNK_SIZE, (chunkZ + 0.5) * CHUNK_SIZE);
+    this.processStreaming(Infinity);
   }
 
   /** À appeler au démarrage de la session XR (autoplay des pièges déjà chargés). */
@@ -149,7 +164,9 @@ export class ChunkStreamer {
       this.currentChunkX = chunkX;
       this.currentChunkZ = chunkZ;
       this.streamAround(chunkX, chunkZ);
+      this.physics.recenter((chunkX + 0.5) * CHUNK_SIZE, (chunkZ + 0.5) * CHUNK_SIZE);
     }
+    this.processStreaming(LOADS_PER_FRAME);
 
     let corruptionDelta = 0;
     let glitchTrapJustTriggered = false;
@@ -268,11 +285,50 @@ export class ChunkStreamer {
     }
 
     for (const key of this.loaded.keys()) {
-      if (!desired.has(key)) this.unloadChunk(key);
+      if (!desired.has(key)) this.pendingUnloads.add(key);
+    }
+    for (const key of this.pendingLoads.keys()) {
+      if (!desired.has(key)) this.pendingLoads.delete(key);
     }
     for (const key of desired) {
-      if (!this.loaded.has(key)) this.loadChunk(key);
+      this.pendingUnloads.delete(key);
+      if (!this.loaded.has(key) && !this.pendingLoads.has(key)) this.pendingLoads.set(key, 0);
     }
+  }
+
+  /**
+   * Streaming étalé : quelques chargements/déchargements par frame (les plus proches d'abord)
+   * au lieu de 5 + 5 d'un coup à chaque changement de chunk, plus la création des meubles.
+   */
+  private processStreaming(maxLoads: number): void {
+    let unloads = 0;
+    for (const key of this.pendingUnloads) {
+      if (unloads >= (Number.isFinite(maxLoads) ? UNLOADS_PER_FRAME : Infinity)) break;
+      this.pendingUnloads.delete(key);
+      this.unloadChunk(key);
+      unloads++;
+    }
+
+    let loads = 0;
+    while (loads < maxLoads && this.pendingLoads.size > 0) {
+      let nearest: string | null = null;
+      let nearestDistance = Infinity;
+      for (const key of this.pendingLoads.keys()) {
+        const [x, z] = parseChunkKey(key);
+        const distance = Math.max(Math.abs(x - this.currentChunkX), Math.abs(z - this.currentChunkZ));
+        if (distance < nearestDistance) {
+          nearestDistance = distance;
+          nearest = key;
+        }
+      }
+      const epoch = this.pendingLoads.get(nearest!)!;
+      this.pendingLoads.delete(nearest!);
+      this.loadChunk(nearest!, epoch);
+      loads++;
+    }
+
+    const spawns = Number.isFinite(maxLoads) ? SPAWNS_PER_FRAME : Infinity;
+    for (let i = 0; i < spawns && this.spawnQueue.length > 0; i++) this.spawnQueue.shift()!();
   }
 
   /** Régénère périodiquement un chunk chargé mais hors champ de vision (labyrinthe dynamique). */
@@ -312,11 +368,13 @@ export class ChunkStreamer {
     const existing = this.loaded.get(key);
     if (!existing) return;
     const nextEpoch = existing.epoch + 1;
+    // Déchargé tout de suite (hors champ), rechargé à la frame suivante par la file.
     this.unloadChunk(key);
-    this.loadChunk(key, nextEpoch);
+    this.pendingLoads.set(key, nextEpoch);
   }
 
   private loadChunk(key: string, epoch = 0): void {
+    perf?.event(`charge ${key}`);
     const [chunkX, chunkZ] = parseChunkKey(key);
     const layout = generateChunkLayout(this.profile, this.noise2D, chunkX, chunkZ, epoch);
     const originX = chunkX * CHUNK_SIZE;
@@ -364,9 +422,11 @@ export class ChunkStreamer {
     for (const placement of layout.propPlacements) {
       spawnProp(placement.kind)
         .then(({ model, template }) => {
-          // Le chunk a pu être déchargé/régénéré pendant le chargement asynchrone du modèle.
-          if (this.loaded.get(key) !== loadedChunk) return;
-          this.grabbables.createProp(placement.kind, model, template, placement.x, placement.z, placement.rotationY);
+          this.spawnQueue.push(() => {
+            // Le chunk a pu être déchargé/régénéré pendant le chargement asynchrone du modèle.
+            if (this.loaded.get(key) !== loadedChunk) return;
+            this.grabbables.createProp(placement.kind, model, template, placement.x, placement.z, placement.rotationY);
+          });
         })
         .catch(() => {});
     }
@@ -376,15 +436,17 @@ export class ChunkStreamer {
       if (this.isItemStored(placement.id) || this.grabbables.isItemAlive(placement.id)) continue;
       spawnCollectibleModel(placement.kind)
         .then(({ model, template }) => {
-          if (this.loaded.get(key) !== loadedChunk) return;
-          if (this.isItemStored(placement.id) || this.grabbables.isItemAlive(placement.id)) return;
-          this.grabbables.createCollectible(
-            toCollectionEntry(placement, depth),
-            model,
-            template,
-            new THREE.Vector3(placement.x, COLLECTIBLE_SPAWN_HEIGHT, placement.z),
-            new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), placement.rotationY),
-          );
+          this.spawnQueue.push(() => {
+            if (this.loaded.get(key) !== loadedChunk) return;
+            if (this.isItemStored(placement.id) || this.grabbables.isItemAlive(placement.id)) return;
+            this.grabbables.createCollectible(
+              toCollectionEntry(placement, depth),
+              model,
+              template,
+              new THREE.Vector3(placement.x, COLLECTIBLE_SPAWN_HEIGHT, placement.z),
+              new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), placement.rotationY),
+            );
+          });
         })
         .catch(() => {});
     }
@@ -403,6 +465,7 @@ export class ChunkStreamer {
   }
 
   private unloadChunk(key: string): void {
+    perf?.event(`décharge ${key}`);
     const chunk = this.loaded.get(key);
     if (!chunk) return;
     this.scene.remove(chunk.group);

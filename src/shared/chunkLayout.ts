@@ -11,7 +11,7 @@ import {
 import { CELL_SIZE, CHUNK_CELLS, EXIT_CLEARANCE_CELLS, PILLAR_SIZE, SPAWN_CLEARANCE_CELLS, WALL_THICKNESS } from "./constants.js";
 import { getExitLocation, type ExitLocation } from "./exit.js";
 import type { LevelProfile } from "./levelProfile.js";
-import { pickPropKind, type PropKind } from "./props.js";
+import { PROP_FOOTPRINT_RADIUS, pickPropKind, type PropKind } from "./props.js";
 import { coordinateHash01, stringSeedToInt } from "./rng.js";
 
 export type WallEdge = "north" | "west";
@@ -212,18 +212,22 @@ function generatePropCluster(
   const sizeRoll = coordinateHash01(seedInt, cellX, cellZ, 90);
   const clusterSize = sizeRoll < 0.55 ? 1 : sizeRoll < 0.85 ? 2 + Math.floor(coordinateHash01(seedInt, cellX, cellZ, 91) * 2) : 4 + Math.floor(coordinateHash01(seedInt, cellX, cellZ, 92) * 2);
 
+  const placed: Array<{ x: number; z: number; radius: number }> = [];
   for (let i = 0; i < clusterSize; i++) {
     const kind = pickPropKind(coordinateHash01(seedInt, cellX, cellZ, 100 + i));
+    const footprint = PROP_FOOTPRINT_RADIUS[kind];
     const angle = coordinateHash01(seedInt, cellX, cellZ, 120 + i) * Math.PI * 2;
     const radius = coordinateHash01(seedInt, cellX, cellZ, 140 + i) * PROP_CLUSTER_MAX_RADIUS;
     const rotationY = coordinateHash01(seedInt, cellX, cellZ, 160 + i) * Math.PI * 2;
-
-    propPlacements.push({
-      kind,
-      x: centerX + Math.cos(angle) * radius,
-      z: centerZ + Math.sin(angle) * radius,
-      rotationY,
-    });
+    // Reste dans la cellule, à distance des murs de bord (demi-épaisseur + marge).
+    const limit = CELL_SIZE / 2 - WALL_THICKNESS / 2 - 0.05 - footprint;
+    if (limit <= 0) continue;
+    const x = centerX + Math.max(-limit, Math.min(limit, Math.cos(angle) * radius));
+    const z = centerZ + Math.max(-limit, Math.min(limit, Math.sin(angle) * radius));
+    // Pas de chevauchement avec les meubles déjà posés de l'amas : sinon, on renonce à celui-ci.
+    if (placed.some((other) => Math.hypot(other.x - x, other.z - z) < other.radius + footprint)) continue;
+    placed.push({ x, z, radius: footprint });
+    propPlacements.push({ kind, x, z, rotationY });
   }
 
   const half = PROP_CLUSTER_MAX_RADIUS + PROP_CLUSTER_OBSTACLE_MARGIN;

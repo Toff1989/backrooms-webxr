@@ -284,6 +284,8 @@ export class GrabSystem {
     this.highlighted.delete(grabbable);
     this.releasing.delete(grabbable);
     grabbable.collider.setCollisionGroups(CollisionGroups.held);
+    // Tenu, il peut aller vite (lancer, balayage) : anti-traversée activé.
+    grabbable.body.enableCcd(true);
     // Objet léger : apesanteur en main. Objet lourd : il pèse et traîne derrière la main.
     grabbable.body.setGravityScale(1 - strength, true);
     grabbable.body.wakeUp();

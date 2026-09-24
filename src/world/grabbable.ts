@@ -14,6 +14,9 @@ const RENDER_DISTANCE = 17;
 /** Au-delà, un objet ne se soulève pas (on peut seulement le pousser) — fiche : physique réaliste. */
 export const MAX_LIFT_MASS = 32;
 
+/** Meubles "boîtes" (armoire, bureau de direction) : collider cuboïde, stable au repos. */
+const BOX_COLLIDER_PROPS = new Set<PropKind>(["cabinet", "officeDesk"]);
+
 const PROP_MASS: Record<PropKind, number> = {
   chair: 6,
   schoolDesk: 14,
@@ -54,6 +57,8 @@ export interface GrabbableInit {
   mass: number;
   /** Données d'inventaire : présent uniquement pour les objets de collection (rangeables). */
   item: CollectionEntry | null;
+  /** Boîte de collision au lieu de l'enveloppe convexe (meubles massifs et anguleux). */
+  boxCollider?: boolean;
 }
 
 /**
@@ -93,12 +98,19 @@ export class Grabbable {
       RAPIER.RigidBodyDesc.dynamic()
         .setTranslation(init.position.x, init.position.y, init.position.z)
         .setRotation(init.quaternion)
-        .setCcdEnabled(true)
-        .setLinearDamping(0.05)
-        .setAngularDamping(0.25),
+        // CCD (anti-traversée à grande vitesse) activée seulement une fois l'objet saisi (voir
+        // GrabSystem) : au repos, elle faisait trembler les petits objets, jusqu'à traverser le sol.
+        // Les meubles naissent endormis, posés au sol : ils ne coûtent rien tant qu'on n'y touche pas.
+        .setSleeping(init.item === null)
+        // Meubles : fort amortissement (frottement sur la moquette) pour qu'ils se posent et
+        // s'endorment vite au lieu de glisser sans fin quand un amas se chevauche au chargement.
+        .setLinearDamping(init.item === null ? 0.8 : 0.25)
+        .setAngularDamping(init.item === null ? 1.5 : 0.9),
     );
 
-    const hullDesc = RAPIER.ColliderDesc.convexHull(scaledHull(shape, init.scale));
+    // L'enveloppe convexe détaillée d'un meuble lourd oscillait sur le sol (contacts instables) ;
+    // une boîte suffit pour ces formes anguleuses.
+    const hullDesc = init.boxCollider ? null : RAPIER.ColliderDesc.convexHull(scaledHull(shape, init.scale));
     const size = shape.box.getSize(new THREE.Vector3()).multiplyScalar(init.scale * 0.5);
     const center = shape.box.getCenter(new THREE.Vector3()).multiplyScalar(init.scale);
     this.localCenter = center.clone();
@@ -107,6 +119,8 @@ export class Grabbable {
       RAPIER.ColliderDesc.cuboid(Math.max(size.x, 0.01), Math.max(size.y, 0.01), Math.max(size.z, 0.01)).setTranslation(center.x, center.y, center.z);
     colliderDesc.setMass(init.mass).setFriction(0.8).setRestitution(0.15).setCollisionGroups(CollisionGroups.dynamic);
     this.collider = physics.world.createCollider(colliderDesc, this.body);
+    // L'ajout du collider réveille le corps : un meuble posé se rendort immédiatement.
+    if (init.item === null) this.body.sleep();
   }
 
   get isCollectible(): boolean {
@@ -174,10 +188,14 @@ export class GrabbableRegistry {
       quaternion: new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), rotationY),
       mass: PROP_MASS[kind],
       item: null,
+      boxCollider: BOX_COLLIDER_PROPS.has(kind),
     });
   }
 
   createCollectible(item: CollectionEntry, model: THREE.Object3D, template: THREE.Object3D, position: THREE.Vector3, quaternion: THREE.Quaternion): Grabbable {
+    // Jamais enfoncé dans le sol : le point le plus bas du modèle est posé juste au-dessus.
+    const lowest = getModelShape(template).box.min.y * item.scale;
+    if (position.y + lowest < 0.01) position = position.clone().setY(0.01 - lowest);
     return this.create({ model, template, scale: item.scale, position, quaternion, mass: collectibleMass(template, item.scale), item });
   }
 
