@@ -39,6 +39,13 @@ const LOADS_PER_FRAME = 1;
 const UNLOADS_PER_FRAME = 2;
 /** Meubles/objets créés par frame (corps physiques à enveloppe convexe). */
 const SPAWNS_PER_FRAME = 3;
+/**
+ * Budget (ms) de travail de streaming par frame, en plus des plafonds ci-dessus : un chunk aux
+ * murs denses peut à lui seul dépasser 10 ms (mesuré, voir `chunkMesh.ts`), sans quoi il
+ * s'additionnerait dans la même frame à d'autres chargements/spawns. Reste sous le budget d'une
+ * frame à 72 fps (~13,9 ms) même si un chunk chargé juste avant a déjà pris du temps.
+ */
+const STREAMING_FRAME_BUDGET_MS = 4;
 /** Les objets de collection apparaissent posés, légèrement au-dessus du sol (la physique les fait retomber). */
 const COLLECTIBLE_SPAWN_HEIGHT = 0.05;
 
@@ -104,7 +111,11 @@ export class ChunkStreamer {
 
   /** Change de level : décharge tout le monde courant, repart à vide sur le nouveau profil/seed. */
   setProfile(profile: LevelProfile): void {
-    for (const key of [...this.loaded.keys()]) this.unloadChunk(key);
+    // `skipGrabbableCleanup` : `removeAllNotHeld()` juste après nettoie l'inventaire du monde en
+    // un seul passage — répéter `removeInArea` (un scan de tous les objets vivants) à chaque
+    // chunk déchargé ici serait O(chunks × objets) pour rien, et c'était un à-coup mesurable au
+    // changement de niveau.
+    for (const key of [...this.loaded.keys()]) this.unloadChunk(key, true);
     this.pendingLoads.clear();
     this.pendingUnloads.clear();
     this.spawnQueue.length = 0;
@@ -210,11 +221,22 @@ export class ChunkStreamer {
   /**
    * Streaming étalé : quelques chargements/déchargements par frame (les plus proches d'abord)
    * au lieu de 5 + 5 d'un coup à chaque changement de chunk, plus la création des meubles.
+   *
+   * Un budget en NOMBRE d'éléments (un chunk, jusqu'à 3 objets) ne suffit pas : un chunk aux
+   * murs denses peut à lui seul coûter plus de 10 ms (mesuré, voir chunkMesh.ts) et se
+   * retrouver dans la même frame que 2-3 objets à instancier — les coûts s'additionnent. Le
+   * budget temps ci-dessous arrête le travail de streaming dès qu'il a assez pris sur la
+   * frame, quitte à reporter le reste à la frame suivante (la file `pendingLoads`/
+   * `pendingUnloads`/`spawnQueue` survit d'une frame à l'autre, rien n'est perdu).
    */
   private processStreaming(maxLoads: number): void {
+    const budgeted = Number.isFinite(maxLoads);
+    const deadline = budgeted ? performance.now() + STREAMING_FRAME_BUDGET_MS : Infinity;
+    const overBudget = (): boolean => budgeted && performance.now() > deadline;
+
     let unloads = 0;
     for (const key of this.pendingUnloads) {
-      if (unloads >= (Number.isFinite(maxLoads) ? UNLOADS_PER_FRAME : Infinity)) break;
+      if (unloads >= (budgeted ? UNLOADS_PER_FRAME : Infinity) || overBudget()) break;
       this.pendingUnloads.delete(key);
       this.unloadChunk(key);
       unloads++;
@@ -222,6 +244,7 @@ export class ChunkStreamer {
 
     let loads = 0;
     while (loads < maxLoads && this.pendingLoads.size > 0) {
+      if (overBudget()) break;
       let nearest: string | null = null;
       let nearestDistance = Infinity;
       for (const key of this.pendingLoads.keys()) {
@@ -238,8 +261,11 @@ export class ChunkStreamer {
       loads++;
     }
 
-    const spawns = Number.isFinite(maxLoads) ? SPAWNS_PER_FRAME : Infinity;
-    for (let i = 0; i < spawns && this.spawnQueue.length > 0; i++) this.spawnQueue.shift()!();
+    const spawns = budgeted ? SPAWNS_PER_FRAME : Infinity;
+    for (let i = 0; i < spawns && this.spawnQueue.length > 0; i++) {
+      if (overBudget()) break;
+      this.spawnQueue.shift()!();
+    }
   }
 
   /** Régénère périodiquement un chunk chargé mais hors champ de vision (labyrinthe dynamique). */
@@ -396,16 +422,18 @@ export class ChunkStreamer {
     );
   }
 
-  private unloadChunk(key: string): void {
+  private unloadChunk(key: string, skipGrabbableCleanup = false): void {
     perf?.event(`décharge ${key}`);
     const chunk = this.loaded.get(key);
     if (!chunk) return;
     this.scene.remove(chunk.group);
     disposeGroup(chunk.group);
-    // Les objets suivent leur position réelle, pas leur chunk d'origine : un meuble
-    // transporté ailleurs survit au déchargement de son chunk de départ.
-    const { min, max } = chunk.bounds;
-    this.grabbables.removeInArea(min.x, max.x, min.z, max.z);
+    if (!skipGrabbableCleanup) {
+      // Les objets suivent leur position réelle, pas leur chunk d'origine : un meuble
+      // transporté ailleurs survit au déchargement de son chunk de départ.
+      const { min, max } = chunk.bounds;
+      this.grabbables.removeInArea(min.x, max.x, min.z, max.z);
+    }
     this.physics.world.removeRigidBody(chunk.staticBody);
     for (const trap of chunk.wallTraps) {
       this.scene.remove(trap.group);

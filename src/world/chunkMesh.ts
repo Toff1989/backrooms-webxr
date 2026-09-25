@@ -34,6 +34,16 @@ const PILLAR_SEGMENTS = 3;
 
 /** Boîte modèle d'un mur (1 m de long), partagée : ses sommets sont recopiés transformés. */
 let wallTemplate: THREE.BoxGeometry | null = null;
+// Tableaux bruts du gabarit, extraits une seule fois : indexer un Float32Array/Uint16Array
+// directement dans la boucle chaude (jusqu'à ~50 murs × ~90 sommets par chunk) coûte nettement
+// moins cher que 6 appels BufferAttribute.getX/Y/Z par sommet — mesuré ~9 ms de pic par chunk
+// avec les accesseurs, sur un profil de murs dense (voir tests/perf-probe, retiré après usage).
+let wallSrcPosition: ArrayLike<number> | null = null;
+let wallSrcNormal: ArrayLike<number> | null = null;
+let wallSrcUv: ArrayLike<number> | null = null;
+let wallSrcIndex: ArrayLike<number> | null = null;
+let wallVertexCount = 0;
+let wallIndexCount = 0;
 
 function buildWalls(layout: ChunkLayout): THREE.Mesh | null {
   const segments = layout.wallSegments;
@@ -42,13 +52,25 @@ function buildWalls(layout: ChunkLayout): THREE.Mesh | null {
   // Boîte (pas un plan) : le mur a une vraie épaisseur, cohérente avec la boîte de collision.
   // Écriture directe dans un seul buffer (pas de clone + fusion de 30 géométries : ~4 ms par
   // chunk sur PC, un à-coup visible sur Quest à chaque changement de chunk).
-  wallTemplate ??= new THREE.BoxGeometry(1, WALL_HEIGHT, WALL_THICKNESS, WALL_SEGMENTS_LENGTH, WALL_SEGMENTS_HEIGHT, 1);
-  const srcPosition = wallTemplate.getAttribute("position") as THREE.BufferAttribute;
-  const srcNormal = wallTemplate.getAttribute("normal") as THREE.BufferAttribute;
-  const srcUv = wallTemplate.getAttribute("uv") as THREE.BufferAttribute;
-  const srcIndex = wallTemplate.getIndex()!;
-  const vertexCount = srcPosition.count;
-  const indexCount = srcIndex.count;
+  if (!wallTemplate) {
+    wallTemplate = new THREE.BoxGeometry(1, WALL_HEIGHT, WALL_THICKNESS, WALL_SEGMENTS_LENGTH, WALL_SEGMENTS_HEIGHT, 1);
+    const srcPosition = wallTemplate.getAttribute("position") as THREE.BufferAttribute;
+    const srcNormal = wallTemplate.getAttribute("normal") as THREE.BufferAttribute;
+    const srcUv = wallTemplate.getAttribute("uv") as THREE.BufferAttribute;
+    const srcIndex = wallTemplate.getIndex()!;
+    wallSrcPosition = srcPosition.array as ArrayLike<number>;
+    wallSrcNormal = srcNormal.array as ArrayLike<number>;
+    wallSrcUv = srcUv.array as ArrayLike<number>;
+    wallSrcIndex = srcIndex.array as ArrayLike<number>;
+    wallVertexCount = srcPosition.count;
+    wallIndexCount = srcIndex.count;
+  }
+  const srcPosition = wallSrcPosition!;
+  const srcNormal = wallSrcNormal!;
+  const srcUv = wallSrcUv!;
+  const srcIndex = wallSrcIndex!;
+  const vertexCount = wallVertexCount;
+  const indexCount = wallIndexCount;
 
   const positions = new Float32Array(segments.length * vertexCount * 3);
   const normals = new Float32Array(segments.length * vertexCount * 3);
@@ -64,24 +86,27 @@ function buildWalls(layout: ChunkLayout): THREE.Mesh | null {
     const centerZ = (segment.minZ + segment.maxZ) / 2;
     const base = s * vertexCount;
     for (let i = 0; i < vertexCount; i++) {
-      const x = srcPosition.getX(i) * length;
-      const y = srcPosition.getY(i) + WALL_HEIGHT / 2;
-      const z = srcPosition.getZ(i);
-      const nx = srcNormal.getX(i);
-      const nz = srcNormal.getZ(i);
+      const pi = i * 3;
+      const x = srcPosition[pi]! * length;
+      const y = srcPosition[pi + 1]! + WALL_HEIGHT / 2;
+      const z = srcPosition[pi + 2]!;
+      const nx = srcNormal[pi]!;
+      const nz = srcNormal[pi + 2]!;
       const o = (base + i) * 3;
       // Mur orienté selon Z : rotation de 90° autour de Y (x' = z, z' = -x).
       positions[o] = (alongX ? x : z) + centerX;
       positions[o + 1] = y;
       positions[o + 2] = (alongX ? z : -x) + centerZ;
       normals[o] = alongX ? nx : nz;
-      normals[o + 1] = srcNormal.getY(i);
+      normals[o + 1] = srcNormal[pi + 1]!;
       normals[o + 2] = alongX ? nz : -nx;
-      uvs[(base + i) * 2] = srcUv.getX(i);
-      uvs[(base + i) * 2 + 1] = srcUv.getY(i);
+      const ui = i * 2;
+      const uo = (base + i) * 2;
+      uvs[uo] = srcUv[ui]!;
+      uvs[uo + 1] = srcUv[ui + 1]!;
     }
     const indexBase = s * indexCount;
-    for (let i = 0; i < indexCount; i++) indices[indexBase + i] = srcIndex.getX(i) + base;
+    for (let i = 0; i < indexCount; i++) indices[indexBase + i] = srcIndex[i]! + base;
   });
 
   const geometry = new THREE.BufferGeometry();

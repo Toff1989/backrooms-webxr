@@ -68,6 +68,17 @@ function noiseAt(g: Grabbable, loudness: number): void {
   emitNoise(g.object.position, loudness);
 }
 
+/**
+ * Point le plus haut du modèle, en espace local (calculé une fois à l'apparition de l'objet) :
+ * bonne approximation de la buse d'un aérosol ou de la molette d'un briquet, sans réglage
+ * propre à chaque asset. `object.localToWorld(point.clone())` le replace ensuite en espace monde.
+ */
+function topLocalPoint(object: THREE.Object3D): THREE.Vector3 {
+  const box = new THREE.Box3().setFromObject(object);
+  const topWorld = new THREE.Vector3((box.min.x + box.max.x) / 2, box.max.y, (box.min.z + box.max.z) / 2);
+  return object.worldToLocal(topWorld);
+}
+
 /** Écran / surface dessinée sur un canvas, posé sur une face du modèle (lumineux ou non). */
 class FaceCanvas {
   readonly canvas = document.createElement("canvas");
@@ -533,17 +544,22 @@ const can: Factory = (g, w, system) => {
 
 /** Aérosol : pulvérise un petit nuage ; le lubrifiant fait taire un chariot qui grince. */
 function sprayCan(lubricant: boolean): Factory {
-  return (g, w, system) => ({
-    use: (hand) => {
-      w.audio.playAt("spray", g.object.position, 0.6);
-      noiseAt(g, 0.15);
-      system.puff(g.object.position, hand.aimDirection);
-      if (!lubricant) return;
-      for (const other of w.registry.all) {
-        if (other.kind === "storageCart" && other.object.position.distanceTo(g.object.position) < 1.4) system.behaviourOf(other)?.oil?.();
-      }
-    },
-  });
+  return (g, w, system) => {
+    // La buse, pas le centre du bidon : sinon le nuage part du mauvais endroit à l'usage.
+    const nozzleLocal = topLocalPoint(g.object);
+    return {
+      use: (hand) => {
+        const nozzleWorld = g.object.localToWorld(nozzleLocal.clone());
+        w.audio.playAt("spray", nozzleWorld, 0.6);
+        noiseAt(g, 0.15);
+        system.puff(nozzleWorld, hand.aimDirection);
+        if (!lubricant) return;
+        for (const other of w.registry.all) {
+          if (other.kind === "storageCart" && other.object.position.distanceTo(g.object.position) < 1.4) system.behaviourOf(other)?.oil?.();
+        }
+      },
+    };
+  };
 }
 
 /** Photo : annotation au dos ; quand on ne la regarde pas, l'image change (l'endroit où l'on est). */
@@ -821,9 +837,7 @@ function flameTexture(): THREE.CanvasTexture {
  * buse sans avoir besoin d'un réglage propre à chaque objet.
  */
 const lighter: Factory = (g, w) => {
-  const box = new THREE.Box3().setFromObject(g.object);
-  const nozzleWorld = new THREE.Vector3((box.min.x + box.max.x) / 2, box.max.y, (box.min.z + box.max.z) / 2);
-  const nozzleLocal = g.object.worldToLocal(nozzleWorld);
+  const nozzleLocal = topLocalPoint(g.object);
   const texture = flameTexture();
   const flame = new THREE.Sprite(new THREE.SpriteMaterial({ map: texture, blending: THREE.AdditiveBlending, depthWrite: false, transparent: true }));
   flame.scale.setScalar(0.045);
