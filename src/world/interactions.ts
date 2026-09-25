@@ -1,13 +1,12 @@
 import * as THREE from "three";
 import { log } from "../debug/debugLog";
-import { tList, t } from "../i18n";
+import { tList } from "../i18n";
 import { CollisionGroups, RAPIER, type PhysicsWorld } from "../physics/physicsWorld";
-import type { Flashlight } from "../player/flashlight";
 import type { LiveViews } from "../player/liveViews";
 import type { Hand } from "../player/hand";
 import { stringSeedToInt } from "../shared/rng";
 import type { Grabbable, GrabbableRegistry } from "./grabbable";
-import { HANDWRITING_FONT } from "./loreArt";
+import { HANDWRITING_FONT, wrapLines } from "./loreArt";
 import { createFacePlane, findModelFace, type ModelFace } from "./modelFace";
 import { emitNoise } from "./noise";
 import type { LoopHandle, ObjectAudio } from "./objectAudio";
@@ -17,7 +16,6 @@ export interface InteractionWorld {
   audio: ObjectAudio;
   physics: PhysicsWorld;
   registry: GrabbableRegistry;
-  flashlight: Flashlight;
   scene: THREE.Scene;
   camera: THREE.Camera;
   head(): THREE.Vector3;
@@ -25,8 +23,6 @@ export interface InteractionWorld {
   stunCadreur(seconds: number): void;
   exitPosition(): { x: number; z: number };
   capturePhoto(): HTMLCanvasElement | null;
-  /** Objet de collection caché dans un meuble : au plus un par meuble et par level. */
-  spawnHiddenItem(key: string, position: THREE.Vector3): void;
   take(): number;
   runSeconds(): number;
   drop(grabbable: Grabbable): void;
@@ -34,8 +30,6 @@ export interface InteractionWorld {
   views: LiveViews;
   /** Œil du Cadreur (sa tête-caméra) et ce qu'il regarde, quand il est là. */
   cadreurEye(): { position: THREE.Vector3; target: THREE.Vector3 } | null;
-  /** Relit la dernière cassette audio trouvée (caméscope). Faux s'il n'y en a aucune. */
-  playLatestTape(): boolean;
 }
 
 interface Behaviour {
@@ -62,7 +56,6 @@ const POKE_COOLDOWN = 0.7;
 const IMPACT_MIN_SPEED = 1.2;
 
 const tmp = new THREE.Vector3();
-const torchPosition = new THREE.Vector3();
 const tmp2 = new THREE.Vector3();
 
 /** Tirage déterministe [0..1) propre à un objet (identifiant de collection, sinon position de départ). */
@@ -73,6 +66,17 @@ function objectRoll(g: Grabbable, salt: number): number {
 
 function noiseAt(g: Grabbable, loudness: number): void {
   emitNoise(g.object.position, loudness);
+}
+
+/**
+ * Point le plus haut du modèle, en espace local (calculé une fois à l'apparition de l'objet) :
+ * bonne approximation de la buse d'un aérosol ou de la molette d'un briquet, sans réglage
+ * propre à chaque asset. `object.localToWorld(point.clone())` le replace ensuite en espace monde.
+ */
+function topLocalPoint(object: THREE.Object3D): THREE.Vector3 {
+  const box = new THREE.Box3().setFromObject(object);
+  const topWorld = new THREE.Vector3((box.min.x + box.max.x) / 2, box.max.y, (box.min.z + box.max.z) / 2);
+  return object.worldToLocal(topWorld);
 }
 
 /** Écran / surface dessinée sur un canvas, posé sur une face du modèle (lumineux ou non). */
@@ -186,10 +190,12 @@ function atEye(g: Grabbable, w: InteractionWorld, distance: number): boolean {
 
 // ---------------------------------------------------------------- Mobilier
 
-/** Télévision : neige qui grésille ; console branchée à côté : un jeu ; cassette approchée : lecture. */
+/** Télévision : neige qui grésille, puis passe en direct après quelques secondes. */
 const television: Factory = (g, w, system) => {
   const face = faceOf(g, FRONT_AXES);
-  const screen = face ? new FaceCanvas(g.object, face, 160, 120, { shrink: 0.68, glow: true, raise: 0.08 }) : null;
+  // Pas de décalage artificiel ("raise") : l'écran se pose exactement sur la face détectée du
+  // boîtier, pour ne pas paraître flotter au-dessus du modèle 3D.
+  const screen = face ? new FaceCanvas(g.object, face, 160, 120, { shrink: 0.68, glow: true }) : null;
   if (screen) {
     screen.visible = false;
     system.displays.add(screen.mesh);
@@ -202,11 +208,8 @@ const television: Factory = (g, w, system) => {
   let frame = 0;
   let noiseTimer = 0;
   let scanTimer = 0;
-  let mode: "static" | "game" | "tape" | "live" = "static";
-  let tapeUntil = 0;
-  let tapePhoto: HTMLCanvasElement | null = null;
+  let mode: "static" | "live" = "static";
   let time = 0;
-  const ball = { x: 80, y: 60, vx: 70, vy: 45 };
   const noise = screen ? screen.ctx.createImageData(160, 120) : null;
 
   const setOn = (value: boolean): void => {
@@ -220,10 +223,6 @@ const television: Factory = (g, w, system) => {
       hum?.stop();
       hum = null;
     }
-  };
-  const nearbyKind = (kind: string, radius: number): Grabbable | null => {
-    for (const other of w.registry.all) if (other.kind === kind && other.object.position.distanceTo(g.object.position) < radius) return other;
-    return null;
   };
 
   const drawStatic = (ctx: CanvasRenderingContext2D): void => {
@@ -239,38 +238,6 @@ const television: Factory = (g, w, system) => {
     // Barre de défilement verticale (synchro qui décroche).
     ctx.fillStyle = "rgba(0, 0, 0, 0.25)";
     ctx.fillRect(0, (time * 40) % 140 - 20, 160, 14);
-  };
-  const drawGame = (ctx: CanvasRenderingContext2D, dt: number): void => {
-    ball.x += ball.vx * dt;
-    ball.y += ball.vy * dt;
-    if (ball.y < 4 || ball.y > 116) ball.vy *= -1;
-    if (ball.x < 12 || ball.x > 148) ball.vx *= -1;
-    ctx.fillStyle = "#050805";
-    ctx.fillRect(0, 0, 160, 120);
-    ctx.fillStyle = "#b8ffb8";
-    for (let y = 0; y < 120; y += 10) ctx.fillRect(79, y, 2, 5);
-    ctx.fillRect(6, Math.min(100, Math.max(0, ball.y - 12)), 4, 24);
-    ctx.fillRect(150, Math.min(100, Math.max(0, ball.y - 10 + Math.sin(time * 2) * 8)), 4, 24);
-    ctx.fillRect(ball.x - 2, ball.y - 2, 4, 4);
-    ctx.font = "bold 14px monospace";
-    ctx.fillText(String(Math.floor(time / 7) % 10), 60, 16);
-    ctx.fillText(String(Math.floor(time / 9) % 10), 92, 16);
-  };
-  const drawTape = (ctx: CanvasRenderingContext2D): void => {
-    ctx.fillStyle = "#0a0a14";
-    ctx.fillRect(0, 0, 160, 120);
-    if (tapePhoto) {
-      // Image qui ondule par bandes, comme une VHS usée.
-      for (let y = 0; y < 120; y += 4) {
-        const shift = Math.sin(time * 3 + y * 0.2) * 2 + (Math.random() < 0.03 ? (Math.random() - 0.5) * 20 : 0);
-        ctx.drawImage(tapePhoto, 0, (y / 120) * tapePhoto.height, tapePhoto.width, (4 / 120) * tapePhoto.height, shift, y, 160, 4);
-      }
-    }
-    ctx.fillStyle = "#ffffff";
-    ctx.font = "bold 12px monospace";
-    ctx.fillText(t("tv.play"), 6, 14);
-    const seconds = Math.floor(time);
-    ctx.fillText(`01:13:${String(seconds % 60).padStart(2, "0")}:${String(Math.floor((time % 1) * 25)).padStart(2, "0")}`, 70, 112);
   };
 
   /**
@@ -307,17 +274,12 @@ const television: Factory = (g, w, system) => {
       scanTimer -= dt;
       if (scanTimer <= 0) {
         scanTimer = 0.4;
-        const tape = nearbyKind("tape", 0.45);
-        if (tape && time > tapeUntil) {
-          tapeUntil = time + 15;
-          tapePhoto = w.capturePhoto();
-        }
         // Après deux secondes de neige : l'image en direct, coupée de temps en temps par la neige.
         if (Math.random() < 0.06) glitchUntil = time + 0.35;
         const previousMode = mode;
-        mode = time < tapeUntil ? "tape" : nearbyKind("gamingConsole", 1.6) ? "game" : time - onSince > 2 && time > glitchUntil ? "live" : "static";
+        mode = time - onSince > 2 && time > glitchUntil ? "live" : "static";
         // Journal : un changement de mode réel, pas chaque coupure de neige du direct.
-        if (mode !== previousMode && !(wentLive && (mode === "static" || mode === "live"))) {
+        if (mode !== previousMode && !wentLive) {
           log("interact", { action: "tv", mode, source: mode === "live" ? (system.securityCamera ? "security" : w.cadreurEye() ? "cadreur" : "behind") : undefined });
         }
         if (mode === "live") wentLive = true;
@@ -336,9 +298,7 @@ const television: Factory = (g, w, system) => {
       frame -= dt;
       if (frame > 0) return;
       frame = 1 / 15;
-      if (mode === "static") drawStatic(screen.ctx);
-      else if (mode === "game") drawGame(screen.ctx, 1 / 15);
-      else drawTape(screen.ctx);
+      drawStatic(screen.ctx);
       screen.commit();
     },
     dispose: () => {
@@ -353,76 +313,6 @@ const television: Factory = (g, w, system) => {
 };
 
 /** Écran de projection : quand on s'approche, le projecteur (invisible) démarre — amorce, compte à rebours. */
-const projectorScreen: Factory = (g, w) => {
-  const face = faceOf(g, FRONT_AXES);
-  const screen = face ? new FaceCanvas(g.object, face, 128, 96, { shrink: 0.86, glow: true }) : null;
-  if (screen) screen.visible = false;
-  let running = false;
-  let loop: LoopHandle | null = null;
-  let time = 0;
-  let frame = 0;
-  let noiseTimer = 0;
-  return {
-    update: (dt) => {
-      if (!screen) return;
-      const close = g.object.position.distanceTo(w.head()) < 4;
-      if (close !== running) {
-        running = close;
-        screen.visible = running;
-        if (running) loop = w.audio.loop("projector", g.object, 0.35);
-        else {
-          loop?.stop();
-          loop = null;
-        }
-      }
-      if (!running) return;
-      time += dt;
-      noiseTimer -= dt;
-      if (noiseTimer <= 0) {
-        noiseTimer = 4;
-        noiseAt(g, 0.3);
-      }
-      frame -= dt;
-      if (frame > 0) return;
-      frame = 1 / 12;
-      const ctx = screen.ctx;
-      const flicker = 0.78 + Math.random() * 0.14;
-      ctx.fillStyle = `rgb(${220 * flicker}, ${214 * flicker}, ${190 * flicker})`;
-      ctx.fillRect(0, 0, 128, 96);
-      // Amorce de film : cercles, réticule et chiffre du compte à rebours.
-      const count = 3 - (Math.floor(time) % 3);
-      ctx.strokeStyle = "rgba(20, 18, 14, 0.8)";
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.arc(64, 48, 34, 0, Math.PI * 2);
-      ctx.moveTo(64, 0);
-      ctx.lineTo(64, 96);
-      ctx.moveTo(0, 48);
-      ctx.lineTo(128, 48);
-      ctx.stroke();
-      ctx.fillStyle = "rgba(20, 18, 14, 0.25)";
-      ctx.beginPath();
-      ctx.moveTo(64, 48);
-      ctx.arc(64, 48, 44, -Math.PI / 2, -Math.PI / 2 + (time % 1) * Math.PI * 2);
-      ctx.fill();
-      ctx.fillStyle = "rgba(20, 18, 14, 0.9)";
-      ctx.font = "bold 40px monospace";
-      ctx.textAlign = "center";
-      ctx.textBaseline = "middle";
-      ctx.fillText(String(count), 64, 50);
-      for (let i = 0; i < 40; i++) {
-        ctx.fillStyle = `rgba(0, 0, 0, ${Math.random() * 0.4})`;
-        ctx.fillRect(Math.random() * 128, Math.random() * 96, 1, 1 + Math.random() * 3);
-      }
-      screen.commit();
-    },
-    dispose: () => {
-      loop?.stop();
-      screen?.dispose();
-    },
-  };
-};
-
 /** Tableau noir : quand on a le dos tourné, un message apparaît à la craie. */
 const chalkboard: Factory = (g, w) => {
   const face = faceOf(g, FRONT_AXES);
@@ -442,15 +332,18 @@ const chalkboard: Factory = (g, w) => {
       const message = messages[Math.floor(objectRoll(g, 2) * messages.length)]!.replace("{take}", String(w.take()));
       const ctx = board.ctx;
       ctx.clearRect(0, 0, 256, 192);
-      ctx.fillStyle = "rgba(240, 240, 232, 0.88)";
-      ctx.font = `bold 34px ${HANDWRITING_FONT}`;
+      // Craie bien contrastée (blanc quasi pur + léger halo) : lisible même de loin, à travers la corruption.
+      ctx.font = "bold 46px " + HANDWRITING_FONT;
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
-      const words = message.split(" ");
-      const lines = words.length > 2 ? [words.slice(0, Math.ceil(words.length / 2)).join(" "), words.slice(Math.ceil(words.length / 2)).join(" ")] : [message];
+      ctx.shadowColor = "rgba(0, 0, 0, 0.55)";
+      ctx.shadowBlur = 6;
+      const lines = wrapLines(ctx, message, 232);
+      const lineHeight = 50;
+      ctx.fillStyle = "rgba(250, 250, 245, 0.97)";
       lines.forEach((line, index) => {
         ctx.save();
-        ctx.translate(128, 96 + (index - (lines.length - 1) / 2) * 44);
+        ctx.translate(128, 96 + (index - (lines.length - 1) / 2) * lineHeight);
         ctx.rotate(-0.05);
         ctx.fillText(line, 0, 0);
         ctx.restore();
@@ -460,25 +353,6 @@ const chalkboard: Factory = (g, w) => {
     dispose: () => board?.dispose(),
   };
 };
-
-/** Meuble qu'on fouille (tiroirs, casier, rabats, coussins) : un objet caché, une seule fois. */
-function stash(sound: "drawer" | "creak" | "rustle", chance: number): Factory {
-  return (g, w) => {
-    const start = g.object.position.clone();
-    const key = `${Math.round(start.x * 100)}:${Math.round(start.z * 100)}`;
-    let searched = false;
-    const search = (): void => {
-      w.audio.playAt(sound, g.object.position, searched ? 0.4 : 0.8);
-      noiseAt(g, 0.15);
-      if (searched) return;
-      searched = true;
-      if (objectRoll(g, 3) >= chance) return;
-      const box = new THREE.Box3().setFromObject(g.object);
-      w.spawnHiddenItem(key, new THREE.Vector3((box.min.x + box.max.x) / 2, box.max.y + 0.06, (box.min.z + box.max.z) / 2));
-    };
-    return { poke: search, use: search };
-  };
-}
 
 /** Chariot : ses roulettes grincent quand on le pousse (plus maintenant, s'il a été graissé). */
 const storageCart: Factory = (g, w) => {
@@ -523,14 +397,6 @@ const metalShelves: Factory = (g, w) => {
   };
 };
 
-/** Bibliothèque : un livre tombe quand on la touche. */
-const bookshelf: Factory = (g, w) => ({
-  poke: () => {
-    w.audio.playAt("thump", g.object.position, 0.8);
-    noiseAt(g, 0.3);
-  },
-});
-
 /** Panneau « sol glissant » : se plie et se déplie. */
 const wetFloorSign: Factory = (g, w) => {
   let folded = false;
@@ -565,7 +431,9 @@ const armChair: Factory = (g, w) => {
 const metalStool: Factory = (g, w) => {
   const spin = (): void => {
     g.body.applyTorqueImpulse({ x: 0, y: 1.2, z: 0 }, true);
-    w.audio.playAt("squeak", g.object.position, 0.5);
+    // "creak" (grincement métallique) plutôt que "squeak" (couic de jouet) : un tabouret qui
+    // tourne ne devrait pas sonner comme un canard en caoutchouc.
+    w.audio.playAt("creak", g.object.position, 0.5);
     noiseAt(g, 0.2);
   };
   return { poke: spin, use: spin };
@@ -676,66 +544,23 @@ const can: Factory = (g, w, system) => {
 
 /** Aérosol : pulvérise un petit nuage ; le lubrifiant fait taire un chariot qui grince. */
 function sprayCan(lubricant: boolean): Factory {
-  return (g, w, system) => ({
-    use: (hand) => {
-      w.audio.playAt("spray", g.object.position, 0.6);
-      noiseAt(g, 0.15);
-      system.puff(g.object.position, hand.aimDirection);
-      if (!lubricant) return;
-      for (const other of w.registry.all) {
-        if (other.kind === "storageCart" && other.object.position.distanceTo(g.object.position) < 1.4) system.behaviourOf(other)?.oil?.();
-      }
-    },
-  });
-}
-
-/** Feuille imprimée ou manuscrite posée sur la face de l'objet (feuille de service, notes). */
-function paperFace(draw: (ctx: CanvasRenderingContext2D, g: Grabbable) => void, width = 256, height = 320): Factory {
-  return (g) => {
-    const face = faceOf(g);
-    if (!face) return {};
-    const sheet = new FaceCanvas(g.object, face, width, height, { shrink: 0.86 });
-    draw(sheet.ctx, g);
-    sheet.commit();
-    return { dispose: () => sheet.dispose() };
+  return (g, w, system) => {
+    // La buse, pas le centre du bidon : sinon le nuage part du mauvais endroit à l'usage.
+    const nozzleLocal = topLocalPoint(g.object);
+    return {
+      use: (hand) => {
+        const nozzleWorld = g.object.localToWorld(nozzleLocal.clone());
+        w.audio.playAt("spray", nozzleWorld, 0.6);
+        noiseAt(g, 0.15);
+        system.puff(nozzleWorld, hand.aimDirection);
+        if (!lubricant) return;
+        for (const other of w.registry.all) {
+          if (other.kind === "storageCart" && other.object.position.distanceTo(g.object.position) < 1.4) system.behaviourOf(other)?.oil?.();
+        }
+      },
+    };
   };
 }
-
-const callSheet = paperFace((ctx) => {
-  const lines = tList("interact.callSheet");
-  ctx.fillStyle = "#f2efe6";
-  ctx.fillRect(0, 0, 256, 320);
-  ctx.fillStyle = "#1a1510";
-  ctx.font = "bold 20px 'Courier New', monospace";
-  ctx.textAlign = "center";
-  ctx.fillText(lines[0] ?? "", 128, 34);
-  ctx.textAlign = "left";
-  ctx.font = "13px 'Courier New', monospace";
-  lines.slice(1).forEach((line, index) => ctx.fillText(line, 14, 76 + index * 32));
-  ctx.strokeStyle = "rgba(0, 0, 0, 0.4)";
-  ctx.strokeRect(8, 50, 240, 262);
-});
-
-const productionNote = paperFace((ctx, g) => {
-  const notes = tList("interact.notes");
-  const note = notes[Math.floor(objectRoll(g, 5) * notes.length)] ?? "";
-  ctx.fillStyle = "#f3e9a8";
-  ctx.fillRect(0, 0, 256, 256);
-  ctx.fillStyle = "#1c2753";
-  ctx.font = `26px ${HANDWRITING_FONT}`;
-  const words = note.split(" ");
-  let line = "";
-  let y = 50;
-  for (const word of words) {
-    const candidate = line ? `${line} ${word}` : word;
-    if (ctx.measureText(candidate).width > 220 && line) {
-      ctx.fillText(line, 18, y);
-      line = word;
-      y += 36;
-    } else line = candidate;
-  }
-  ctx.fillText(line, 18, y);
-}, 256, 256);
 
 /** Photo : annotation au dos ; quand on ne la regarde pas, l'image change (l'endroit où l'on est). */
 const photo: Factory = (g, w) => {
@@ -848,53 +673,6 @@ const digitalWatch = dial(128, 1, (ctx, _g, w) => {
   ctx.fillText(`${String(Math.floor(total / 60)).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`, 64, 64);
 });
 
-/**
- * Lampe trouvée : elle s'allume dès qu'on la prend en main (gâchette : éteindre / rallumer), le
- * faisceau part de la main, dans la direction pointée, sans pile. Lâchée, elle s'éteint.
- */
-function handTorch(warm: boolean): Factory {
-  return (g, w, system) => {
-    let on = false;
-    const light = (): void => {
-      log("interact", { action: "torch", kind: g.kind });
-      on = true;
-      system.torchOwner = g;
-      w.audio.playAt("metalClick", g.object.position, 0.5);
-    };
-    const off = (): void => {
-      on = false;
-      if (system.torchOwner === g) {
-        system.torchOwner = null;
-        w.flashlight.setHandTorch(null);
-      }
-    };
-    return {
-      grab: () => {
-        if (!on) light();
-      },
-      use: () => {
-        if (!on) {
-          light();
-          return;
-        }
-        w.audio.playAt("metalClick", g.object.position, 0.5);
-        off();
-      },
-      update: () => {
-        if (!on) return;
-        const hand = g.heldBy as Hand | null;
-        if (!hand || system.torchOwner !== g) {
-          off();
-          return;
-        }
-        torchPosition.copy(hand.palm).addScaledVector(hand.aimDirection, 0.12);
-        w.flashlight.setHandTorch({ position: torchPosition, direction: hand.aimDirection, warm });
-      },
-      dispose: off,
-    };
-  };
-}
-
 /** Manette : vibre dans la vraie manette du joueur. */
 const gamepad: Factory = () => ({
   use: (hand) => hand.pulse(1, 450),
@@ -935,79 +713,6 @@ const lightbulb: Factory = (g, w, system) => {
       buzz?.stop();
       glowTexture.dispose();
       (glow.material as THREE.Material).dispose();
-    },
-  };
-};
-
-/** Mètre ruban : gâchette tenue, le ruban se déroule dans la direction pointée ; relâchée, il se rembobine. */
-const measuringTape: Factory = (g, w) => {
-  const canvas = document.createElement("canvas");
-  canvas.width = 256;
-  canvas.height = 16;
-  const ctx = canvas.getContext("2d")!;
-  ctx.fillStyle = "#e8c22e";
-  ctx.fillRect(0, 0, 256, 16);
-  ctx.fillStyle = "#1a1a1a";
-  for (let x = 0; x < 256; x += 8) ctx.fillRect(x, 0, 1, x % 64 === 0 ? 12 : 6);
-  const texture = new THREE.CanvasTexture(canvas);
-  texture.wrapS = THREE.RepeatWrapping;
-  texture.colorSpace = THREE.SRGBColorSpace;
-  const blade = new THREE.Mesh(new THREE.BoxGeometry(1, 0.001, 0.019).translate(0.5, 0, 0), new THREE.MeshStandardMaterial({ map: texture, roughness: 0.5, metalness: 0.4 }));
-  blade.visible = false;
-  w.scene.add(blade);
-  let length = 0;
-  let extending = false;
-  return {
-    update: (dt) => {
-      const hand = g.heldBy as Hand | null;
-      const pulling = !!hand && hand.input.trigger.pressed;
-      if (pulling && !extending) extending = true;
-      if (!pulling && extending) {
-        extending = false;
-        if (length > 0.1) w.audio.playAt("zip", g.object.position, 0.6);
-      }
-      length = THREE.MathUtils.clamp(length + (pulling ? 1.4 : -6) * dt, 0, 3);
-      blade.visible = length > 0.01 && !!hand;
-      if (!blade.visible || !hand) return;
-      blade.position.copy(g.object.position);
-      blade.quaternion.setFromUnitVectors(new THREE.Vector3(1, 0, 0), hand.aimDirection);
-      blade.scale.set(length, 1, 1);
-      texture.repeat.set(length * 4, 1);
-    },
-    dispose: () => {
-      blade.removeFromParent();
-      blade.geometry.dispose();
-      texture.dispose();
-    },
-  };
-};
-
-/** Tapette : armée à la gâchette ; posée, elle claque si le Cadreur passe dessus (il reste figé). */
-const mousetrap: Factory = (g, w) => {
-  let armed = false;
-  const snap = (hand?: Hand): void => {
-    armed = false;
-    w.audio.playAt("snap", g.object.position, 1);
-    noiseAt(g, 0.6);
-    hand?.pulse(1, 120);
-  };
-  return {
-    use: () => {
-      armed = !armed;
-      w.audio.playAt("metalClick", g.object.position, 0.6);
-    },
-    grab: (hand) => {
-      if (armed) snap(hand);
-    },
-    poke: (hand) => {
-      if (armed) snap(hand);
-    },
-    update: () => {
-      if (!armed || g.heldBy) return;
-      const cadreur = w.cadreurPosition();
-      if (!cadreur || Math.hypot(cadreur.x - g.object.position.x, cadreur.z - g.object.position.z) > 0.7) return;
-      snap();
-      w.stunCadreur(3.5);
     },
   };
 };
@@ -1112,6 +817,54 @@ const wallClock: Factory = (g, w) => {
   };
 };
 
+/** Lueur additive d'une flamme (même esprit que le halo de l'ampoule, pas de lumière dynamique). */
+function flameTexture(): THREE.CanvasTexture {
+  const canvas = document.createElement("canvas");
+  canvas.width = canvas.height = 32;
+  const ctx = canvas.getContext("2d")!;
+  const gradient = ctx.createRadialGradient(16, 20, 1, 16, 16, 16);
+  gradient.addColorStop(0, "rgba(255, 245, 200, 1)");
+  gradient.addColorStop(0.4, "rgba(255, 170, 60, 0.9)");
+  gradient.addColorStop(1, "rgba(255, 90, 20, 0)");
+  ctx.fillStyle = gradient;
+  ctx.fillRect(0, 0, 32, 32);
+  return new THREE.CanvasTexture(canvas);
+}
+
+/**
+ * Briquet : gâchette pour allumer/éteindre une petite flamme (son "flick" : molette puis prise).
+ * Sa position (approchée par le point le plus haut du modèle, dans son repère local) suit la
+ * buse sans avoir besoin d'un réglage propre à chaque objet.
+ */
+const lighter: Factory = (g, w) => {
+  const nozzleLocal = topLocalPoint(g.object);
+  const texture = flameTexture();
+  const flame = new THREE.Sprite(new THREE.SpriteMaterial({ map: texture, blending: THREE.AdditiveBlending, depthWrite: false, transparent: true }));
+  flame.scale.setScalar(0.045);
+  flame.position.copy(nozzleLocal).addScaledVector(new THREE.Vector3(0, 1, 0), 0.012 / Math.max(0.01, g.object.scale.y));
+  flame.visible = false;
+  g.object.add(flame);
+  let on = false;
+  return {
+    use: () => {
+      on = !on;
+      w.audio.playAt("flick", g.object.position, 0.5);
+      flame.visible = on;
+    },
+    update: (dt) => {
+      if (!on) return;
+      const jitter = 1 + Math.sin(performance.now() * 0.03) * 0.08 + (Math.random() - 0.5) * 0.1;
+      flame.scale.set(0.045 * jitter, 0.06 * (1 + (Math.random() - 0.5) * 0.15), 1);
+      flame.position.y += Math.sin(dt * 40) * 0.0003;
+    },
+    dispose: () => {
+      flame.removeFromParent();
+      texture.dispose();
+      (flame.material as THREE.Material).dispose();
+    },
+  };
+};
+
 /**
  * Caméra de surveillance : on la pointe où l'on veut surveiller, on la pose (on la lâche) ; son
  * image passe alors sur les télés allumées.
@@ -1204,85 +957,14 @@ const magnifyingGlass: Factory = (g, w, system) => {
   };
 };
 
-/**
- * Caméscope : porté à l'œil, le viseur montre la scène en vision nocturne (le noir n'y cache
- * plus rien) avec son REC ; gâchette : relit la dernière cassette audio trouvée.
- */
-const videoCamera: Factory = (g, w, system) => {
-  const material = new THREE.MeshBasicMaterial({ color: new THREE.Color(0.9, 2.4, 1.1), depthTest: false, depthWrite: false, toneMapped: false });
-  const viewfinder = eyeOverlay(w, 0.16, 0.12, material);
-  const recCanvas = document.createElement("canvas");
-  recCanvas.width = 256;
-  recCanvas.height = 192;
-  const rec = recCanvas.getContext("2d")!;
-  rec.strokeStyle = "rgba(255, 255, 255, 0.8)";
-  rec.lineWidth = 3;
-  for (const [x, y, dx, dy] of [[12, 12, 1, 1], [244, 12, -1, 1], [12, 180, 1, -1], [244, 180, -1, -1]] as const) {
-    rec.beginPath();
-    rec.moveTo(x, y + dy * 20);
-    rec.lineTo(x, y);
-    rec.lineTo(x + dx * 20, y);
-    rec.stroke();
-  }
-  rec.fillStyle = "#ff3b30";
-  rec.beginPath();
-  rec.arc(30, 36, 7, 0, Math.PI * 2);
-  rec.fill();
-  rec.font = "bold 18px monospace";
-  rec.fillText("REC", 44, 42);
-  const recTexture = new THREE.CanvasTexture(recCanvas);
-  const frameOverlay = new THREE.Mesh(
-    new THREE.PlaneGeometry(0.16, 0.12),
-    new THREE.MeshBasicMaterial({ map: recTexture, transparent: true, depthTest: false, depthWrite: false, toneMapped: false }),
-  );
-  frameOverlay.position.z = 0.001;
-  frameOverlay.renderOrder = 996;
-  viewfinder.add(frameOverlay);
-  return {
-    use: () => {
-      if (!w.playLatestTape()) w.audio.playAt("crackle", g.object.position, 0.6);
-    },
-    update: () => {
-      const visible = atEye(g, w, 0.2);
-      if (visible && !viewfinder.visible) log("interact", { action: "view", kind: "videoCamera" });
-      viewfinder.visible = visible;
-      if (!viewfinder.visible) return;
-      const view = w.views.use("camcorder", 192, 144, 12, 50, [...system.displays]);
-      g.object.getWorldPosition(view.camera.position);
-      w.camera.getWorldQuaternion(view.camera.quaternion);
-      if (material.map !== view.texture) {
-        material.map = view.texture;
-        material.needsUpdate = true;
-      }
-    },
-    dispose: () => {
-      viewfinder.removeFromParent();
-      viewfinder.geometry.dispose();
-      material.dispose();
-      frameOverlay.geometry.dispose();
-      (frameOverlay.material as THREE.Material).dispose();
-      recTexture.dispose();
-    },
-  };
-};
-
 const BEHAVIOURS: Record<string, Factory> = {
   securityCamera,
   binoculars,
   magnifyingGlass,
-  videoCamera,
   television,
-  projectorScreen,
   chalkboard,
-  officeDesk: stash("drawer", 0.6),
-  cabinet: stash("drawer", 0.7),
-  schoolDesk: stash("creak", 0.4),
-  cardboardBox: stash("rustle", 0.5),
-  sofa: stash("rustle", 0.35),
-  toolbox: stash("drawer", 0.8),
   storageCart,
   metalShelves,
-  bookshelf,
   wetFloorSign,
   armChair,
   metalStool,
@@ -1307,22 +989,43 @@ const BEHAVIOURS: Record<string, Factory> = {
   pliers: useSound("metalClick", 0),
   cleaner: sprayCan(false),
   lubricant: sprayCan(true),
-  clipboard: callSheet,
-  note: productionNote,
   photo,
   compass,
   digitalWatch,
-  flashlight: handTorch(false),
-  vintageFlashlight: handTorch(true),
   gamepad,
-  measuringTape,
-  mousetrap,
+  lighter,
   multimeter,
   plunger,
   spacecraftInstrument,
   watch: pocketWatch,
   wallClock,
+  // Petits outils sans comportement propre : au moins un bruit de choc plausible au lancer.
+  wrench: impactNoise("clank", 1.3, 0.35),
+  combWrench: impactNoise("clank", 1.3, 0.35),
+  screwdriver: impactNoise("clank", 1.2, 0.3),
+  screwdriverFlat: impactNoise("clank", 1.2, 0.3),
+  dustpan: impactNoise("thump", 1.3, 0.3),
+  drainCleaner: impactNoise("thump", 1.4, 0.35),
+  bleach: impactNoise("thump", 1.4, 0.35),
+  woodenSpoon: impactNoise("thump", 1.2, 0.25),
 };
+
+/**
+ * Faces (écran, tableau, cadran) que cherchent les comportements ci-dessus, calculées d'avance
+ * au pré-chauffage (voir warmup.ts) : la recherche parcourt tous les triangles du modèle —
+ * jusqu'à ~10 ms au premier spawn d'une loupe (banc de test). Mêmes appels que les
+ * comportements, donc mêmes entrées du cache de `findModelFace`.
+ */
+export function prepareInteractionFaces(kind: string, template: THREE.Object3D): void {
+  const behaviour = BEHAVIOURS[kind];
+  if (behaviour === television || behaviour === chalkboard) findModelFace(template, undefined, FRONT_AXES);
+  else if (behaviour === compass || behaviour === digitalWatch) findModelFace(template, undefined, UP_AXES);
+  else if (behaviour === magnifyingGlass) findModelFace(template);
+  else if (behaviour === photo) {
+    const front = findModelFace(template);
+    if (front) findModelFace(template, front.normal.clone().negate());
+  }
+}
 
 /**
  * Objets qui s'animent (phase 3 de la feuille de route) : chaque meuble ou objet de collection
@@ -1340,8 +1043,6 @@ export class InteractionSystem {
   private readonly lastPoke = new Map<Grabbable, number>();
   private readonly puffs: Array<{ points: THREE.Points; age: number; velocity: THREE.Vector3 }> = [];
   private time = 0;
-  /** Lampe trouvée actuellement allumée en main (une seule à la fois). */
-  torchOwner: Grabbable | null = null;
   /** Surfaces qui affichent une vue en direct : masquées pendant le rendu des vues. */
   readonly displays = new Set<THREE.Object3D>();
   /** Dernière caméra de surveillance posée (son image passe sur les télés), et son axe. */

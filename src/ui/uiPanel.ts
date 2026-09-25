@@ -31,6 +31,15 @@ const tmpLocal = new THREE.Vector3();
  * Panneau de menu en espace monde : texture canvas sur un plan, visée au pointeur laser
  * (voir `UiPointer`). Les sous-classes dessinent le canvas et réagissent au survol/aux clics.
  */
+/**
+ * Intervalle minimal (ms) entre deux redessins effectifs d'un panneau. Un survol qui change
+ * (rayon laser qui tremble pile à la frontière de deux cases) peut appeler `invalidate()` à
+ * chaque frame ; sans ce plancher, chaque appel redessine tout le canvas (fillText/roundRect en
+ * nombre) et réuploade la texture au GPU — coûteux, et inutile à plus de ~20 Hz pour une simple
+ * surbrillance de survol. L'état affiché reste toujours le plus récent, juste légèrement différé.
+ */
+const MIN_REDRAW_INTERVAL_MS = 45;
+
 export abstract class UiPanel {
   readonly group = new THREE.Group();
   readonly canvas: HTMLCanvasElement;
@@ -38,6 +47,7 @@ export abstract class UiPanel {
   protected readonly texture: THREE.CanvasTexture;
   protected readonly mesh: THREE.Mesh;
   private dirty = true;
+  private lastDrawAt = -Infinity;
 
   protected constructor(
     readonly widthMeters: number,
@@ -74,7 +84,11 @@ export abstract class UiPanel {
 
   refresh(): void {
     if (!this.dirty || !this.visible) return;
+    const now = performance.now();
+    // Reste "dirty" : redessiné dès que le prochain refresh() passe le seuil, jamais perdu.
+    if (now - this.lastDrawAt < MIN_REDRAW_INTERVAL_MS) return;
     this.dirty = false;
+    this.lastDrawAt = now;
     this.draw(this.ctx);
     this.texture.needsUpdate = true;
   }

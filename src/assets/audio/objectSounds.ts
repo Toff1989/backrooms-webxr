@@ -1,8 +1,8 @@
-import { bandpass, brownNoise, createSamples, fadeEdges, highpass, lowpass, makeLoopable, normalize, reverb, toBuffer } from "./synth";
+import { bandpass, createSamples, fadeEdges, highpass, lowpass, makeLoopable, normalize, reverb, toBuffer } from "./synth";
 
 /**
  * Sons des objets manipulables, synthétisés hors ligne comme le reste du jeu (pas de fichier
- * audio) : télé qui grésille, réveil, bouilloire, verre qui éclate, tapette qui claque...
+ * audio) : télé qui grésille, réveil, bouilloire, verre qui éclate...
  * Sourds et « dans la pièce » plutôt que des bips de synthé.
  */
 export type ObjectSoundName =
@@ -15,28 +15,24 @@ export type ObjectSoundName =
   | "squeak"
   | "gong"
   | "shatter"
-  | "snap"
   | "crumple"
   | "thump"
   | "bang"
   | "clank"
   | "beep"
   | "spray"
-  | "drawer"
   | "wheel"
   | "flick"
   | "creak"
   | "rattle"
   | "suction"
-  | "zip"
   | "rustle"
   | "metalClick"
-  | "projector"
   | "crackle"
   | "buzz";
 
 /** Sons joués en boucle (attachés à l'objet tant qu'il est actif). */
-export const LOOPING_SOUNDS = new Set<ObjectSoundName>(["tvStatic", "projector", "buzz", "tick"]);
+export const LOOPING_SOUNDS = new Set<ObjectSoundName>(["tvStatic", "buzz", "tick"]);
 
 const noise = (): number => Math.random() * 2 - 1;
 
@@ -113,24 +109,26 @@ export function createObjectSound(context: BaseAudioContext, name: ObjectSoundNa
       break;
     }
     case "squeak": {
-      data = createSamples(rate, 0.35);
+      // Anche en caoutchouc du jouet : un souffle d'air mêlé au sifflement, pas un bip pur.
+      data = createSamples(rate, 0.32);
       for (let i = 0; i < data.length; i++) {
         const t = i / rate;
-        data[i] = Math.sin(2 * Math.PI * (1400 + Math.sin(t * 40) * 500 + t * 1500) * t) * Math.sin((Math.PI * t) / 0.35);
+        data[i] = (Math.sin(2 * Math.PI * (1200 + Math.sin(t * 35) * 400 + t * 1100) * t) * 0.75 + noise() * 0.25) * Math.sin((Math.PI * t) / 0.32);
       }
+      lowpass(data, rate, 3200);
       break;
     }
     case "gong": {
-      // Pot en laiton frappé : partiels inharmoniques qui s'éteignent lentement.
-      data = createSamples(rate, 3);
-      for (const [freq, gain, decay] of [[196, 1, 1.4], [313, 0.6, 1.1], [487, 0.45, 0.8], [731, 0.3, 0.5], [1102, 0.2, 0.3]] as const) {
+      // Petit pot en laiton frappé : résonance métallique brève (pas un gong de temple).
+      data = createSamples(rate, 1.2);
+      for (const [freq, gain, decay] of [[520, 1, 0.35], [780, 0.55, 0.26], [1170, 0.4, 0.18], [1560, 0.25, 0.12], [2340, 0.15, 0.08]] as const) {
         for (let i = 0; i < data.length; i++) {
           const t = i / rate;
-          data[i] = data[i]! + Math.sin(2 * Math.PI * freq * t * (1 + Math.sin(t * 5) * 0.002)) * gain * Math.exp(-t / decay);
+          data[i] = data[i]! + Math.sin(2 * Math.PI * freq * t * (1 + Math.sin(t * 9) * 0.003)) * gain * Math.exp(-t / decay);
         }
       }
-      decayHit(data, rate, 0, 400, 0.01, 0.8, 0.9);
-      reverb(data, rate, 0.3, 1.4);
+      decayHit(data, rate, 0, 1800, 0.006, 0.9, 0.85);
+      reverb(data, rate, 0.18, 0.6);
       break;
     }
     case "shatter": {
@@ -142,13 +140,6 @@ export function createObjectSound(context: BaseAudioContext, name: ObjectSoundNa
       reverb(data, rate, 0.2, 0.8);
       break;
     }
-    case "snap": {
-      // Tapette qui claque : claquement sec du ressort + bois.
-      data = createSamples(rate, 0.2);
-      decayHit(data, rate, 0, 1900, 0.004, 1.3, 0.8);
-      decayHit(data, rate, 0.004, 220, 0.03, 0.8, 0.3);
-      break;
-    }
     case "crumple": {
       data = createSamples(rate, 0.5);
       for (let k = 0; k < 40; k++) decayHit(data, rate, Math.random() * 0.4, 2500 + Math.random() * 3000, 0.002 + Math.random() * 0.004, Math.random(), 0.9);
@@ -156,25 +147,29 @@ export function createObjectSound(context: BaseAudioContext, name: ObjectSoundNa
       break;
     }
     case "thump": {
-      data = createSamples(rate, 0.3);
-      decayHit(data, rate, 0, 90, 0.05, 1, 0.25);
-      lowpass(data, rate, 700);
+      // Choc sourd (ballon, plastique, bois) : transitoire bruité qui domine, pas une note de basse.
+      data = createSamples(rate, 0.28);
+      decayHit(data, rate, 0, 70, 0.045, 0.75, 0.65);
+      for (let i = 0; i < data.length; i++) data[i] = data[i]! + noise() * Math.exp(-(i / rate) * 55) * 0.6;
+      lowpass(data, rate, 550);
       break;
     }
     case "bang": {
-      // Coup de marteau contre un mur : choc lourd, résonance du placo.
+      // Coup de marteau contre un mur : impact net et bruité, puis résonance sourde du placo.
       data = createSamples(rate, 0.6);
-      decayHit(data, rate, 0, 120, 0.08, 1, 0.4);
-      decayHit(data, rate, 0, 1500, 0.01, 0.6, 0.9);
-      reverb(data, rate, 0.35, 1.2);
+      decayHit(data, rate, 0, 110, 0.09, 1.1, 0.5);
+      decayHit(data, rate, 0, 2200, 0.006, 0.8, 0.95);
+      for (let i = 0; i < data.length; i++) data[i] = data[i]! + noise() * Math.exp(-(i / rate) * 90) * 0.5;
+      reverb(data, rate, 0.32, 1.1);
       break;
     }
     case "clank": {
-      // Canette qui rebondit : métal fin, creux.
+      // Métal fin qui rebondit (canette, outil à main) : choc bruité + résonance courte, pas un tintement propre.
       data = createSamples(rate, 0.4);
-      decayHit(data, rate, 0, 1650, 0.05, 1, 0.3);
-      decayHit(data, rate, 0.09, 1720, 0.035, 0.5, 0.3);
-      decayHit(data, rate, 0.16, 1690, 0.02, 0.25, 0.3);
+      decayHit(data, rate, 0, 1650, 0.045, 0.9, 0.55);
+      decayHit(data, rate, 0, 480, 0.03, 0.35, 0.7);
+      decayHit(data, rate, 0.09, 1720, 0.03, 0.4, 0.55);
+      decayHit(data, rate, 0.16, 1690, 0.018, 0.2, 0.55);
       break;
     }
     case "beep": {
@@ -194,24 +189,15 @@ export function createObjectSound(context: BaseAudioContext, name: ObjectSoundNa
       peak = 0.55;
       break;
     }
-    case "drawer": {
-      // Tiroir métallique qui coulisse, puis butée.
-      data = brownNoise(createSamples(rate, 0.8), 2);
-      for (let i = 0; i < data.length; i++) {
-        const t = i / rate;
-        data[i] = data[i]! * (t < 0.6 ? 0.5 + 0.5 * Math.abs(Math.sin(t * 90)) : 0) + noise() * 0.15 * (t < 0.6 ? 1 : 0);
-      }
-      bandpass(data, rate, 1300, 0.7);
-      decayHit(data, rate, 0.6, 700, 0.03, 1.2, 0.5);
-      break;
-    }
     case "wheel": {
-      // Roulette de chariot qui grince.
+      // Roulette de chariot qui grince : frottement irrégulier (stick-slip), pas un sifflement propre.
       data = createSamples(rate, 0.4);
       for (let i = 0; i < data.length; i++) {
         const t = i / rate;
-        data[i] = Math.sin(2 * Math.PI * (2100 + Math.sin(t * 25) * 300) * t) * Math.sin((Math.PI * t) / 0.4) * (0.6 + 0.4 * Math.sin(t * 180));
+        const chatter = Math.sin(2 * Math.PI * 60 * t + Math.sin(t * 140) * 3) > 0.3 ? 1 : 0.15;
+        data[i] = (Math.sin(2 * Math.PI * (1900 + Math.sin(t * 25) * 250) * t) * 0.4 + noise() * 0.7) * chatter * Math.sin((Math.PI * t) / 0.4);
       }
+      bandpass(data, rate, 2000, 0.9);
       peak = 0.5;
       break;
     }
@@ -224,18 +210,19 @@ export function createObjectSound(context: BaseAudioContext, name: ObjectSoundNa
       break;
     }
     case "creak": {
+      // Grincement de charnière/panneau : frottement irrégulier, dominé par le bruit plutôt qu'un ton.
       data = createSamples(rate, 0.8);
       for (let i = 0; i < data.length; i++) {
         const t = i / rate;
-        const pulse = Math.max(0, Math.sin(2 * Math.PI * (35 + t * 20) * t));
-        data[i] = pulse ** 8 * Math.sin((Math.PI * t) / 0.8);
+        const pulse = Math.max(0, Math.sin(2 * Math.PI * (32 + t * 22) * t + Math.sin(t * 50) * 0.6));
+        data[i] = pulse ** 6 * (noise() * 0.55 + Math.sin(2 * Math.PI * 180 * t) * 0.45) * Math.sin((Math.PI * t) / 0.8);
       }
-      bandpass(data, rate, 800, 1.2);
+      bandpass(data, rate, 750, 1.1);
       break;
     }
     case "rattle": {
       data = createSamples(rate, 0.6);
-      for (let k = 0; k < 14; k++) decayHit(data, rate, Math.random() * 0.45, 900 + Math.random() * 1500, 0.015, 0.4 + Math.random() * 0.6, 0.4);
+      for (let k = 0; k < 18; k++) decayHit(data, rate, Math.random() * 0.45, 800 + Math.random() * 1700, 0.014, 0.35 + Math.random() * 0.55, 0.7);
       reverb(data, rate, 0.2, 0.6);
       break;
     }
@@ -246,17 +233,6 @@ export function createObjectSound(context: BaseAudioContext, name: ObjectSoundNa
         data[i] = (noise() * 0.5 + Math.sin(2 * Math.PI * (300 - t * 800) * t)) * Math.exp(-t * 18);
       }
       lowpass(data, rate, 1500);
-      break;
-    }
-    case "zip": {
-      // Mètre ruban qui se rembobine.
-      data = createSamples(rate, 0.45);
-      for (let i = 0; i < data.length; i++) {
-        const t = i / rate;
-        data[i] = noise() * (0.5 + 0.5 * Math.abs(Math.sin(t * 400))) * (1 - t / 0.45);
-      }
-      decayHit(data, rate, 0.42, 1400, 0.01, 1, 0.5);
-      bandpass(data, rate, 2400, 0.8);
       break;
     }
     case "rustle": {
@@ -274,16 +250,6 @@ export function createObjectSound(context: BaseAudioContext, name: ObjectSoundNa
       decayHit(data, rate, 0, 4200, 0.004, 1, 0.4);
       decayHit(data, rate, 0.035, 3600, 0.004, 0.6, 0.4);
       highpass(data, rate, 1500);
-      break;
-    }
-    case "projector": {
-      // Projecteur à bobines : claquement de la griffe (24 im/s) sur le ronron du moteur.
-      data = createSamples(rate, 1);
-      for (let frame = 0; frame < 24; frame++) decayHit(data, rate, frame / 24, 900, 0.006, 0.6, 0.7);
-      for (let i = 0; i < data.length; i++) data[i] = data[i]! + Math.sin((2 * Math.PI * 100 * i) / rate) * 0.15;
-      lowpass(data, rate, 3000);
-      data = makeLoopable(data, rate, 0.05);
-      peak = 0.5;
       break;
     }
     case "crackle": {

@@ -6,7 +6,7 @@ Jeu d'exploration horrifique en VR, dans le navigateur (WebXR). Voir la fiche pr
 snap-turn, génération par chunks streamés avec collisions, levels avec sortie sombre (porte
 entrouverte sur le noir, balise sonore, signal du caméscope) et difficulté progressive, murs qui
 surgissent, zones sombres (lampe torche à piles) et un labyrinthe dynamique. Les pièges "glitch"
-visuels ont été remplacés par deux menaces : la Coupure et le Cadreur. Décor (mobilier CC0) et ~50 objets
+visuels ont été remplacés par deux menaces : la Coupure et le Cadreur. Décor (mobilier CC0) et 39 objets
 de collection (vrais modèles CC0, rareté fixe par objet) avec un vrai moteur physique (Rapier),
 mains gantées, saisie/lancer au grip (y compris à distance), menu d'inventaire avec aperçus 3D,
 accroupi, jouable assis, persistance IndexedDB. Contrôles inspirés de *The Walking Dead: Saints
@@ -38,9 +38,9 @@ main, menus sans quitter le jeu) :
 | Pousser / frapper | Poing fermé (grip sans objet) ou geste vif |
 | Inventaire | Y (ouvrir/fermer) ; gâchette sur une case puis sur une autre : déplacer l'objet ; grip sur une case : sortir l'objet, puis le relâcher sur une autre case pour l'y ranger ; bouton TRI (récent / rareté / profondeur / nom) ; identifiant de build en bas à droite |
 | Lampe frontale | B (batterie limitée, HUD `BAT` : ramasser des piles au sol en marchant dessus ou en les touchant) |
-| Journal des bandes perdues | Grip avec la main à la ceinture (le carnet reste en main tant que le grip est tenu), ou bouton JOURNAL du menu d'inventaire ; l'autre main tourne les pages à la gâchette |
+| Journal des bandes perdues | Bouton JOURNAL du menu d'inventaire (il flotte devant soi) ; l'autre main tourne les pages à la gâchette |
 | Lire une bande perdue | Saisir la page au sol (grip) : elle entre au journal ; A/X ou par-dessus l'épaule pour la classer |
-| Utiliser un objet | Gâchette en le tenant (allumer une lampe ou la télé, remonter le réveil, armer la tapette, pulvériser...) ; pour un meuble, le toucher du bout de l'index (gâchette relâchée) : tiroirs, télé, tabouret |
+| Utiliser un objet | Gâchette en le tenant (allumer la télé, remonter le réveil, allumer un briquet, pulvériser...) ; pour un meuble, le toucher du bout de l'index (gâchette relâchée) : télé, tabouret |
 | Recaler la hauteur / STOP REC | Boutons du menu d'inventaire |
 
 Hauteur : au démarrage de la session, un joueur assis est automatiquement rehaussé à hauteur
@@ -95,7 +95,9 @@ avec leur cause, stats par seconde, état audio, session XR, chunks...) dans
 `server/logs/debug-AAAA-MM-JJ.jsonl`, relisible via `GET /api/debug-log?token=DEBUG_LOG_TOKEN`
 (jeton dans `server/.env`, généré par `scripts/plesk-install.sh`). L'identifiant de build (commit
 + date) est affiché dans le menu d'inventaire et les options : il permet de vérifier que le casque
-charge bien la dernière version.
+charge bien la dernière version. En mode debug, `window.__game` expose aussi quelques commandes
+pour les bancs de test automatisés (téléporter le joueur, descendre d'un level, ouvrir
+l'inventaire) et le journal signale la fin du pré-chauffage (`warmup`).
 
 ## Structure
 
@@ -118,7 +120,7 @@ src/
                                collider cinématique (poing fermé = on bouscule)
     grabSystem.ts            Saisie proche/à distance, suivi physique en main, lancer, rangement
     inventoryMenu.ts         Menu d'inventaire : miniatures 3D, sortie à taille réelle, actions système
-    journal.ts               Journal des bandes perdues (carnet en main) : index, lecture, code de cassette, jumelage
+    journal.ts               Journal des bandes perdues (carnet flottant, ouvert depuis le menu) : index, lecture, code de cassette, jumelage
     endRunScreen.ts          Écran de fin de run (pseudo, envoi au classement)
     flashlight.ts            Lampe frontale (B)
     comfortVignette.ts      Vignette de confort (quad shader fixé à la caméra, réagit au mouvement)
@@ -182,6 +184,16 @@ tests/physics.sim.ts         Simulation physique sans rendu (`npm run test:physi
   licence Content License — retraitée : redimensionnée, recompressée en WebM, pas le fichier
   brut, pour rester dans le cadre "modifier/adapter" de la licence), pas d'un hash procédural.
   Échantillonnée en `NearestFilter` pour garder le grain brut, son intensité suit `uCorruption`.
+  24 images de la vidéo sont capturées au démarrage dans une texture à couches (« flipbook »,
+  `vhsNoiseTexture.ts`) : plus de décodage vidéo ni d'envoi de l'image au GPU à chaque frame.
+- Performance (budget Quest : 13,9 ms à 72 Hz, cadence demandée au casque) : tout ce qui se
+  préparait à la première apparition d'un objet en pleine partie est fait au démarrage, par
+  petits morceaux dans la boucle de rendu (`warmup.ts`) — chargement de tous les modèles,
+  enveloppes physiques, faces des écrans/cadrans, compilation des shaders (écran et rendu dans
+  une texture) et envoi des textures au GPU. Plus de verre réfractif (il re-rendait toute la
+  scène), une seule passe plein écran pour l'overlay VHS et la vignette, faces invisibles des
+  murs retirées, colliders des murs fusionnés, corps physiques endormis ni relus ni réveillés
+  au changement de chunk (dalles sol/plafond recentrées tous les 180 m seulement).
 - La disposition d'un chunk (murs/piliers/pièges) est une fonction pure de ses coordonnées
   globales et de la seed (`src/shared/`) : deux chunks voisins générés indépendamment restent
   cohérents à leur frontière, et cette logique est réellement réutilisée côté serveur pour la
@@ -226,9 +238,10 @@ tests/physics.sim.ts         Simulation physique sans rendu (`npm run test:physi
   toutes les 10 s que les journaux arrivent, et à l'arrêt (Ctrl+C) exporte la session dans
   `server/logs/export-….jsonl` — à déposer dans la page d'analyse (Artifact « Banc de test
   Backrooms ») puis « Envoyer à Claude », ou directement dans la conversation.
-- **Récit : le Monteur.** La veille du rendu, un monteur retire du film les rushes de la nuit du
-  14, ceux de l'accident où Julien, le cadreur, est mort en continuant de filmer. Le Cadreur,
-  c'est lui : il filme pour que quelqu'un voie enfin.
+- **Récit générique.** Pas de personnage nommé ni d'incident précis : les bandes sont des
+  fragments anonymes laissés par d'autres explorateurs (notes, fiches, photos, cassettes),
+  qui racontent la descente dans les Backrooms et la présence du Cadreur, sans jamais
+  l'expliquer — il regarde, il filme, on ne sait ni qui il est ni ce qu'il veut vraiment.
 - **Bandes perdues** (`shared/lore.ts`, `loreArt.ts`, `lorePage.ts`, `loreJournal.ts`,
   `player/journal.ts`) : 16 bandes, lues dans l'ordre d'une run à l'autre, sous quatre formes :
   note manuscrite (feuille de cahier), fiche de montage (bobine, plan, time-code, note au stylo
@@ -238,7 +251,7 @@ tests/physics.sim.ts         Simulation physique sans rendu (`npm run test:physi
   viseur, `player/tapePlayer.ts`). À chaque level, la bande attendue traîne au sol, à l'écart du
   chemin vers la sortie (cellule dégagée, jamais emmurée) ; la prendre en main la lit et
   l'ajoute au journal.
-  Le journal (carnet pris à la ceinture ou ouvert depuis le menu) liste les bandes lues ou
+  Le journal (carnet ouvert depuis le menu d'inventaire) liste les bandes lues ou
   encore perdues. Progression gardée sur l'appareil et côté serveur (une seule nouvelle bande par
   level et par run, validée contre la run en cours).
 - **Identité sans compte** (`server/src/players.ts`, `pairing.ts`, `routes/player.ts`) : au premier
@@ -249,8 +262,8 @@ tests/physics.sim.ts         Simulation physique sans rendu (`npm run test:physi
   affiche un code à 6 chiffres, l'appareil déjà enregistré le confirme au pavé numérique du
   journal ou sur la page d'accueil). Un appareil qui avait déjà sa propre identité y est fusionné
   (runs et bandes conservées) ; il adopte alors le code de cassette de l'autre.
-- **Mobilier** : 19 modèles CC0 Poly Haven (dont 15 ajoutés : fauteuil, canapé, table basse,
-  tabouret, chaise en plastique, étagère métallique, bibliothèque, chariot, écran de projection,
+- **Mobilier** : 18 modèles CC0 Poly Haven (dont 14 ajoutés : fauteuil, canapé, table basse,
+  tabouret, chaise en plastique, étagère métallique, bibliothèque, chariot,
   tableau noir, carton, caisse en plastique, panneau « sol glissant », télévision, plante),
   optimisés avec glTF-Transform (Draco, WebP 512 px). Ils sont placés en mises en scène
   (`shared/props.ts`) tournées d'un quart de tour aléatoire : coin bureau, réserve avec caisses
@@ -259,25 +272,22 @@ tests/physics.sim.ts         Simulation physique sans rendu (`npm run test:physi
   lumineux, qui varie doucement, est interpolé entre sommets) — fini les ombres en biseau
   dessinées par les triangles ; pénombre plus large et moins noire.
 - **Objets qui s'animent** (`world/interactions.ts`, `objectAudio.ts`, `noise.ts`,
-  `modelFace.ts`, sons dans `assets/audio/objectSounds.ts`) : une quarantaine d'objets ont
-  un comportement. Télé (neige qui grésille, jeu si une console est à côté, lecture si on
-  approche une cassette), écran de projection (amorce et compte à rebours), tableau noir (un
-  message apparaît à la craie quand on a le dos tourné), tiroirs, casiers, cartons et coussins
-  (un objet caché, une fois par meuble et par level), réveil (leurre à retardement), tapette
-  (armée, elle fige le Cadreur), lampes trouvées (le faisceau part de la main, sans pile),
-  multimètre, boussole et instrument de bord (détecteurs), photo qui change quand on ne la
-  regarde pas, mètre ruban, ventouse qui se colle au mur, horloge qui se tait quand le Cadreur
-  approche, objets qui se brisent ou résonnent quand on les lance. Écrans et cadrans sont
-  posés sur la surface trouvée automatiquement dans la géométrie du modèle. **Le bruit attire
-  le Cadreur** : un bruit fort le fait venir plus tôt ; présent, il va voir d'où ça vient — un
-  objet bruyant lancé au loin sert de leurre.
+  `modelFace.ts`, sons dans `assets/audio/objectSounds.ts`) : une trentaine d'objets ont
+  un comportement. Télé (neige qui grésille, puis passe en direct après quelques secondes),
+  tableau noir (un message apparaît à la craie quand on a le dos tourné), réveil (leurre à
+  retardement), briquet (petite flamme à la gâchette), multimètre, boussole et instrument de
+  bord (détecteurs), photo qui change quand on ne la regarde pas, ventouse qui se colle au mur,
+  horloge qui se tait quand le Cadreur approche, objets qui se brisent ou résonnent quand on les
+  lance (sons synthétisés dédiés par matériau : métal, plastique/bois, verre). Écrans et cadrans
+  sont posés sur la surface trouvée automatiquement dans la géométrie du modèle. **Le bruit
+  attire le Cadreur** : un bruit fort le fait venir plus tôt ; présent, il va voir d'où ça vient
+  — un objet bruyant lancé au loin sert de leurre.
 - **Vues en direct** (`player/liveViews.ts`) : caméras secondaires rendues en basse définition,
   à cadence réduite, une seule par frame et seulement quand on les regarde. La télé allumée
   passe en direct après deux secondes de neige : l'image de la caméra de surveillance qu'on a
   posée (on la pointe, on la lâche), sinon ce que voit le Cadreur quand il est là, sinon ton
   couloir filmé de dos. Jumelles (zoom ×5 portées aux yeux), loupe (grossit ce qu'on regarde à
-  travers le verre), caméscope (viseur en vision nocturne porté à l'œil ; gâchette : relit la
-  dernière cassette trouvée).
+  travers le verre).
 - **Tester les menaces** : en mode debug (`?debug=1`), le menu d'inventaire (Y) a une rangée
   bleue de boutons de test : lancer/arrêter la Coupure, appeler/renvoyer le Cadreur (même au
   niveau 0), passer au niveau suivant, recharger la lampe.
@@ -289,7 +299,7 @@ tests/physics.sim.ts         Simulation physique sans rendu (`npm run test:physi
 
 ## Étapes 6–8 (résumé)
 
-- **Collection (étape 6)** : ~50 modèles CC0 distincts (Poly Haven), rareté fixe par objet
+- **Collection (étape 6)** : 39 modèles CC0 distincts (Poly Haven), rareté fixe par objet
   (pièces détachées retirées : cassette du baladeur, câbles de la manette et du multimètre,
   sangle des jumelles, étui à cigarettes réduit à l'étui ouvert). Modèle du Cadreur : « X Bot »
   de Mixamo (Adobe), décimé et compressé.

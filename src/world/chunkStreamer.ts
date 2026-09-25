@@ -1,18 +1,18 @@
 import * as THREE from "three";
 import type { NoiseFunction2D } from "simplex-noise";
 import { CollisionGroups, RAPIER, type PhysicsWorld } from "../physics/physicsWorld";
-import { generateChunkLayout, type ChunkLayout, type WallSegment } from "../shared/chunkLayout";
+import { generateChunkLayout, mergeCollinearBoxes, type ChunkLayout, type WallSegment } from "../shared/chunkLayout";
 import { CHUNK_SIZE, STREAM_RADIUS_CHUNKS, WALL_HEIGHT } from "../shared/constants";
 import type { LevelProfile } from "../shared/levelProfile";
 import { createSeededNoise2D } from "../shared/noise";
 import { log } from "../debug/debugLog";
 import { perf } from "../player/perfStats";
 import { BatteryPickup } from "./batteryPickup";
-import { buildChunkGroup } from "./chunkMesh";
+import { buildChunkGroup, freezeMatrices } from "./chunkMesh";
 import { spawnCollectibleModel } from "./collectibleLoader";
 import { toCollectionEntry } from "./collection";
 import type { GrabbableRegistry } from "./grabbable";
-import { createLoreObject } from "./lorePage";
+import { createLoreObject, type LoreObject } from "./lorePage";
 import { spawnProp } from "./propLoader";
 import { WallTrap } from "./wallTrap";
 
@@ -39,6 +39,13 @@ const LOADS_PER_FRAME = 1;
 const UNLOADS_PER_FRAME = 2;
 /** Meubles/objets créés par frame (corps physiques à enveloppe convexe). */
 const SPAWNS_PER_FRAME = 3;
+/**
+ * Budget (ms) de travail de streaming par frame, en plus des plafonds ci-dessus : un chunk aux
+ * murs denses peut à lui seul dépasser 10 ms (mesuré, voir `chunkMesh.ts`), sans quoi il
+ * s'additionnerait dans la même frame à d'autres chargements/spawns. Reste sous le budget d'une
+ * frame à 72 fps (~13,9 ms) même si un chunk chargé juste avant a déjà pris du temps.
+ */
+const STREAMING_FRAME_BUDGET_MS = 4;
 /** Les objets de collection apparaissent posés, légèrement au-dessus du sol (la physique les fait retomber). */
 const COLLECTIBLE_SPAWN_HEIGHT = 0.05;
 
@@ -86,6 +93,12 @@ export class ChunkStreamer {
   private regenTimer = randomRegenInterval();
   private readonly frustum = new THREE.Frustum();
   private readonly frustumMatrix = new THREE.Matrix4();
+  /**
+   * Bande perdue du level, préparée dès le changement de level (voir `prepareLorePage`) : son
+   * dessin (papier vieilli, texte : ~10 ms sur PC) ne tombe plus pendant la partie, quand son
+   * chunk se charge.
+   */
+  private preparedLore: { fragment: number; lore: Promise<LoreObject> } | null = null;
 
   constructor(
     private readonly scene: THREE.Scene,
@@ -100,17 +113,25 @@ export class ChunkStreamer {
   ) {
     this.profile = profile;
     this.noise2D = createSeededNoise2D(profile.seed);
+    this.prepareLorePage();
   }
 
   /** Change de level : décharge tout le monde courant, repart à vide sur le nouveau profil/seed. */
   setProfile(profile: LevelProfile): void {
-    for (const key of [...this.loaded.keys()]) this.unloadChunk(key);
+    // `skipGrabbableCleanup` : `removeAllNotHeld()` juste après nettoie l'inventaire du monde en
+    // un seul passage — répéter `removeInArea` (un scan de tous les objets vivants) à chaque
+    // chunk déchargé ici serait O(chunks × objets) pour rien, et c'était un à-coup mesurable au
+    // changement de niveau.
+    for (const key of [...this.loaded.keys()]) this.unloadChunk(key, true);
     this.pendingLoads.clear();
     this.pendingUnloads.clear();
     this.spawnQueue.length = 0;
     this.grabbables.removeAllNotHeld();
     this.profile = profile;
     this.noise2D = createSeededNoise2D(profile.seed);
+    this.discardPreparedLore();
+    // Dans la file des spawns : dans une frame à part, pas dans celle qui démonte l'ancien monde.
+    this.spawnQueue.push(() => this.prepareLorePage());
     this.pickedBatteries.clear();
     this.currentChunkX = Number.NaN;
     this.currentChunkZ = Number.NaN;
@@ -210,11 +231,22 @@ export class ChunkStreamer {
   /**
    * Streaming étalé : quelques chargements/déchargements par frame (les plus proches d'abord)
    * au lieu de 5 + 5 d'un coup à chaque changement de chunk, plus la création des meubles.
+   *
+   * Un budget en NOMBRE d'éléments (un chunk, jusqu'à 3 objets) ne suffit pas : un chunk aux
+   * murs denses peut à lui seul coûter plus de 10 ms (mesuré, voir chunkMesh.ts) et se
+   * retrouver dans la même frame que 2-3 objets à instancier — les coûts s'additionnent. Le
+   * budget temps ci-dessous arrête le travail de streaming dès qu'il a assez pris sur la
+   * frame, quitte à reporter le reste à la frame suivante (la file `pendingLoads`/
+   * `pendingUnloads`/`spawnQueue` survit d'une frame à l'autre, rien n'est perdu).
    */
   private processStreaming(maxLoads: number): void {
+    const budgeted = Number.isFinite(maxLoads);
+    const deadline = budgeted ? performance.now() + STREAMING_FRAME_BUDGET_MS : Infinity;
+    const overBudget = (): boolean => budgeted && performance.now() > deadline;
+
     let unloads = 0;
     for (const key of this.pendingUnloads) {
-      if (unloads >= (Number.isFinite(maxLoads) ? UNLOADS_PER_FRAME : Infinity)) break;
+      if (unloads >= (budgeted ? UNLOADS_PER_FRAME : Infinity) || overBudget()) break;
       this.pendingUnloads.delete(key);
       this.unloadChunk(key);
       unloads++;
@@ -222,6 +254,7 @@ export class ChunkStreamer {
 
     let loads = 0;
     while (loads < maxLoads && this.pendingLoads.size > 0) {
+      if (overBudget()) break;
       let nearest: string | null = null;
       let nearestDistance = Infinity;
       for (const key of this.pendingLoads.keys()) {
@@ -238,8 +271,11 @@ export class ChunkStreamer {
       loads++;
     }
 
-    const spawns = Number.isFinite(maxLoads) ? SPAWNS_PER_FRAME : Infinity;
-    for (let i = 0; i < spawns && this.spawnQueue.length > 0; i++) this.spawnQueue.shift()!();
+    const spawns = budgeted ? SPAWNS_PER_FRAME : Infinity;
+    for (let i = 0; i < spawns && this.spawnQueue.length > 0; i++) {
+      if (overBudget()) break;
+      this.spawnQueue.shift()!();
+    }
   }
 
   /** Régénère périodiquement un chunk chargé mais hors champ de vision (labyrinthe dynamique). */
@@ -295,8 +331,7 @@ export class ChunkStreamer {
     this.scene.add(group);
 
     const staticBody = this.physics.world.createRigidBody(RAPIER.RigidBodyDesc.fixed());
-    for (const segment of layout.wallSegments) this.addBoxCollider(staticBody, segment);
-    for (const segment of layout.pillarObstacles) this.addBoxCollider(staticBody, segment);
+    for (const box of mergeCollinearBoxes([...layout.wallSegments, ...layout.pillarObstacles])) this.addBoxCollider(staticBody, box);
 
     const wallTraps = layout.wallTrapCandidates.map((segment) => {
       const trap = new WallTrap(segment, this.audioListener, this.physics);
@@ -308,6 +343,7 @@ export class ChunkStreamer {
       .filter((placement) => !this.pickedBatteries.has(placement.id))
       .map((placement) => {
         const battery = new BatteryPickup(placement.id, placement.x, placement.z, placement.rotationY);
+        freezeMatrices(battery.object);
         group.add(battery.object);
         return battery;
       });
@@ -330,7 +366,8 @@ export class ChunkStreamer {
         .catch(() => {});
     }
 
-    if (layout.lorePage) this.spawnLorePage(key, loadedChunk, layout.lorePage);
+    const lorePage = layout.lorePage;
+    if (lorePage) this.spawnQueue.push(() => this.spawnLorePage(key, loadedChunk, lorePage));
 
     const depth = this.depth;
     for (const placement of layout.collectiblePlacements) {
@@ -360,8 +397,12 @@ export class ChunkStreamer {
   private spawnLorePage(key: string, chunk: LoadedChunk, location: NonNullable<ChunkLayout["lorePage"]>): void {
     const id = `${this.profile.seed}:lore`;
     const fragment = this.lorePageFragment();
-    if (fragment === null || this.grabbables.isItemAlive(id)) return;
-    createLoreObject(fragment)
+    if (this.loaded.get(key) !== chunk || fragment === null || this.grabbables.isItemAlive(id)) return;
+    // Objet préparé au changement de level, s'il porte bien cette bande (consommé : si le chunk se
+    // recharge plus tard, la page est redessinée).
+    const prepared = this.preparedLore?.fragment === fragment ? this.preparedLore.lore : null;
+    if (prepared) this.preparedLore = null;
+    (prepared ?? createLoreObject(fragment))
       .then((lore) => {
         this.spawnQueue.push(() => {
           if (this.loaded.get(key) !== chunk || this.grabbables.isItemAlive(id)) {
@@ -384,6 +425,22 @@ export class ChunkStreamer {
       .catch(() => {});
   }
 
+  /** Dessine d'avance la bande perdue attendue dans ce level (voir `preparedLore`). */
+  private prepareLorePage(): void {
+    this.discardPreparedLore();
+    const fragment = this.lorePageFragment();
+    if (fragment === null) return;
+    const lore = createLoreObject(fragment);
+    lore.catch(() => {});
+    this.preparedLore = { fragment, lore };
+  }
+
+  private discardPreparedLore(): void {
+    const prepared = this.preparedLore;
+    this.preparedLore = null;
+    prepared?.lore.then((lore) => lore.dispose()).catch(() => {});
+  }
+
   private addBoxCollider(body: RAPIER.RigidBody, segment: WallSegment): void {
     const halfX = (segment.maxX - segment.minX) / 2;
     const halfZ = (segment.maxZ - segment.minZ) / 2;
@@ -396,16 +453,18 @@ export class ChunkStreamer {
     );
   }
 
-  private unloadChunk(key: string): void {
+  private unloadChunk(key: string, skipGrabbableCleanup = false): void {
     perf?.event(`décharge ${key}`);
     const chunk = this.loaded.get(key);
     if (!chunk) return;
     this.scene.remove(chunk.group);
     disposeGroup(chunk.group);
-    // Les objets suivent leur position réelle, pas leur chunk d'origine : un meuble
-    // transporté ailleurs survit au déchargement de son chunk de départ.
-    const { min, max } = chunk.bounds;
-    this.grabbables.removeInArea(min.x, max.x, min.z, max.z);
+    if (!skipGrabbableCleanup) {
+      // Les objets suivent leur position réelle, pas leur chunk d'origine : un meuble
+      // transporté ailleurs survit au déchargement de son chunk de départ.
+      const { min, max } = chunk.bounds;
+      this.grabbables.removeInArea(min.x, max.x, min.z, max.z);
+    }
     this.physics.world.removeRigidBody(chunk.staticBody);
     for (const trap of chunk.wallTraps) {
       this.scene.remove(trap.group);

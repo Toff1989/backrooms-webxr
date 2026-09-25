@@ -118,6 +118,8 @@ export class Cadreur {
   private lure: { x: number; z: number; seconds: number; searching: number } | null = null;
   /** Étourdi (tapette à souris) : figé, la caméra grésille. */
   private stunnedSeconds = 0;
+  /** Modèle chargé et ajouté (caché) à la scène — ou échec journalisé : ne rejette jamais. */
+  readonly ready: Promise<void>;
 
   constructor(
     scene: THREE.Scene,
@@ -146,7 +148,7 @@ export class Cadreur {
     queueWarmup(() => {
       for (let i = 0; i < 4; i++) this.steps.push(createCarpetStepBuffer(listener.context));
     });
-    loadCadreur()
+    this.ready = loadCadreur()
       .then((rig) => {
         this.rig = rig;
         rig.root.visible = false;

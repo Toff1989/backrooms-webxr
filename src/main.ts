@@ -3,7 +3,7 @@ import { VRButton } from "three/addons/webxr/VRButton.js";
 import { AmbientHum } from "./assets/audio/ambientHum";
 import { getLanguage, onLanguageChange, setLanguage, t, type Language } from "./i18n";
 import { runWarmupStep } from "./assets/audio/synth";
-import { installDebugLog, log } from "./debug/debugLog";
+import { DEBUG_ENABLED, installDebugLog, log } from "./debug/debugLog";
 import { PhysicsWorld } from "./physics/physicsWorld";
 import { CamcorderHud } from "./player/camcorderHud";
 import { ComfortVignette } from "./player/comfortVignette";
@@ -34,10 +34,6 @@ import { GrabbableRegistry, type LorePageData } from "./world/grabbable";
 import { InteractionSystem } from "./world/interactions";
 import { onNoise } from "./world/noise";
 import { ObjectAudio } from "./world/objectAudio";
-import { spawnCollectibleModel } from "./world/collectibleLoader";
-import type { CollectionEntry } from "./world/collection";
-import { COLLECTIBLE_SCALE_MAX, COLLECTIBLE_SCALE_MIN, generateCollectibleLore, getCollectibleRarity, pickCollectibleKind } from "./shared/collectibles";
-import { coordinateHash01, stringSeedToInt } from "./shared/rng";
 import { LevelManager, SPAWN_LOCAL_POSITION } from "./world/levelManager";
 import { loreFormat } from "./shared/lore";
 import { LoreJournal } from "./world/loreJournal";
@@ -46,6 +42,7 @@ import { Poltergeist } from "./world/poltergeist";
 import { initMaterials } from "./world/materials";
 import { endRun, reportLevel, startRun, type RunSessionInfo } from "./world/runSession";
 import { setFlashlightBounce, updateVhsTime } from "./world/vhsMaterial";
+import { Warmup } from "./world/warmup";
 
 installDebugLog();
 
@@ -76,6 +73,9 @@ renderer.xr.setFoveation(1);
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.xr.enabled = true;
 renderer.outputColorSpace = THREE.SRGBColorSpace;
+// Vérification des shaders (lecture synchrone des journaux de compilation) : utile en debug
+// seulement — en jeu, elle force le fil principal à attendre chaque compilation.
+renderer.debug.checkShaderErrors = DEBUG_ENABLED;
 appRoot.appendChild(renderer.domElement);
 // Pas de bouton "Entrer en VR" proposé par le navigateur (offerSession) : il lance la session
 // sans aucun geste sur la page, et le navigateur refuse alors de démarrer le son jusqu'au
@@ -125,7 +125,8 @@ const input = new XrInput(renderer, player.body);
 const hands = [new Hand(input.left, physics), new Hand(input.right, physics)];
 const sfx = new Sfx(audioListener);
 
-const comfortVignette = new ComfortVignette(camera);
+const vhsOverlay = new VhsOverlay(camera);
+const comfortVignette = new ComfortVignette(vhsOverlay);
 /** Vignette de confort : réglable dans les options (écran) et dans le menu du casque, mémorisée. */
 const VIGNETTE_KEY = "backrooms-vr:vignette";
 const vignetteToggle = document.querySelector<HTMLInputElement>("#vignette-toggle");
@@ -145,7 +146,6 @@ function setVignette(enabled: boolean): void {
     // Stockage indisponible : réglage valable pour cette session seulement.
   }
 }
-const vhsOverlay = new VhsOverlay(camera);
 const hud = new CamcorderHud(camera);
 /** Bandes perdues : cassettes lues dans le viseur, polaroids photographiés derrière le joueur. */
 const tapePlayer = new TapePlayer(audioListener, hud);
@@ -186,6 +186,10 @@ const blackout = new Blackout(scene, audioListener);
 const cadreur = new Cadreur(scene, audioListener, physics);
 /** Le bruit (télé, réveil, objets lancés) attire le Cadreur, partout. */
 onNoise((event) => cadreur.hear(event, levelManager.depth));
+
+/** Pré-chauffage (modèles, enveloppes physiques, shaders, textures) : voir `warmup.ts`. */
+const warmup = new Warmup(renderer, scene, camera);
+warmup.start([cadreur.ready, ...hands.map((hand) => hand.models)]);
 
 /** Bonus de collection : recalculés à chaque rangement/sortie d'objet. */
 function applyPerks(): void {
@@ -266,7 +270,7 @@ const endRunScreen = new EndRunScreen(
   () => beginNewRun(true),
 );
 
-const journal = new Journal(camera, player.body, scene, loreJournal, sfx);
+const journal = new Journal(camera, player.body, loreJournal, sfx);
 installAccountPanel(loreJournal);
 
 const pointer = new UiPointer(hands, scene, [inventoryMenu, endRunScreen, journal]);
@@ -295,46 +299,15 @@ grabSystem = new GrabSystem(physics, grabbables, hands, sfx, {
     interactions.grabbed(grabbable.heldBy, grabbable);
   },
   onUse: (hand, grabbable) => interactions.use(hand, grabbable),
-  onEmptyGrip: (hand) => {
-    if (!journal.isAtHip(hand)) return false;
-    journal.openInHand(hand);
-    return true;
-  },
   head: () => ({ position: player.headWorld, forward: camera.getWorldDirection(new THREE.Vector3()) }),
 }, scene);
 
-/**
- * Objet de collection caché dans un meuble fouillé (tiroir, carton, casier) : tiré au sort à
- * partir de la seed du level et de l'emplacement du meuble — un seul par meuble et par level.
- */
-function spawnHiddenItem(key: string, position: THREE.Vector3): void {
-  const id = `${levelManager.levelSeed}:hid:${key}`;
-  if (collectionStore.has(id) || grabbables.isItemAlive(id)) return;
-  const seedInt = stringSeedToInt(id);
-  const roll = (salt: number): number => coordinateHash01(seedInt, 0, 0, salt);
-  const kind = pickCollectibleKind(roll(1));
-  const entry: CollectionEntry = {
-    id,
-    kind,
-    rarity: getCollectibleRarity(kind),
-    scale: COLLECTIBLE_SCALE_MIN + roll(4) * (COLLECTIBLE_SCALE_MAX - COLLECTIBLE_SCALE_MIN),
-    depth: levelManager.depth,
-    ...generateCollectibleLore(kind, roll(2), roll(3)),
-    collectedAt: 0,
-  };
-  grabbables.reserveItem(id);
-  spawnCollectibleModel(kind)
-    .then(({ model, template }) => grabbables.createCollectible(entry, model, template, position, new THREE.Quaternion()))
-    .catch(() => grabbables.releaseItem(id));
-}
-
-/** Objets qui s'animent : télé, réveil, tiroirs, lampes, tapette... (voir `interactions.ts`). */
+/** Objets qui s'animent : télé, réveil, lampes... (voir `interactions.ts`). */
 const objectAudio = new ObjectAudio(scene, audioListener);
 const interactions = new InteractionSystem({
   audio: objectAudio,
   physics,
   registry: grabbables,
-  flashlight,
   scene,
   camera,
   head: () => player.headWorld,
@@ -342,7 +315,6 @@ const interactions = new InteractionSystem({
   stunCadreur: (seconds) => cadreur.stun(seconds),
   exitPosition: () => levelManager.exitPosition,
   capturePhoto,
-  spawnHiddenItem,
   take: () => take,
   runSeconds: () => hud.recordingSeconds,
   drop: (grabbable) => grabSystem.drop(grabbable),
@@ -350,14 +322,6 @@ const interactions = new InteractionSystem({
   cadreurEye: () => {
     const position = cadreur.worldPosition;
     return position ? { position: new THREE.Vector3(position.x, 1.8, position.z), target: player.headWorld } : null;
-  },
-  playLatestTape: () => {
-    for (let fragment = loreJournal.count - 1; fragment >= 0; fragment--) {
-      if (loreFormat(fragment) !== "audio") continue;
-      tapePlayer.play(fragment);
-      return true;
-    }
-    return false;
   },
 });
 
@@ -422,6 +386,29 @@ function restartWorld(seed: string): void {
 beginNewRun(false);
 void loreJournal.sync();
 
+// Mode debug : commandes pour les bancs de test automatisés (session XR émulée) — déplacer le
+// joueur d'un coup (streaming de chunks dans le pire cas), descendre, ouvrir l'inventaire.
+if (DEBUG_ENABLED) {
+  (window as unknown as Record<string, unknown>)["__game"] = {
+    teleport: (x: number, z: number) => {
+      player.teleport(new THREE.Vector3(x, 0, z));
+      grabSystem.onTeleport();
+    },
+    descend: () => goDeeper(false),
+    toggleInventory: () => inventoryMenu.toggle(),
+    head: () => ({ x: player.headWorld.x, z: player.headWorld.z }),
+    exit: () => levelManager.exitPosition,
+    awakeBodies: () => {
+      let awake = 0;
+      physics.world.bodies.forEach((body) => {
+        if (body.isDynamic() && !body.isSleeping()) awake++;
+      });
+      return awake;
+    },
+    renderer,
+  };
+}
+
 /**
  * Son : les navigateurs (dont celui du Quest) ne démarrent l'audio que pendant un geste de
  * l'utilisateur. L'événement "sessionstart" n'en est pas toujours un : on relance donc le
@@ -439,12 +426,21 @@ function resumeAudio(reason: string): void {
 for (const type of ["pointerdown", "pointerup", "click", "keydown", "touchstart"]) document.addEventListener(type, () => resumeAudio(type), { capture: true });
 audioListener.context.addEventListener("statechange", () => log("audio", { action: "statechange", state: audioListener.context.state }));
 
+/** Cadence visée en VR (Hz). */
+const TARGET_FRAME_RATE = 72;
+
 renderer.xr.addEventListener("sessionstart", () => {
   resumeAudio("sessionstart");
   ambientHum.start();
   levelManager.onSessionStart();
   const session = renderer.xr.getSession();
   if (session) {
+    // Cadence fixée à 72 Hz (budget de 13,9 ms, celui que suit `PerfStats`) si le casque en
+    // propose une plus haute par défaut : 72 images stables valent mieux qu'un 90 Hz qui
+    // décroche (chaque frame manquée se voit, reprojetée). Pratique courante sur Quest.
+    if (session.supportedFrameRates?.includes(TARGET_FRAME_RATE) && session.frameRate !== TARGET_FRAME_RATE) {
+      session.updateTargetFrameRate?.(TARGET_FRAME_RATE).catch((error: unknown) => log("xr", { action: "frame-rate-failed", error: String(error) }));
+    }
     for (const type of ["selectstart", "squeezestart"] as const) session.addEventListener(type, () => resumeAudio(`xr-${type}`));
     log("xr", {
       action: "sessionstart",
@@ -525,7 +521,6 @@ renderer.setAnimationLoop((timestamp) => {
   pointer.update();
   inventoryMenu.update(deltaSeconds, hands, (hand) => pointer.frame(hand).target === inventoryMenu);
   endRunScreen.update(hands);
-  journal.update(hands, (hand) => !grabSystem.isHolding(hand));
   grabSystem.update(elapsedSeconds, pointer);
   perfStats.end("joueur");
 
@@ -605,6 +600,9 @@ renderer.setAnimationLoop((timestamp) => {
   updateVhsTime(elapsedSeconds);
   runWarmupStep(renderer.xr.isPresenting);
   perfStats.end("effets");
+  perfStats.begin("préchauffage");
+  warmup.step();
+  perfStats.end("préchauffage");
   perfStats.begin("vues");
   liveViews.render(deltaSeconds);
   perfStats.end("vues");

@@ -10,7 +10,7 @@ import { coordinateHash01, stringSeedToInt } from "./rng.js";
 export const LORE_FRAGMENT_COUNT = 16;
 
 /**
- * Forme d'une bande : note manuscrite du monteur, fiche de montage (bobine, plan, time-code),
+ * Forme d'une bande : note manuscrite, fiche de montage (bobine, plan, time-code),
  * photo polaroid (développée au ramassage), ou cassette audio (grésillement + transcription).
  */
 export type LoreFormat = "journal" | "fiche" | "polaroid" | "audio";
@@ -26,9 +26,8 @@ export interface LoreFragmentMeta {
 }
 
 /**
- * Le Monteur : la veille du rendu, il retire du film les rushes de la nuit du 14, ceux de
- * l'accident où Julien, le cadreur, est mort en continuant de filmer. Les bandes alternent ses
- * notes, les fiches des plans coupés, les photos du tournage et les enregistrements audio.
+ * Récit générique, sans personnage nommé ni incident précis : des fragments anonymes laissés
+ * par d'autres explorateurs des Backrooms, sous forme de notes, fiches, photos et cassettes.
  */
 export const LORE_FRAGMENTS: readonly LoreFragmentMeta[] = [
   { format: "journal" },

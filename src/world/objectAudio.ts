@@ -47,8 +47,8 @@ export class ObjectAudio {
       this.loops.push({ audio, owner: null });
     }
     const names: ObjectSoundName[] = [
-      "tvStatic", "tvOn", "tvOff", "alarm", "tick", "whistle", "squeak", "gong", "shatter", "snap", "crumple", "thump", "bang", "clank",
-      "beep", "spray", "drawer", "wheel", "flick", "creak", "rattle", "suction", "zip", "rustle", "metalClick", "projector", "crackle", "buzz",
+      "tvStatic", "tvOn", "tvOff", "alarm", "tick", "whistle", "squeak", "gong", "shatter", "crumple", "thump", "bang", "clank",
+      "beep", "spray", "wheel", "flick", "creak", "rattle", "suction", "rustle", "metalClick", "crackle", "buzz",
     ];
     for (const name of names) queueWarmup(() => this.buffer(name));
   }

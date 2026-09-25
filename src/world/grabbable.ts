@@ -41,7 +41,6 @@ const PROP_MASS: Record<PropKind, number> = {
   metalShelves: 18,
   bookshelf: 40,
   storageCart: 30,
-  projectorScreen: 7,
   chalkboard: 9,
   cardboardBox: 4,
   plasticCrate: 1.5,
@@ -129,6 +128,8 @@ export class Grabbable {
   heldBy: object | null = null;
 
   private highlight: HighlightLevel = 0;
+  /** Le corps bougeait à la synchro précédente (voir `sync`). */
+  private wasMoving = true;
   private readonly onDispose: (() => void) | undefined;
   private readonly meshes: Array<{ mesh: THREE.Mesh; original: THREE.Material | THREE.Material[] }> = [];
 
@@ -208,8 +209,15 @@ export class Grabbable {
     }
   }
 
-  /** Copie la pose simulée vers le mesh. */
+  /**
+   * Copie la pose simulée vers le mesh. Un corps endormi ne bouge pas : une fois sa pose
+   * recopiée (la frame où il s'endort), plus rien à lire — la plupart des meubles dorment, et
+   * chaque lecture coûte deux appels WASM et deux objets à ramasser par le GC.
+   */
   sync(): void {
+    const moving = this.heldBy !== null || !this.body.isSleeping();
+    if (!moving && !this.wasMoving) return;
+    this.wasMoving = moving;
     const t = this.body.translation();
     const r = this.body.rotation();
     this.object.position.set(t.x, t.y, t.z);

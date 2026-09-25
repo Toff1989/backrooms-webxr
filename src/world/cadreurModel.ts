@@ -46,7 +46,7 @@ export interface CadreurRig {
 }
 
 export async function loadCadreur(): Promise<CadreurRig> {
-  const [gltf, camcorder] = await Promise.all([gltfLoader.loadAsync(cadreurUrl), spawnCollectibleModel("videoCamera")]);
+  const [gltf, camcorder] = await Promise.all([gltfLoader.loadAsync(cadreurUrl), spawnCollectibleModel("cadreurHead")]);
   const character = gltf.scene;
   character.scale.setScalar(BODY_SCALE);
   const skin = new THREE.MeshStandardMaterial({ color: 0x15110d, roughness: 0.38, metalness: 0.05 });

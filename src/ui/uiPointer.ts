@@ -5,6 +5,12 @@ import type { UiPanel } from "./uiPanel";
 const LASER_IDLE_LENGTH = 0.6;
 const LASER_COLOR = 0xffe3a0;
 
+// Écopes de calcul réutilisées chaque frame (une par main suffirait, mais le pointeur est mis à
+// jour séquentiellement) : évite d'allouer un Vector3/Quaternion par main et par frame tant
+// qu'un panneau est ouvert, simple source de pression sur le ramasse-miettes sinon.
+const tmpIdleEnd = new THREE.Vector3();
+const tmpCursorQuaternion = new THREE.Quaternion();
+
 interface HandPointer {
   hand: Hand;
   line: THREE.Line;
@@ -75,7 +81,7 @@ export class UiPointer {
         if (hit && (!best || hit.distance < best.hit.distance)) best = { panel, hit };
       }
 
-      const end = best ? best.hit.point : hand.aimOrigin.clone().addScaledVector(hand.aimDirection, LASER_IDLE_LENGTH);
+      const end = best ? best.hit.point : tmpIdleEnd.copy(hand.aimOrigin).addScaledVector(hand.aimDirection, LASER_IDLE_LENGTH);
       const positions = pointer.line.geometry.getAttribute("position") as THREE.BufferAttribute;
       positions.setXYZ(0, hand.aimOrigin.x, hand.aimOrigin.y, hand.aimOrigin.z);
       positions.setXYZ(1, end.x, end.y, end.z);
@@ -91,7 +97,7 @@ export class UiPointer {
       frame.target = best.panel;
       pointer.cursor.visible = true;
       pointer.cursor.position.copy(best.hit.point);
-      pointer.cursor.quaternion.copy(best.panel.group.getWorldQuaternion(new THREE.Quaternion()));
+      pointer.cursor.quaternion.copy(best.panel.group.getWorldQuaternion(tmpCursorQuaternion));
       this.setHover(pointer, best.panel, best.hit.px, best.hit.py);
 
       if (hand.input.trigger.justPressed) best.panel.onPress(hand, best.hit.px, best.hit.py, "trigger");

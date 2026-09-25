@@ -25,6 +25,41 @@ export interface WallSegment {
   maxZ: number;
 }
 
+/**
+ * Colliders des murs : les segments alignés bout à bout (même section, même axe) deviennent une
+ * seule boîte — union exacte, même collision. ~26 % de colliders en moins par chunk (mesuré sur
+ * 648 chunks : 38,8 → 28,8), autant de moins à insérer dans le monde physique à chaque
+ * chargement (pics du pas de simulation) et à parcourir par les rayons et le déplacement.
+ */
+export function mergeCollinearBoxes(boxes: readonly WallSegment[]): WallSegment[] {
+  const lines = new Map<string, WallSegment[]>();
+  for (const box of boxes) {
+    const alongX = box.maxX - box.minX >= box.maxZ - box.minZ;
+    const key = alongX ? `x|${box.minZ}|${box.maxZ}` : `z|${box.minX}|${box.maxX}`;
+    const line = lines.get(key);
+    if (line) line.push(box);
+    else lines.set(key, [box]);
+  }
+  const merged: WallSegment[] = [];
+  for (const [key, line] of lines) {
+    const alongX = key.startsWith("x");
+    line.sort((a, b) => (alongX ? a.minX - b.minX : a.minZ - b.minZ));
+    let current: WallSegment | null = null;
+    for (const box of line) {
+      const start = alongX ? box.minX : box.minZ;
+      const currentEnd = current ? (alongX ? current.maxX : current.maxZ) : -Infinity;
+      if (current && start <= currentEnd + 1e-6) {
+        if (alongX) current.maxX = Math.max(current.maxX, box.maxX);
+        else current.maxZ = Math.max(current.maxZ, box.maxZ);
+        continue;
+      }
+      current = { minX: box.minX, maxX: box.maxX, minZ: box.minZ, maxZ: box.maxZ };
+      merged.push(current);
+    }
+  }
+  return merged;
+}
+
 export interface ChunkLayout {
   chunkX: number;
   chunkZ: number;

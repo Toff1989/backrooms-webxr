@@ -12,14 +12,13 @@ import metalStoolUrl from "../assets/models/props/metalStool.glb";
 import monoblocChairUrl from "../assets/models/props/monoblocChair.glb";
 import plasticCrateUrl from "../assets/models/props/plasticCrate.glb";
 import pottedPlantUrl from "../assets/models/props/pottedPlant.glb";
-import projectorScreenUrl from "../assets/models/props/projectorScreen.glb";
 import sofaUrl from "../assets/models/props/sofa.glb";
 import storageCartUrl from "../assets/models/props/storageCart.glb";
 import televisionUrl from "../assets/models/props/television.glb";
 import wetFloorSignUrl from "../assets/models/props/wetFloorSign.glb";
 import schoolDeskUrl from "../assets/models/schooldesk.glb";
 import type { PropKind } from "../shared/props";
-import { loadTemplateModel } from "./gltfLoader";
+import { loadedTemplates, loadTemplateModel } from "./gltfLoader";
 
 /**
  * Mobilier décoratif : modèles CC0 (Poly Haven), décimés + compressés Draco + textures WebP
@@ -40,7 +39,6 @@ const PROP_URLS: Record<PropKind, string> = {
   metalShelves: metalShelvesUrl,
   bookshelf: bookshelfUrl,
   storageCart: storageCartUrl,
-  projectorScreen: projectorScreenUrl,
   chalkboard: chalkboardUrl,
   cardboardBox: cardboardBoxUrl,
   plasticCrate: plasticCrateUrl,
@@ -63,4 +61,9 @@ function loadTemplate(kind: PropKind): Promise<THREE.Object3D> {
 export async function spawnProp(kind: PropKind): Promise<{ model: THREE.Object3D; template: THREE.Object3D }> {
   const template = await loadTemplate(kind);
   return { model: template.clone(true), template };
+}
+
+/** Tous les modèles de meubles, chargés d'avance (pré-chauffage, voir `warmup.ts`). */
+export function preloadPropTemplates(): Promise<Array<{ kind: PropKind; template: THREE.Object3D }>> {
+  return loadedTemplates((Object.keys(PROP_URLS) as PropKind[]).map((kind) => [kind, loadTemplate(kind)]));
 }
