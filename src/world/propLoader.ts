@@ -12,7 +12,6 @@ import metalStoolUrl from "../assets/models/props/metalStool.glb";
 import monoblocChairUrl from "../assets/models/props/monoblocChair.glb";
 import plasticCrateUrl from "../assets/models/props/plasticCrate.glb";
 import pottedPlantUrl from "../assets/models/props/pottedPlant.glb";
-import projectorScreenUrl from "../assets/models/props/projectorScreen.glb";
 import sofaUrl from "../assets/models/props/sofa.glb";
 import storageCartUrl from "../assets/models/props/storageCart.glb";
 import televisionUrl from "../assets/models/props/television.glb";
@@ -40,7 +39,6 @@ const PROP_URLS: Record<PropKind, string> = {
   metalShelves: metalShelvesUrl,
   bookshelf: bookshelfUrl,
   storageCart: storageCartUrl,
-  projectorScreen: projectorScreenUrl,
   chalkboard: chalkboardUrl,
   cardboardBox: cardboardBoxUrl,
   plasticCrate: plasticCrateUrl,

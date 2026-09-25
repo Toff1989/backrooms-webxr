@@ -143,9 +143,16 @@ export class CamcorderHud {
     this.text(`${t("hud.bag")} ${this.status.items}`, 200, 120, "left");
     // Signal de la sortie (façon réception du caméscope) : 5 barres, de plus en plus pleines.
     const bars = Math.round(this.status.signal * 5);
-    this.text(`${t("hud.signal")} ${"▮".repeat(bars)}${"▯".repeat(5 - bars)}`, 380, 120, "left", bars >= 4 ? "#9fe39f" : "#f4f1e8");
+    const SIGNAL_X = 380;
+    const signalText = `${t("hud.signal")} ${"▮".repeat(bars)}${"▯".repeat(5 - bars)}`;
     const flags = [this.status.crouching ? t("hud.crouch") : "", this.status.sprinting ? t("hud.sprint") : "", this.status.flashlight ? t("hud.flashlight") : ""].filter(Boolean).join("  ");
-    this.text(flags, CANVAS_WIDTH - 20, 120, "right", "#b9e0ff");
+    // Les indicateurs passent sur leur propre ligne s'ils empiéteraient sur SIGNAL (langue plus
+    // longue, ou les trois actifs à la fois) : mieux vaut deux lignes lisibles qu'un chevauchement.
+    const signalEndX = SIGNAL_X + ctx.measureText(signalText).width;
+    const flagsStartX = flags ? CANVAS_WIDTH - 20 - ctx.measureText(flags).width : CANVAS_WIDTH;
+    const flagsOnOwnRow = signalEndX + 24 > flagsStartX;
+    this.text(signalText, SIGNAL_X, 120, "left", bars >= 4 ? "#9fe39f" : "#f4f1e8");
+    if (flags) this.text(flags, CANVAS_WIDTH - 20, flagsOnOwnRow ? 148 : 120, "right", "#b9e0ff");
 
     if (this.elapsedSeconds < this.noticeUntil) {
       ctx.font = "bold 27px monospace";

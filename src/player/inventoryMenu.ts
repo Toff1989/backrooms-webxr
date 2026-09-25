@@ -2,10 +2,11 @@ import * as THREE from "three";
 import { DEBUG_ENABLED } from "../debug/debugLog";
 import { getLanguage, onLanguageChange, setLanguage, t } from "../i18n";
 import { getModelShape } from "../physics/modelShape";
-import { drawButton, drawPanelBackground, inRect, UiPanel, wrapText, type PressButton, type Rect } from "../ui/uiPanel";
+import { drawButton, drawPanelBackground, inRect, UiPanel, type PressButton, type Rect } from "../ui/uiPanel";
 import { spawnCollectibleModel } from "../world/collectibleLoader";
 import { SORT_MODES, type CollectionEntry, type CollectionStore } from "../world/collection";
 import { computePerks } from "../world/collectionPerks";
+import { wrapLines } from "../world/loreArt";
 import type { Hand } from "./hand";
 import type { Sfx } from "./sfx";
 
@@ -418,16 +419,37 @@ export class InventoryMenu extends UiPanel {
     const focus = [...hoveredSlots].map((slot) => entries[slot]).find((entry) => entry !== undefined);
     ctx.textAlign = "left";
     if (focus) {
-      ctx.font = "bold 32px monospace";
-      ctx.fillStyle = "#f2e8cf";
       const french = getLanguage() === "fr";
-      ctx.fillText(french ? focus.nameFr : focus.nameEn, 40, 462);
-      ctx.font = "22px monospace";
+      const maxTextWidth = width - 80;
+      // Nom sur autant de lignes que nécessaire (jusqu'à 2 : au-delà, ellipse) : un nom + gabarit
+      // long ("instrument de vaisseau spatial — origine inconnue") ne tient pas toujours sur une ligne.
+      const NAME_TOP = 446;
+      const NAME_LINE_HEIGHT = 30;
+      ctx.font = "bold 28px monospace";
+      ctx.fillStyle = "#f2e8cf";
+      const nameSource = french ? focus.nameFr : focus.nameEn;
+      const nameLines = wrapLines(ctx, nameSource, maxTextWidth).slice(0, 2);
+      if (wrapLines(ctx, nameSource, maxTextWidth).length > 2) nameLines[1] = ellipsize(ctx, nameLines[1]!, maxTextWidth);
+      nameLines.forEach((line, index) => ctx.fillText(line, 40, NAME_TOP + index * NAME_LINE_HEIGHT));
+
+      const rarityY = NAME_TOP + nameLines.length * NAME_LINE_HEIGHT + 4;
+      ctx.font = "20px monospace";
       ctx.fillStyle = RARITY_COLOR[focus.rarity];
-      ctx.fillText(t("inv.found", { rarity: rarityLabel(focus.rarity), depth: focus.depth }), 40, 496);
-      ctx.font = "21px monospace";
+      ctx.fillText(t("inv.found", { rarity: rarityLabel(focus.rarity), depth: focus.depth }), 40, rarityY);
+
+      // Description sur autant de lignes que la place restante le permet (au moins une), avec
+      // une vraie ellipse en cas de dépassement au lieu d'une coupe silencieuse.
+      const DESC_TOP = rarityY + 26;
+      const DESC_LINE_HEIGHT = 22;
+      const DESC_BOTTOM_LIMIT = 542;
+      const maxDescLines = Math.max(1, Math.floor((DESC_BOTTOM_LIMIT - DESC_TOP) / DESC_LINE_HEIGHT) + 1);
+      ctx.font = "20px monospace";
       ctx.fillStyle = "#a79d86";
-      wrapText(ctx, french ? focus.descriptionFr : focus.descriptionEn, 40, 526, width - 80, 24, 1);
+      const descSource = french ? focus.descriptionFr : focus.descriptionEn;
+      const allDescLines = wrapLines(ctx, descSource, maxTextWidth);
+      const descLines = allDescLines.slice(0, maxDescLines);
+      if (allDescLines.length > maxDescLines) descLines[descLines.length - 1] = ellipsize(ctx, descLines[descLines.length - 1]!, maxTextWidth);
+      descLines.forEach((line, index) => ctx.fillText(line, 40, DESC_TOP + index * DESC_LINE_HEIGHT));
     } else if (this.statusUntil) {
       ctx.font = "26px monospace";
       ctx.fillStyle = "#9fe39f";
@@ -478,4 +500,12 @@ export class InventoryMenu extends UiPanel {
     ctx.font = "15px monospace";
     ctx.fillText(`build ${__BUILD_ID__}`, width - 20, 774 + DEBUG_ROW);
   }
+}
+
+/** Coupe un texte avec une vraie ellipse plutôt qu'un dépassement ou une coupe silencieuse. */
+function ellipsize(ctx: CanvasRenderingContext2D, text: string, maxWidth: number): string {
+  if (ctx.measureText(text).width <= maxWidth) return text;
+  let cut = text;
+  while (cut.length > 1 && ctx.measureText(`${cut}…`).width > maxWidth) cut = cut.slice(0, -1);
+  return `${cut.trimEnd()}…`;
 }

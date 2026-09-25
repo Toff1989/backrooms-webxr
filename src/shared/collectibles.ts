@@ -7,9 +7,7 @@
  * côté serveur (étape 7).
  */
 export type CollectibleKind =
-  | "tape"
   | "photo"
-  | "note"
   | "can"
   | "toy"
   | "wrench"
@@ -20,7 +18,6 @@ export type CollectibleKind =
   | "cigarettePack"
   | "circuitBoard"
   | "cleanerTin"
-  | "clipboard"
   | "combWrench"
   | "hammer"
   | "digitalWatch"
@@ -31,9 +28,7 @@ export type CollectibleKind =
   | "gamepad"
   | "lightbulb"
   | "lubricant"
-  | "measuringTape"
   | "medicalTape"
-  | "mousetrap"
   | "pliers"
   | "plunger"
   | "screwdriver"
@@ -41,22 +36,16 @@ export type CollectibleKind =
   | "watch"
   | "binoculars"
   | "brassPot"
-  | "gamingConsole"
   | "magnifyingGlass"
   | "toolbox"
   | "multimeter"
-  | "spectacles"
   | "securityCamera"
-  | "flashlight"
   | "kettle"
-  | "vintageFlashlight"
   | "lighter"
   | "wallClock"
   | "vase"
-  | "bullHead"
   | "spacecraftInstrument"
-  | "compass"
-  | "videoCamera";
+  | "compass";
 
 export type CollectibleRarity = "common" | "rare" | "legendary";
 
@@ -72,9 +61,7 @@ interface KindData {
 /** Une entrée par modèle : rareté fixe (propriété de l'objet) + nom de base FR/EN traduit du modèle Poly Haven d'origine. */
 const KIND_DATA: Record<CollectibleKind, KindData> = {
   // Commun — objets du quotidien, très largement répandus.
-  tape: { rarity: "common", nameFr: "lecteur cassette", nameEn: "cassette player" },
   photo: { rarity: "common", nameFr: "cadre photo", nameEn: "picture frame" },
-  note: { rarity: "common", nameFr: "carnet relié", nameEn: "bound notebook" },
   can: { rarity: "common", nameFr: "boîte de conserve rouillée", nameEn: "rusted tin can" },
   toy: { rarity: "common", nameFr: "canard en caoutchouc", nameEn: "rubber duck" },
   wrench: { rarity: "common", nameFr: "clé à molette", nameEn: "adjustable wrench" },
@@ -85,7 +72,6 @@ const KIND_DATA: Record<CollectibleKind, KindData> = {
   cigarettePack: { rarity: "common", nameFr: "paquet de cigarettes", nameEn: "cigarette pack" },
   circuitBoard: { rarity: "common", nameFr: "carte électronique", nameEn: "circuit board" },
   cleanerTin: { rarity: "common", nameFr: "boîte de cirage", nameEn: "tin of cleaner" },
-  clipboard: { rarity: "common", nameFr: "écritoire à pince", nameEn: "clipboard" },
   combWrench: { rarity: "common", nameFr: "clé plate", nameEn: "combination wrench" },
   hammer: { rarity: "common", nameFr: "marteau de menuisier", nameEn: "cross-pein hammer" },
   digitalWatch: { rarity: "common", nameFr: "montre digitale", nameEn: "digital wrist watch" },
@@ -96,9 +82,7 @@ const KIND_DATA: Record<CollectibleKind, KindData> = {
   gamepad: { rarity: "common", nameFr: "manette de jeu", nameEn: "gamepad" },
   lightbulb: { rarity: "common", nameFr: "ampoule", nameEn: "lightbulb" },
   lubricant: { rarity: "common", nameFr: "bombe de lubrifiant", nameEn: "lubricant spray" },
-  measuringTape: { rarity: "common", nameFr: "mètre ruban", nameEn: "measuring tape" },
   medicalTape: { rarity: "common", nameFr: "sparadrap", nameEn: "medical tape" },
-  mousetrap: { rarity: "common", nameFr: "piège à souris", nameEn: "mousetrap" },
   pliers: { rarity: "common", nameFr: "pince", nameEn: "pliers" },
   plunger: { rarity: "common", nameFr: "ventouse de plombier", nameEn: "plunger" },
   screwdriver: { rarity: "common", nameFr: "tournevis", nameEn: "screwdriver" },
@@ -108,24 +92,18 @@ const KIND_DATA: Record<CollectibleKind, KindData> = {
   watch: { rarity: "rare", nameFr: "montre à gousset", nameEn: "pocket watch" },
   binoculars: { rarity: "rare", nameFr: "jumelles", nameEn: "binoculars" },
   brassPot: { rarity: "rare", nameFr: "pot en laiton", nameEn: "brass pot" },
-  gamingConsole: { rarity: "rare", nameFr: "console de jeu", nameEn: "gaming console" },
   magnifyingGlass: { rarity: "rare", nameFr: "loupe", nameEn: "magnifying glass" },
   toolbox: { rarity: "rare", nameFr: "boîte à outils", nameEn: "metal toolbox" },
   multimeter: { rarity: "rare", nameFr: "multimètre rétro", nameEn: "retro multimeter" },
-  spectacles: { rarity: "rare", nameFr: "lunettes rondes", nameEn: "round spectacles" },
   securityCamera: { rarity: "rare", nameFr: "caméra de surveillance", nameEn: "security camera" },
-  flashlight: { rarity: "rare", nameFr: "lampe torche à signal", nameEn: "signal flashlight" },
   kettle: { rarity: "rare", nameFr: "bouilloire électrique vintage", nameEn: "vintage electric kettle" },
-  vintageFlashlight: { rarity: "rare", nameFr: "lampe torche vintage", nameEn: "vintage flashlight" },
   lighter: { rarity: "rare", nameFr: "briquet vintage", nameEn: "vintage lighter" },
   wallClock: { rarity: "rare", nameFr: "horloge murale", nameEn: "wall clock" },
 
   // Légendaire — ne devrait pas se trouver dans les Backrooms.
   vase: { rarity: "legendary", nameFr: "vase en céramique antique", nameEn: "antique ceramic vase" },
-  bullHead: { rarity: "legendary", nameFr: "tête de taureau sculptée", nameEn: "bull head sculpture" },
   spacecraftInstrument: { rarity: "legendary", nameFr: "instrument de vaisseau spatial", nameEn: "vintage spacecraft instrument" },
   compass: { rarity: "legendary", nameFr: "boussole de marin", nameEn: "seadog's compass" },
-  videoCamera: { rarity: "legendary", nameFr: "caméra vidéo vintage", nameEn: "vintage video camera" },
 };
 
 export const COLLECTIBLE_KINDS = Object.keys(KIND_DATA) as CollectibleKind[];

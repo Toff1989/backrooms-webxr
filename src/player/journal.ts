@@ -29,17 +29,7 @@ const INDEX_ROW = 29;
 const FORMAT_COLOR: Record<LoreFormat, string> = { journal: "#1c2753", fiche: "#a3221b", polaroid: "#2f6b2f", audio: "#8a5a2b" };
 const PLAY_BUTTON: Rect = { x: CANVAS_W - 30 - 488 + 30, y: 30 + 570 - 84, w: 250, h: 58 };
 
-/** Carnet tenu en main : devant la paume, décalé du côté opposé à la main, tourné vers les yeux. */
-const HAND_UP = 0.1;
-const HAND_SIDE = 0.2;
-const HAND_TOWARD_HEAD = 0.06;
 const FLOAT_DISTANCE = 0.55;
-
-/** Zone "ceinture" (relative à la tête) où la main attrape le journal, comme dans Saints & Sinners. */
-const HIP_DROP_MIN = 0.42;
-const HIP_DROP_MAX = 0.98;
-const HIP_RADIUS = 0.34;
-const HIP_MAX_FORWARD = 0.16;
 
 type Tab = "tapes" | "record";
 type PairState =
@@ -52,15 +42,9 @@ type PairState =
 const KEYPAD_TOP = 172;
 const KEYPAD = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "⌫", "0", "OK"] as const;
 
-const tmpHead = new THREE.Vector3();
-const tmpRight = new THREE.Vector3();
-const tmpForward = new THREE.Vector3();
-const tmpOffset = new THREE.Vector3();
-
 /**
- * Journal des bandes perdues : un carnet qu'on prend à la ceinture (grip, main à la hanche) et
- * qu'on garde en main tant que le grip est tenu, ou qu'on ouvre depuis le menu d'inventaire (il
- * flotte alors devant soi). L'autre main tourne les pages au pointeur (gâchette).
+ * Journal des bandes perdues : un carnet qu'on ouvre depuis le menu d'inventaire (bouton
+ * JOURNAL), qui flotte alors devant soi. L'autre main tourne les pages au pointeur (gâchette).
  * - Onglet BANDES : l'index des 16 bandes (lues ou encore perdues), et la bande choisie écrite
  *   à la main sur la page de droite.
  * - Onglet ENREGISTREMENT : le code de cassette (retrouver ses bandes et scores ailleurs), les
@@ -69,17 +53,14 @@ const tmpOffset = new THREE.Vector3();
 export class Journal extends UiPanel {
   private tab: Tab = "tapes";
   private selected = 0;
-  private heldBy: Hand | null = null;
   private pair: PairState = { kind: "idle" };
   private status: { key: TranslationKey; good: boolean } | null = null;
   private readonly hovered = new Map<Hand, string | null>();
   private hitRects: Array<{ id: string; rect: Rect }> = [];
-  private readonly inHipZone = new Map<Hand, boolean>();
 
   constructor(
     private readonly camera: THREE.Camera,
     private readonly body: THREE.Object3D,
-    private readonly scene: THREE.Scene,
     private readonly lore: LoreJournal,
     private readonly sfx: Sfx,
   ) {
@@ -89,29 +70,8 @@ export class Journal extends UiPanel {
     lore.onChange(() => this.invalidate());
   }
 
-  /** La main est-elle à la ceinture (zone de prise du journal) ? */
-  isAtHip(hand: Hand): boolean {
-    this.camera.getWorldPosition(tmpHead);
-    const drop = tmpHead.y - hand.palm.y;
-    if (drop < HIP_DROP_MIN || drop > HIP_DROP_MAX) return false;
-    tmpOffset.subVectors(hand.palm, tmpHead).setY(0);
-    if (tmpOffset.length() > HIP_RADIUS) return false;
-    this.camera.getWorldDirection(tmpForward).setY(0).normalize();
-    return tmpOffset.dot(tmpForward) < HIP_MAX_FORWARD;
-  }
-
-  /** Grip à la ceinture : le journal vient dans la main, tant que le grip est tenu. */
-  openInHand(hand: Hand): void {
-    this.heldBy = hand;
-    if (this.group.parent !== this.scene) this.scene.add(this.group);
-    this.show();
-    hand.pulse(0.4, 40);
-    this.placeInHand();
-  }
-
   /** Depuis le menu : le journal flotte devant le joueur. */
   openFloating(): void {
-    this.heldBy = null;
     if (this.group.parent !== this.body) this.body.add(this.group);
     const head = this.camera.position;
     const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(this.camera.quaternion).setY(0);
@@ -125,14 +85,13 @@ export class Journal extends UiPanel {
   close(): void {
     if (!this.visible) return;
     this.group.visible = false;
-    this.heldBy = null;
     if (this.pair.kind === "showing") this.pair.request.cancel();
     if (this.pair.kind !== "idle") this.pair = { kind: "idle" };
     this.sfx.play("click", 0.25);
   }
 
   private show(): void {
-    log("journal", { action: "open", held: this.heldBy !== null });
+    log("journal", { action: "open" });
     this.group.visible = true;
     // Ouvert sur la dernière bande lue (la plus récente), sinon sur la première à trouver.
     this.selected = Math.max(0, Math.min(this.lore.count, LORE_FRAGMENT_COUNT) - 1);
@@ -140,34 +99,6 @@ export class Journal extends UiPanel {
     this.sfx.play("take", 0.35);
     this.invalidate();
     void this.lore.sync();
-  }
-
-  /** Chaque frame : suit la main qui le tient (et se referme au relâchement), signale la ceinture. */
-  update(hands: Hand[], isHandFree: (hand: Hand) => boolean): void {
-    for (const hand of hands) {
-      const inZone = hand.tracked && hand !== this.heldBy && isHandFree(hand) && this.isAtHip(hand);
-      if (inZone && !this.inHipZone.get(hand)) hand.pulse(0.12, 15);
-      this.inHipZone.set(hand, inZone);
-    }
-    if (!this.visible || !this.heldBy) return;
-    if (!this.heldBy.tracked || !this.heldBy.input.squeeze.pressed) {
-      this.close();
-      return;
-    }
-    this.placeInHand();
-  }
-
-  private placeInHand(): void {
-    const hand = this.heldBy;
-    if (!hand) return;
-    this.camera.getWorldPosition(tmpHead);
-    this.camera.getWorldDirection(tmpForward);
-    tmpRight.crossVectors(tmpForward, THREE.Object3D.DEFAULT_UP).setY(0).normalize();
-    const side = hand.input.handedness === "left" ? 1 : -1;
-    tmpOffset.subVectors(tmpHead, hand.palm).normalize().multiplyScalar(HAND_TOWARD_HEAD);
-    this.group.position.copy(hand.palm).addScaledVector(tmpRight, side * HAND_SIDE).add(tmpOffset);
-    this.group.position.y += HAND_UP;
-    this.group.lookAt(tmpHead);
   }
 
   onHover(hand: Hand, px: number | null, py: number | null): void {

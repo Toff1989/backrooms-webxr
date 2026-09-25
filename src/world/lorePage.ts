@@ -208,9 +208,9 @@ function createPolaroid(fragment: number): LoreObject {
   };
 }
 
-/** Cassette audio : le modèle de cassette de la collection ; la prendre en main la lit. */
+/** Cassette audio : modèle de cassette dédié (plus un objet de collection normal) ; la prendre en main la lit. */
 async function createCassette(fragment: number): Promise<LoreObject> {
-  const { model, template } = await spawnCollectibleModel("tape");
+  const { model, template } = await spawnCollectibleModel("cassette");
   const lowest = getModelShape(template).box.min.y;
   return {
     model,

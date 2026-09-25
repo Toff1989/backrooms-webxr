@@ -34,10 +34,6 @@ import { GrabbableRegistry, type LorePageData } from "./world/grabbable";
 import { InteractionSystem } from "./world/interactions";
 import { onNoise } from "./world/noise";
 import { ObjectAudio } from "./world/objectAudio";
-import { spawnCollectibleModel } from "./world/collectibleLoader";
-import type { CollectionEntry } from "./world/collection";
-import { COLLECTIBLE_SCALE_MAX, COLLECTIBLE_SCALE_MIN, generateCollectibleLore, getCollectibleRarity, pickCollectibleKind } from "./shared/collectibles";
-import { coordinateHash01, stringSeedToInt } from "./shared/rng";
 import { LevelManager, SPAWN_LOCAL_POSITION } from "./world/levelManager";
 import { loreFormat } from "./shared/lore";
 import { LoreJournal } from "./world/loreJournal";
@@ -266,7 +262,7 @@ const endRunScreen = new EndRunScreen(
   () => beginNewRun(true),
 );
 
-const journal = new Journal(camera, player.body, scene, loreJournal, sfx);
+const journal = new Journal(camera, player.body, loreJournal, sfx);
 installAccountPanel(loreJournal);
 
 const pointer = new UiPointer(hands, scene, [inventoryMenu, endRunScreen, journal]);
@@ -295,46 +291,15 @@ grabSystem = new GrabSystem(physics, grabbables, hands, sfx, {
     interactions.grabbed(grabbable.heldBy, grabbable);
   },
   onUse: (hand, grabbable) => interactions.use(hand, grabbable),
-  onEmptyGrip: (hand) => {
-    if (!journal.isAtHip(hand)) return false;
-    journal.openInHand(hand);
-    return true;
-  },
   head: () => ({ position: player.headWorld, forward: camera.getWorldDirection(new THREE.Vector3()) }),
 }, scene);
 
-/**
- * Objet de collection caché dans un meuble fouillé (tiroir, carton, casier) : tiré au sort à
- * partir de la seed du level et de l'emplacement du meuble — un seul par meuble et par level.
- */
-function spawnHiddenItem(key: string, position: THREE.Vector3): void {
-  const id = `${levelManager.levelSeed}:hid:${key}`;
-  if (collectionStore.has(id) || grabbables.isItemAlive(id)) return;
-  const seedInt = stringSeedToInt(id);
-  const roll = (salt: number): number => coordinateHash01(seedInt, 0, 0, salt);
-  const kind = pickCollectibleKind(roll(1));
-  const entry: CollectionEntry = {
-    id,
-    kind,
-    rarity: getCollectibleRarity(kind),
-    scale: COLLECTIBLE_SCALE_MIN + roll(4) * (COLLECTIBLE_SCALE_MAX - COLLECTIBLE_SCALE_MIN),
-    depth: levelManager.depth,
-    ...generateCollectibleLore(kind, roll(2), roll(3)),
-    collectedAt: 0,
-  };
-  grabbables.reserveItem(id);
-  spawnCollectibleModel(kind)
-    .then(({ model, template }) => grabbables.createCollectible(entry, model, template, position, new THREE.Quaternion()))
-    .catch(() => grabbables.releaseItem(id));
-}
-
-/** Objets qui s'animent : télé, réveil, tiroirs, lampes, tapette... (voir `interactions.ts`). */
+/** Objets qui s'animent : télé, réveil, lampes... (voir `interactions.ts`). */
 const objectAudio = new ObjectAudio(scene, audioListener);
 const interactions = new InteractionSystem({
   audio: objectAudio,
   physics,
   registry: grabbables,
-  flashlight,
   scene,
   camera,
   head: () => player.headWorld,
@@ -342,7 +307,6 @@ const interactions = new InteractionSystem({
   stunCadreur: (seconds) => cadreur.stun(seconds),
   exitPosition: () => levelManager.exitPosition,
   capturePhoto,
-  spawnHiddenItem,
   take: () => take,
   runSeconds: () => hud.recordingSeconds,
   drop: (grabbable) => grabSystem.drop(grabbable),
@@ -350,14 +314,6 @@ const interactions = new InteractionSystem({
   cadreurEye: () => {
     const position = cadreur.worldPosition;
     return position ? { position: new THREE.Vector3(position.x, 1.8, position.z), target: player.headWorld } : null;
-  },
-  playLatestTape: () => {
-    for (let fragment = loreJournal.count - 1; fragment >= 0; fragment--) {
-      if (loreFormat(fragment) !== "audio") continue;
-      tapePlayer.play(fragment);
-      return true;
-    }
-    return false;
   },
 });
 
@@ -525,7 +481,6 @@ renderer.setAnimationLoop((timestamp) => {
   pointer.update();
   inventoryMenu.update(deltaSeconds, hands, (hand) => pointer.frame(hand).target === inventoryMenu);
   endRunScreen.update(hands);
-  journal.update(hands, (hand) => !grabSystem.isHolding(hand));
   grabSystem.update(elapsedSeconds, pointer);
   perfStats.end("joueur");
 
