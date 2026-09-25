@@ -1011,6 +1011,23 @@ const BEHAVIOURS: Record<string, Factory> = {
 };
 
 /**
+ * Faces (écran, tableau, cadran) que cherchent les comportements ci-dessus, calculées d'avance
+ * au pré-chauffage (voir warmup.ts) : la recherche parcourt tous les triangles du modèle —
+ * jusqu'à ~10 ms au premier spawn d'une loupe (banc de test). Mêmes appels que les
+ * comportements, donc mêmes entrées du cache de `findModelFace`.
+ */
+export function prepareInteractionFaces(kind: string, template: THREE.Object3D): void {
+  const behaviour = BEHAVIOURS[kind];
+  if (behaviour === television || behaviour === chalkboard) findModelFace(template, undefined, FRONT_AXES);
+  else if (behaviour === compass || behaviour === digitalWatch) findModelFace(template, undefined, UP_AXES);
+  else if (behaviour === magnifyingGlass) findModelFace(template);
+  else if (behaviour === photo) {
+    const front = findModelFace(template);
+    if (front) findModelFace(template, front.normal.clone().negate());
+  }
+}
+
+/**
  * Objets qui s'animent (phase 3 de la feuille de route) : chaque meuble ou objet de collection
  * concerné reçoit un comportement à son apparition. On s'en sert :
  * - à la gâchette en le tenant (allumer, remonter, pulvériser, écraser) ;

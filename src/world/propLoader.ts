@@ -18,7 +18,7 @@ import televisionUrl from "../assets/models/props/television.glb";
 import wetFloorSignUrl from "../assets/models/props/wetFloorSign.glb";
 import schoolDeskUrl from "../assets/models/schooldesk.glb";
 import type { PropKind } from "../shared/props";
-import { loadTemplateModel } from "./gltfLoader";
+import { loadedTemplates, loadTemplateModel } from "./gltfLoader";
 
 /**
  * Mobilier décoratif : modèles CC0 (Poly Haven), décimés + compressés Draco + textures WebP
@@ -61,4 +61,9 @@ function loadTemplate(kind: PropKind): Promise<THREE.Object3D> {
 export async function spawnProp(kind: PropKind): Promise<{ model: THREE.Object3D; template: THREE.Object3D }> {
   const template = await loadTemplate(kind);
   return { model: template.clone(true), template };
+}
+
+/** Tous les modèles de meubles, chargés d'avance (pré-chauffage, voir `warmup.ts`). */
+export function preloadPropTemplates(): Promise<Array<{ kind: PropKind; template: THREE.Object3D }>> {
+  return loadedTemplates((Object.keys(PROP_URLS) as PropKind[]).map((kind) => [kind, loadTemplate(kind)]));
 }

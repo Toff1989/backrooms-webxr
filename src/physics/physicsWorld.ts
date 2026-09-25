@@ -43,8 +43,18 @@ export const CollisionGroups = {
 /** Pas de simulation borné : suit la cadence du casque (72/90 Hz) sans sauts, coupé en deux sur un gros à-coup. */
 const MIN_STEP = 1 / 120;
 const MAX_STEP = 1 / 45;
-/** Demi-côté des dalles sol/plafond : couvre largement la zone chargée (5 chunks de 20 m). */
-const BOUNDS_HALF_EXTENT = 80;
+/**
+ * Demi-côté des dalles sol/plafond : couvre largement la zone chargée (5 chunks de 20 m, ±50 m
+ * autour du joueur). Assez petit pour des contacts précis en flottants 32 bits (une dalle de
+ * 10 km faisait trembler les meubles : ici l'erreur reste de l'ordre de 0,03 mm).
+ */
+const BOUNDS_HALF_EXTENT = 240;
+/**
+ * Écart toléré entre le joueur et le centre des dalles avant de les recentrer (la zone chargée
+ * reste couverte, avec 10 m de marge). Recentrer réveille tous les corps posés au sol (voir
+ * `recenter`) : le faire tous les 180 m plutôt qu'à chaque chunk (20 m).
+ */
+const RECENTER_DISTANCE = 180;
 
 /**
  * Monde physique Rapier (moteur rigide WASM) : sol et plafond infinis (un seul collider
@@ -80,8 +90,15 @@ export class PhysicsWorld {
     );
   }
 
-  /** Recentre les dalles sol/plafond sous le joueur (à chaque changement de chunk). */
+  /**
+   * Recentre les dalles sol/plafond sous le joueur (appelé à chaque changement de chunk), seulement
+   * s'il s'est éloigné de leur centre : déplacer (ou recréer) un collider réveille dans Rapier tous
+   * les corps qui le touchent — ici tous les meubles et objets posés (~200, mesuré), simulés pour
+   * rien pendant les ~2 s qu'ils mettent à se rendormir. Avant, c'était à chaque chunk traversé.
+   */
   recenter(x: number, z: number): void {
+    const center = this.bounds.translation();
+    if (Math.abs(x - center.x) <= RECENTER_DISTANCE && Math.abs(z - center.z) <= RECENTER_DISTANCE) return;
     this.bounds.setTranslation({ x, y: 0, z }, true);
   }
 

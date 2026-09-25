@@ -95,7 +95,9 @@ avec leur cause, stats par seconde, état audio, session XR, chunks...) dans
 `server/logs/debug-AAAA-MM-JJ.jsonl`, relisible via `GET /api/debug-log?token=DEBUG_LOG_TOKEN`
 (jeton dans `server/.env`, généré par `scripts/plesk-install.sh`). L'identifiant de build (commit
 + date) est affiché dans le menu d'inventaire et les options : il permet de vérifier que le casque
-charge bien la dernière version.
+charge bien la dernière version. En mode debug, `window.__game` expose aussi quelques commandes
+pour les bancs de test automatisés (téléporter le joueur, descendre d'un level, ouvrir
+l'inventaire) et le journal signale la fin du pré-chauffage (`warmup`).
 
 ## Structure
 
@@ -182,6 +184,16 @@ tests/physics.sim.ts         Simulation physique sans rendu (`npm run test:physi
   licence Content License — retraitée : redimensionnée, recompressée en WebM, pas le fichier
   brut, pour rester dans le cadre "modifier/adapter" de la licence), pas d'un hash procédural.
   Échantillonnée en `NearestFilter` pour garder le grain brut, son intensité suit `uCorruption`.
+  24 images de la vidéo sont capturées au démarrage dans une texture à couches (« flipbook »,
+  `vhsNoiseTexture.ts`) : plus de décodage vidéo ni d'envoi de l'image au GPU à chaque frame.
+- Performance (budget Quest : 13,9 ms à 72 Hz, cadence demandée au casque) : tout ce qui se
+  préparait à la première apparition d'un objet en pleine partie est fait au démarrage, par
+  petits morceaux dans la boucle de rendu (`warmup.ts`) — chargement de tous les modèles,
+  enveloppes physiques, faces des écrans/cadrans, compilation des shaders (écran et rendu dans
+  une texture) et envoi des textures au GPU. Plus de verre réfractif (il re-rendait toute la
+  scène), une seule passe plein écran pour l'overlay VHS et la vignette, faces invisibles des
+  murs retirées, colliders des murs fusionnés, corps physiques endormis ni relus ni réveillés
+  au changement de chunk (dalles sol/plafond recentrées tous les 180 m seulement).
 - La disposition d'un chunk (murs/piliers/pièges) est une fonction pure de ses coordonnées
   globales et de la seed (`src/shared/`) : deux chunks voisins générés indépendamment restent
   cohérents à leur frontière, et cette logique est réellement réutilisée côté serveur pour la

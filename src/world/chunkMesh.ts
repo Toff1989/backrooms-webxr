@@ -20,7 +20,20 @@ export function buildChunkGroup(layout: ChunkLayout): THREE.Group {
   const pillars = buildPillars(layout);
   if (pillars) group.add(pillars);
 
+  freezeMatrices(group);
   return group;
+}
+
+/**
+ * Décor immobile : matrices calculées une fois, plus recomposées à chaque frame par
+ * `updateMatrixWorld` (des centaines d'objets statiques dans les 25 chunks chargés). À rappeler
+ * pour tout objet statique ajouté ensuite au groupe (piles, voir chunkStreamer.ts).
+ */
+export function freezeMatrices(root: THREE.Object3D): void {
+  root.traverse((object) => {
+    object.updateMatrix();
+    object.matrixAutoUpdate = false;
+  });
 }
 
 // Segments des murs/piliers : sans subdivision, le displacementMap (voir materials.ts) ne
@@ -33,7 +46,7 @@ const WALL_SEGMENTS_HEIGHT = 3;
 const PILLAR_SEGMENTS = 3;
 
 /** Boîte modèle d'un mur (1 m de long), partagée : ses sommets sont recopiés transformés. */
-let wallTemplate: THREE.BoxGeometry | null = null;
+let wallTemplate: THREE.BufferGeometry | null = null;
 // Tableaux bruts du gabarit, extraits une seule fois : indexer un Float32Array/Uint16Array
 // directement dans la boucle chaude (jusqu'à ~50 murs × ~90 sommets par chunk) coûte nettement
 // moins cher que 6 appels BufferAttribute.getX/Y/Z par sommet — mesuré ~9 ms de pic par chunk
@@ -53,7 +66,7 @@ function buildWalls(layout: ChunkLayout): THREE.Mesh | null {
   // Écriture directe dans un seul buffer (pas de clone + fusion de 30 géométries : ~4 ms par
   // chunk sur PC, un à-coup visible sur Quest à chaque changement de chunk).
   if (!wallTemplate) {
-    wallTemplate = new THREE.BoxGeometry(1, WALL_HEIGHT, WALL_THICKNESS, WALL_SEGMENTS_LENGTH, WALL_SEGMENTS_HEIGHT, 1);
+    wallTemplate = withoutTopAndBottom(new THREE.BoxGeometry(1, WALL_HEIGHT, WALL_THICKNESS, WALL_SEGMENTS_LENGTH, WALL_SEGMENTS_HEIGHT, 1));
     const srcPosition = wallTemplate.getAttribute("position") as THREE.BufferAttribute;
     const srcNormal = wallTemplate.getAttribute("normal") as THREE.BufferAttribute;
     const srcUv = wallTemplate.getAttribute("uv") as THREE.BufferAttribute;
@@ -118,15 +131,51 @@ function buildWalls(layout: ChunkLayout): THREE.Mesh | null {
   return new THREE.Mesh(geometry, getWallMaterial());
 }
 
+/**
+ * Boîte sans ses faces du haut et du bas (groupes +Y et -Y de `BoxGeometry`) : murs et piliers
+ * vont du sol au plafond, ces faces y sont collées et ne sont jamais visibles. Un quart des
+ * sommets d'un mur en moins (chacun lit la carte de relief dans le vertex shader, deux fois en
+ * VR), et autant de moins à recopier à chaque chargement de chunk.
+ */
+function withoutTopAndBottom(box: THREE.BoxGeometry): THREE.BufferGeometry {
+  const TOP = 2;
+  const BOTTOM = 3;
+  const sourceIndex = box.getIndex()!;
+  const remap = new Map<number, number>();
+  const indices: number[] = [];
+  for (const group of box.groups) {
+    if (group.materialIndex === TOP || group.materialIndex === BOTTOM) continue;
+    for (let i = group.start; i < group.start + group.count; i++) {
+      const vertex = sourceIndex.getX(i);
+      let mapped = remap.get(vertex);
+      if (mapped === undefined) {
+        mapped = remap.size;
+        remap.set(vertex, mapped);
+      }
+      indices.push(mapped);
+    }
+  }
+  const geometry = new THREE.BufferGeometry();
+  for (const name of ["position", "normal", "uv"] as const) {
+    const source = box.getAttribute(name) as THREE.BufferAttribute;
+    const array = new Float32Array(remap.size * source.itemSize);
+    for (const [from, to] of remap) for (let k = 0; k < source.itemSize; k++) array[to * source.itemSize + k] = source.array[from * source.itemSize + k]!;
+    geometry.setAttribute(name, new THREE.BufferAttribute(array, source.itemSize));
+  }
+  geometry.setIndex(indices);
+  box.dispose();
+  return geometry;
+}
+
 /** Tous les piliers ont la même forme : une seule géométrie partagée par tous les chunks (au
  * lieu d'en reconstruire une, identique, à chaque chargement) — jamais disposée par chunk, voir
  * l'exclusion sur le nom "pillars" dans `disposeGroup` (chunkStreamer.ts). */
-let pillarTemplate: THREE.BoxGeometry | null = null;
+let pillarTemplate: THREE.BufferGeometry | null = null;
 
 function buildPillars(layout: ChunkLayout): THREE.InstancedMesh | null {
   if (layout.pillarPositions.length === 0) return null;
 
-  pillarTemplate ??= new THREE.BoxGeometry(PILLAR_SIZE, WALL_HEIGHT, PILLAR_SIZE, PILLAR_SEGMENTS, WALL_SEGMENTS_HEIGHT, PILLAR_SEGMENTS);
+  pillarTemplate ??= withoutTopAndBottom(new THREE.BoxGeometry(PILLAR_SIZE, WALL_HEIGHT, PILLAR_SIZE, PILLAR_SEGMENTS, WALL_SEGMENTS_HEIGHT, PILLAR_SEGMENTS));
   const mesh = new THREE.InstancedMesh(pillarTemplate, getPillarMaterial(), layout.pillarPositions.length);
   mesh.name = "pillars";
   const matrix = new THREE.Matrix4();

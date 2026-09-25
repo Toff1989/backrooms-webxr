@@ -42,28 +42,31 @@ export class Hand {
   private ghostAttachedTo: THREE.Object3D | null = null;
   private attachedTo: THREE.Object3D | null = null;
   private readonly history: PoseSample[] = [];
+  /** Échantillons sortis de l'historique, réutilisés (pas d'allocation à chaque frame). */
+  private readonly spareSamples: PoseSample[] = [];
   private readonly body: RAPIER.RigidBody;
   private readonly collider: RAPIER.Collider;
   private readonly lastBodyPosition = new THREE.Vector3();
   private readonly gripPosition = new THREE.Vector3();
   private readonly scratch = new THREE.Vector3();
   private readonly deltaQuat = new THREE.Quaternion();
+  /** Modèles de la main (normale et fantôme) une fois chargés : pré-chauffage des shaders. */
+  readonly models: Promise<THREE.Object3D[]>;
 
   constructor(
     readonly input: HandInput,
     physics: PhysicsWorld,
   ) {
-    HandModel.load(input.handedness)
-      .then((model) => {
-        this.model = model;
-      })
-      .catch(() => {});
-    HandModel.load(input.handedness, true)
-      .then((ghost) => {
-        ghost.root.visible = false;
-        this.ghost = ghost;
-      })
-      .catch(() => {});
+    const model = HandModel.load(input.handedness).then((loaded) => {
+      this.model = loaded;
+      return loaded.root;
+    });
+    const ghost = HandModel.load(input.handedness, true).then((loaded) => {
+      loaded.root.visible = false;
+      this.ghost = loaded;
+      return loaded.root;
+    });
+    this.models = Promise.allSettled([model, ghost]).then((results) => results.flatMap((result) => (result.status === "fulfilled" ? [result.value] : [])));
 
     this.body = physics.world.createRigidBody(RAPIER.RigidBodyDesc.kinematicPositionBased().setTranslation(0, -10, 0));
     this.collider = physics.world.createCollider(
@@ -101,7 +104,7 @@ export class Hand {
       this.ghostAttachedTo = grip;
     }
     if (!grip || !this.tracked) {
-      this.history.length = 0;
+      this.clearHistory();
       this.velocity.set(0, 0, 0);
       this.angularVelocity.set(0, 0, 0);
       return;
@@ -152,7 +155,7 @@ export class Hand {
 
   /** Oublie l'historique de vitesse (téléportation / rotation du rig : ce n'est pas un geste de lancer). */
   resetMotion(): void {
-    this.history.length = 0;
+    this.clearHistory();
     this.velocity.set(0, 0, 0);
     this.angularVelocity.set(0, 0, 0);
   }
@@ -172,12 +175,21 @@ export class Hand {
     this.lastBodyPosition.copy(this.palm);
   }
 
+  private clearHistory(): void {
+    this.spareSamples.push(...this.history);
+    this.history.length = 0;
+  }
+
   private recordVelocity(time: number): void {
     const history = this.history;
     const last = history[history.length - 1];
     if (last && time - last.time < 1e-4) return;
-    history.push({ time, position: this.palm.clone(), quaternion: this.quaternion.clone() });
-    while (history.length > 2 && time - history[0]!.time > HISTORY_SECONDS) history.shift();
+    const sample = this.spareSamples.pop() ?? { time: 0, position: new THREE.Vector3(), quaternion: new THREE.Quaternion() };
+    sample.time = time;
+    sample.position.copy(this.palm);
+    sample.quaternion.copy(this.quaternion);
+    history.push(sample);
+    while (history.length > 2 && time - history[0]!.time > HISTORY_SECONDS) this.spareSamples.push(history.shift()!);
 
     const first = history[0]!;
     const span = time - first.time;

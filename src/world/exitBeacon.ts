@@ -3,7 +3,7 @@ import { bandpass, createSamples, normalize, reverb, toBuffer } from "../assets/
 import { CollisionGroups, RAPIER, type PhysicsWorld } from "../physics/physicsWorld";
 import { WALL_HEIGHT } from "../shared/constants";
 import { getWallMaterial } from "./materials";
-import { getVhsNoiseTexture } from "./vhsNoiseTexture";
+import { getVhsNoiseTexture, vhsNoiseFrame } from "./vhsNoiseTexture";
 import { applyVhsEffect } from "./vhsMaterial";
 
 /** Ouverture de la porte (le joueur marche à travers). */
@@ -43,11 +43,12 @@ const VOID_FRAGMENT_SHADER = /* glsl */ `
   varying vec2 vUv;
   uniform float uTime;
   uniform float uPulse;
-  uniform sampler2D uNoiseMap;
+  uniform sampler2DArray uNoiseMap;
+  uniform float uNoiseFrame;
 
   void main() {
     vec2 noiseUv = fract(vUv * vec2(1.7, 2.3) + vec2(floor(uTime * 18.0) * 0.137, uTime * 0.21));
-    float noise = texture2D(uNoiseMap, noiseUv).r;
+    float noise = texture(uNoiseMap, vec3(noiseUv, uNoiseFrame)).r;
     float speck = step(0.93 - uPulse * 0.05, noise) * noise;
     gl_FragColor = vec4(vec3(speck * 0.45), 1.0);
   }
@@ -90,8 +91,8 @@ export class ExitBeacon {
     this.group.rotation.y = facing;
 
     const wallMaterial = getWallMaterial();
-    this.doorMaterial = new THREE.MeshStandardMaterial({ color: 0x3e3a33, roughness: 0.8, metalness: 0.1 });
-    applyVhsEffect(this.doorMaterial);
+    const materials = sharedMaterials();
+    this.doorMaterial = materials.door;
 
     // Bloc : deux joues, fond, et linteau au-dessus de la porte, en papier peint des murs.
     const sideWidth = (BLOCK_WIDTH - DOOR_WIDTH) / 2;
@@ -145,26 +146,13 @@ export class ExitBeacon {
     // Vieux panneau de sortie de secours au-dessus de la porte : presque éteint, il grésille
     // faiblement — le portail doit rester sombre ; on le trouve surtout à l'oreille (balise)
     // et au signal du caméscope.
-    const signTexture = createExitSignTexture();
-    this.signMaterial = new THREE.MeshStandardMaterial({
-      map: signTexture,
-      emissive: 0xffffff,
-      emissiveMap: signTexture,
-      emissiveIntensity: 0.3,
-      roughness: 0.6,
-    });
-    applyVhsEffect(this.signMaterial, { zoneLighting: false });
+    this.signMaterial = materials.sign;
     const sign = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.16, 0.05), this.signMaterial);
     sign.position.set(0, DOOR_HEIGHT + 0.3, 0.03);
     this.group.add(sign);
 
     // Intérieur noir (faces intérieures d'une boîte) : ce qu'on voit par l'entrebâillement.
-    this.voidMaterial = new THREE.ShaderMaterial({
-      uniforms: { uTime: { value: 0 }, uPulse: { value: 0 }, uNoiseMap: { value: getVhsNoiseTexture() } },
-      vertexShader: VOID_VERTEX_SHADER,
-      fragmentShader: VOID_FRAGMENT_SHADER,
-      side: THREE.BackSide,
-    });
+    this.voidMaterial = materials.void;
     const innerDepth = BLOCK_DEPTH - BLOCK_WALL;
     const inside = new THREE.Mesh(new THREE.BoxGeometry(DOOR_WIDTH - 0.01, DOOR_HEIGHT - 0.01, innerDepth), this.voidMaterial);
     inside.position.set(0, DOOR_HEIGHT / 2, -innerDepth / 2 - 0.001);
@@ -197,6 +185,7 @@ export class ExitBeacon {
     // Tube fatigué : quelques micro-coupures, jamais éteint longtemps.
     this.signMaterial.emissiveIntensity = Math.random() < 0.08 ? 0.05 : 0.3;
     this.voidMaterial.uniforms["uTime"]!.value = elapsedSeconds;
+    this.voidMaterial.uniforms["uNoiseFrame"]!.value = vhsNoiseFrame(elapsedSeconds);
     this.voidMaterial.uniforms["uPulse"]!.value = pulse;
     // Le battant frémit à peine, comme poussé par un courant d'air venu du noir.
     this.leaf.rotation.y = LEAF_OPEN_ANGLE + Math.sin(elapsedSeconds * 0.7) * 0.015 + Math.sin(elapsedSeconds * 2.3) * 0.005;
@@ -225,15 +214,48 @@ export class ExitBeacon {
     this.sound.stop();
     if (this.decoy.isPlaying) this.decoy.stop();
     this.decoy.removeFromParent();
-    this.doorMaterial.dispose();
-    this.signMaterial.map?.dispose();
-    this.signMaterial.dispose();
-    this.voidMaterial.dispose();
+    // Matériaux partagés d'un level à l'autre (voir `sharedMaterials`) : jamais libérés ici.
     this.physics.world.removeRigidBody(this.body);
     this.group.traverse((object) => {
       if (object instanceof THREE.Mesh) object.geometry.dispose();
     });
   }
+}
+
+interface ExitMaterials {
+  door: THREE.MeshStandardMaterial;
+  sign: THREE.MeshStandardMaterial;
+  void: THREE.ShaderMaterial;
+}
+let exitMaterials: ExitMaterials | null = null;
+
+/**
+ * Matériaux de la sortie, créés une fois pour toute la partie : les recréer (et libérer les
+ * anciens) à chaque level forçait three.js à recompiler leurs shaders pendant la transition —
+ * un à-coup à chaque descente. Une seule sortie existe à la fois : l'état animé (néon,
+ * flocons) peut vivre dans ces matériaux.
+ */
+function sharedMaterials(): ExitMaterials {
+  if (exitMaterials) return exitMaterials;
+  const door = new THREE.MeshStandardMaterial({ color: 0x3e3a33, roughness: 0.8, metalness: 0.1 });
+  applyVhsEffect(door);
+  const signTexture = createExitSignTexture();
+  const sign = new THREE.MeshStandardMaterial({
+    map: signTexture,
+    emissive: 0xffffff,
+    emissiveMap: signTexture,
+    emissiveIntensity: 0.3,
+    roughness: 0.6,
+  });
+  applyVhsEffect(sign, { zoneLighting: false });
+  const voidMaterial = new THREE.ShaderMaterial({
+    uniforms: { uTime: { value: 0 }, uPulse: { value: 0 }, uNoiseMap: { value: getVhsNoiseTexture() }, uNoiseFrame: { value: 0 } },
+    vertexShader: VOID_VERTEX_SHADER,
+    fragmentShader: VOID_FRAGMENT_SHADER,
+    side: THREE.BackSide,
+  });
+  exitMaterials = { door, sign, void: voidMaterial };
+  return exitMaterials;
 }
 
 /** Panneau "EXIT" pictogramme (bonhomme qui court vers une porte), vert sur fond clair. */

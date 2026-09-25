@@ -41,6 +41,8 @@ export class CamcorderHud {
   private notice = "";
   private noticeColor = "#e8c34a";
   private noticeUntil = 0;
+  /** Contenu du dernier dessin (voir `redraw`). */
+  private lastSignature = "";
 
   constructor(camera: THREE.Camera) {
     const canvas = document.createElement("canvas");
@@ -111,12 +113,34 @@ export class CamcorderHud {
 
   private redraw(): void {
     const ctx = this.ctx;
+    const blink = Math.floor(this.elapsedSeconds * 1.2) % 2 === 0;
+    const total = Math.floor(this.elapsedSeconds);
+    const hours = Math.floor(total / 3600);
+    const minutes = Math.floor((total % 3600) / 60);
+    const seconds = total % 60;
+    const clock = `${hours}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+    // Batterie de la lampe torche (vraie ressource de jeu) : rouge sous 20 %, clignote sous 10 %.
+    const level = Math.round(this.status.battery * 100);
+    const battery = level >= 10 || blink ? `${t("hud.battery")} ${level}%` : "";
+    const depth = `${t("hud.level")} ${this.status.depth}`;
+    const bag = `${t("hud.bag")} ${this.status.items}`;
+    // Signal de la sortie (façon réception du caméscope) : 5 barres, de plus en plus pleines.
+    const bars = Math.round(this.status.signal * 5);
+    const signalText = `${t("hud.signal")} ${"▮".repeat(bars)}${"▯".repeat(5 - bars)}`;
+    const flags = [this.status.crouching ? t("hud.crouch") : "", this.status.sprinting ? t("hud.sprint") : "", this.status.flashlight ? t("hud.flashlight") : ""].filter(Boolean).join("  ");
+    const notice = this.elapsedSeconds < this.noticeUntil ? `${this.noticeColor}${this.notice}` : "";
+    const debug = notice ? "" : (this.status.debug ?? "");
+    // Rien n'a changé depuis le dernier dessin : ni redessin, ni envoi de la texture au GPU
+    // (1024 × 220 px, mipmaps comprises) — le cas le plus courant entre deux secondes du compteur.
+    const signature = `${blink}|${clock}|${battery}|${depth}|${bag}|${signalText}|${flags}|${notice}|${debug}`;
+    if (signature === this.lastSignature) return;
+    this.lastSignature = signature;
+
     ctx.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
     ctx.textBaseline = "middle";
     ctx.lineJoin = "round";
 
     ctx.font = "bold 44px monospace";
-    const blink = Math.floor(this.elapsedSeconds * 1.2) % 2 === 0;
     if (blink) {
       ctx.beginPath();
       ctx.arc(34, 46, 15, 0, Math.PI * 2);
@@ -127,25 +151,13 @@ export class CamcorderHud {
       ctx.stroke();
     }
     this.text("REC", 60, 48, "left");
-
-    const total = Math.floor(this.elapsedSeconds);
-    const hours = Math.floor(total / 3600);
-    const minutes = Math.floor((total % 3600) / 60);
-    const seconds = total % 60;
-    this.text(`${hours}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`, CANVAS_WIDTH / 2, 48, "center");
-
-    // Batterie de la lampe torche (vraie ressource de jeu) : rouge sous 20 %, clignote sous 10 %.
-    const level = Math.round(this.status.battery * 100);
-    if (level >= 10 || blink) this.text(`${t("hud.battery")} ${level}%`, CANVAS_WIDTH - 20, 48, "right", level < 20 ? "#ff6b5a" : "#f4f1e8");
+    this.text(clock, CANVAS_WIDTH / 2, 48, "center");
+    if (battery) this.text(battery, CANVAS_WIDTH - 20, 48, "right", level < 20 ? "#ff6b5a" : "#f4f1e8");
 
     ctx.font = "bold 34px monospace";
-    this.text(`${t("hud.level")} ${this.status.depth}`, 20, 120, "left", "#ffe89a");
-    this.text(`${t("hud.bag")} ${this.status.items}`, 200, 120, "left");
-    // Signal de la sortie (façon réception du caméscope) : 5 barres, de plus en plus pleines.
-    const bars = Math.round(this.status.signal * 5);
+    this.text(depth, 20, 120, "left", "#ffe89a");
+    this.text(bag, 200, 120, "left");
     const SIGNAL_X = 380;
-    const signalText = `${t("hud.signal")} ${"▮".repeat(bars)}${"▯".repeat(5 - bars)}`;
-    const flags = [this.status.crouching ? t("hud.crouch") : "", this.status.sprinting ? t("hud.sprint") : "", this.status.flashlight ? t("hud.flashlight") : ""].filter(Boolean).join("  ");
     // Les indicateurs passent sur leur propre ligne s'ils empiéteraient sur SIGNAL (langue plus
     // longue, ou les trois actifs à la fois) : mieux vaut deux lignes lisibles qu'un chevauchement.
     const signalEndX = SIGNAL_X + ctx.measureText(signalText).width;
@@ -154,13 +166,13 @@ export class CamcorderHud {
     this.text(signalText, SIGNAL_X, 120, "left", bars >= 4 ? "#9fe39f" : "#f4f1e8");
     if (flags) this.text(flags, CANVAS_WIDTH - 20, flagsOnOwnRow ? 148 : 120, "right", "#b9e0ff");
 
-    if (this.elapsedSeconds < this.noticeUntil) {
+    if (notice) {
       ctx.font = "bold 27px monospace";
       const lines = wrapTwoLines(ctx, this.notice, CANVAS_WIDTH - 60);
       lines.forEach((line, index) => this.text(line, CANVAS_WIDTH / 2, lines.length === 1 ? 185 : 168 + index * 34, "center", this.noticeColor));
-    } else if (this.status.debug) {
+    } else if (debug) {
       ctx.font = "bold 21px monospace";
-      this.text(this.status.debug, 20, 185, "left", "#9dff9d");
+      this.text(debug, 20, 185, "left", "#9dff9d");
     }
 
     this.texture.needsUpdate = true;

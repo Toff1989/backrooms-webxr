@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { getVhsNoiseTexture } from "../world/vhsNoiseTexture";
+import { getVhsNoiseTexture, vhsNoiseFrame } from "../world/vhsNoiseTexture";
 
 const VERTEX_SHADER = /* glsl */ `
   varying vec2 vUv;
@@ -16,8 +16,15 @@ const FRAGMENT_SHADER = /* glsl */ `
   uniform float uTracking;
   uniform float uSnow;
   uniform float uBlue;
-  uniform sampler2D uNoiseMap;
+  uniform float uVignette;
+  uniform sampler2DArray uNoiseMap;
+  uniform float uNoiseFrame;
   uniform sampler2D uOsd;
+
+  // Bruit VHS capturé (voir vhsNoiseTexture.ts) : image courante du flipbook.
+  float vhsNoise( vec2 uv ) {
+    return texture( uNoiseMap, vec3( uv, uNoiseFrame ) ).r;
+  }
 
   float hash( vec2 p ) {
     vec3 p3 = fract( vec3( p.xyx ) * 0.1031 );
@@ -32,7 +39,7 @@ const FRAGMENT_SHADER = /* glsl */ `
     // Bruit VHS réel (vidéo de grain TV capturée), pas un hash procédural : dérive dans
     // le temps pour ne jamais se figer sur le même motif, s'intensifie avec la corruption.
     vec2 noiseUv = fract(vUv * 1.3 + vec2(uTime * 0.015, uTime * 0.011));
-    float noise = texture2D(uNoiseMap, noiseUv).r;
+    float noise = vhsNoise(noiseUv);
     float grain = (noise - 0.5) * (0.35 + uCorruption * 0.45);
 
     float alpha = clamp(scanline + abs(grain), 0.0, 0.65);
@@ -44,7 +51,7 @@ const FRAGMENT_SHADER = /* glsl */ `
       float frame = floor(uTime * 24.0);
       float band = floor(vUv.y * 38.0);
       float bandOn = step(1.0 - uTracking * 0.7, hash(vec2(band, frame)));
-      float snow = texture2D(uNoiseMap, fract(vec2(vUv.x * 3.1 + hash(vec2(band, frame + 1.0)), vUv.y * 0.7 + uTime * 0.37))).r;
+      float snow = vhsNoise(fract(vec2(vUv.x * 3.1 + hash(vec2(band, frame + 1.0)), vUv.y * 0.7 + uTime * 0.37)));
       float roll = fract(vUv.y * 0.8 + uTime * 1.3);
       float syncBar = smoothstep(0.0, 0.03, roll) * (1.0 - smoothstep(0.03, 0.09, roll)) * uTracking;
       color = mix(color, vec3(snow), max(bandOn, syncBar));
@@ -54,7 +61,7 @@ const FRAGMENT_SHADER = /* glsl */ `
 
     // Perte de signal complète : neige plein écran (téléportation, corruption extrême).
     if (uSnow > 0.001) {
-      float snow = texture2D(uNoiseMap, fract(vUv * vec2(2.3, 1.7) + vec2(hash(vec2(floor(uTime * 30.0), 1.0)), uTime * 0.9))).r;
+      float snow = vhsNoise(fract(vUv * vec2(2.3, 1.7) + vec2(hash(vec2(floor(uTime * 30.0), 1.0)), uTime * 0.9)));
       color = mix(color, vec3(snow * 0.9), uSnow);
       alpha = max(alpha, uSnow * 0.94);
     }
@@ -69,7 +76,13 @@ const FRAGMENT_SHADER = /* glsl */ `
       color = mix(color, mix(blue, vec3(0.95), osd), uBlue);
       alpha = max(alpha, uBlue);
     }
-    gl_FragColor = vec4(color, alpha);
+    // Vignette de confort (voir comfortVignette.ts), composée comme un voile noir posé
+    // par-dessus l'overlay : même résultat que l'ancien quad séparé, une passe de moins. Même
+    // rayon aussi : l'ancien quad était à 1 m, celui-ci à 0,9 m (d'où le facteur 1/0,9).
+    float vignette = smoothstep(0.55, 1.0, length((vUv - 0.5) * (2.0 / 0.9))) * uVignette;
+    float outAlpha = alpha + vignette - alpha * vignette;
+    color = outAlpha > 0.0 ? color * alpha * (1.0 - vignette) / outAlpha : color;
+    gl_FragColor = vec4(color, outAlpha);
   }
 `;
 
@@ -104,7 +117,9 @@ export class VhsOverlay {
         uTracking: { value: 0 },
         uSnow: { value: 0 },
         uBlue: { value: 0 },
+        uVignette: { value: 0 },
         uNoiseMap: { value: noiseTexture },
+        uNoiseFrame: { value: 0 },
         uOsd: { value: this.osdTexture },
       },
       vertexShader: VERTEX_SHADER,
@@ -120,6 +135,11 @@ export class VhsOverlay {
     mesh.renderOrder = 998;
     mesh.frustumCulled = false;
     camera.add(mesh);
+  }
+
+  /** Assombrissement des bords (vignette de confort, 0..1). */
+  setVignette(intensity: number): void {
+    this.material.uniforms["uVignette"]!.value = intensity;
   }
 
   /** Perte de tracking VHS (0..1), se dissipe d'elle-même. */
@@ -162,6 +182,7 @@ export class VhsOverlay {
     this.material.uniforms["uBlue"]!.value = this.blueSeconds > 0 ? (blueProgress < 0.85 ? 1 : 0) : 0;
     this.material.uniforms["uSnow"]!.value = this.snowSeconds > 0 || (this.blueSeconds > 0 && blueProgress >= 0.85) ? 1 : 0;
     this.material.uniforms["uTime"]!.value = elapsedSeconds;
+    this.material.uniforms["uNoiseFrame"]!.value = vhsNoiseFrame(elapsedSeconds);
     this.material.uniforms["uCorruption"]!.value = corruption;
     this.material.uniforms["uTracking"]!.value = this.tracking;
   }

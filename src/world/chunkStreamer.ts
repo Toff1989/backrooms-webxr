@@ -1,18 +1,18 @@
 import * as THREE from "three";
 import type { NoiseFunction2D } from "simplex-noise";
 import { CollisionGroups, RAPIER, type PhysicsWorld } from "../physics/physicsWorld";
-import { generateChunkLayout, type ChunkLayout, type WallSegment } from "../shared/chunkLayout";
+import { generateChunkLayout, mergeCollinearBoxes, type ChunkLayout, type WallSegment } from "../shared/chunkLayout";
 import { CHUNK_SIZE, STREAM_RADIUS_CHUNKS, WALL_HEIGHT } from "../shared/constants";
 import type { LevelProfile } from "../shared/levelProfile";
 import { createSeededNoise2D } from "../shared/noise";
 import { log } from "../debug/debugLog";
 import { perf } from "../player/perfStats";
 import { BatteryPickup } from "./batteryPickup";
-import { buildChunkGroup } from "./chunkMesh";
+import { buildChunkGroup, freezeMatrices } from "./chunkMesh";
 import { spawnCollectibleModel } from "./collectibleLoader";
 import { toCollectionEntry } from "./collection";
 import type { GrabbableRegistry } from "./grabbable";
-import { createLoreObject } from "./lorePage";
+import { createLoreObject, type LoreObject } from "./lorePage";
 import { spawnProp } from "./propLoader";
 import { WallTrap } from "./wallTrap";
 
@@ -93,6 +93,12 @@ export class ChunkStreamer {
   private regenTimer = randomRegenInterval();
   private readonly frustum = new THREE.Frustum();
   private readonly frustumMatrix = new THREE.Matrix4();
+  /**
+   * Bande perdue du level, préparée dès le changement de level (voir `prepareLorePage`) : son
+   * dessin (papier vieilli, texte : ~10 ms sur PC) ne tombe plus pendant la partie, quand son
+   * chunk se charge.
+   */
+  private preparedLore: { fragment: number; lore: Promise<LoreObject> } | null = null;
 
   constructor(
     private readonly scene: THREE.Scene,
@@ -107,6 +113,7 @@ export class ChunkStreamer {
   ) {
     this.profile = profile;
     this.noise2D = createSeededNoise2D(profile.seed);
+    this.prepareLorePage();
   }
 
   /** Change de level : décharge tout le monde courant, repart à vide sur le nouveau profil/seed. */
@@ -122,6 +129,9 @@ export class ChunkStreamer {
     this.grabbables.removeAllNotHeld();
     this.profile = profile;
     this.noise2D = createSeededNoise2D(profile.seed);
+    this.discardPreparedLore();
+    // Dans la file des spawns : dans une frame à part, pas dans celle qui démonte l'ancien monde.
+    this.spawnQueue.push(() => this.prepareLorePage());
     this.pickedBatteries.clear();
     this.currentChunkX = Number.NaN;
     this.currentChunkZ = Number.NaN;
@@ -321,8 +331,7 @@ export class ChunkStreamer {
     this.scene.add(group);
 
     const staticBody = this.physics.world.createRigidBody(RAPIER.RigidBodyDesc.fixed());
-    for (const segment of layout.wallSegments) this.addBoxCollider(staticBody, segment);
-    for (const segment of layout.pillarObstacles) this.addBoxCollider(staticBody, segment);
+    for (const box of mergeCollinearBoxes([...layout.wallSegments, ...layout.pillarObstacles])) this.addBoxCollider(staticBody, box);
 
     const wallTraps = layout.wallTrapCandidates.map((segment) => {
       const trap = new WallTrap(segment, this.audioListener, this.physics);
@@ -334,6 +343,7 @@ export class ChunkStreamer {
       .filter((placement) => !this.pickedBatteries.has(placement.id))
       .map((placement) => {
         const battery = new BatteryPickup(placement.id, placement.x, placement.z, placement.rotationY);
+        freezeMatrices(battery.object);
         group.add(battery.object);
         return battery;
       });
@@ -356,7 +366,8 @@ export class ChunkStreamer {
         .catch(() => {});
     }
 
-    if (layout.lorePage) this.spawnLorePage(key, loadedChunk, layout.lorePage);
+    const lorePage = layout.lorePage;
+    if (lorePage) this.spawnQueue.push(() => this.spawnLorePage(key, loadedChunk, lorePage));
 
     const depth = this.depth;
     for (const placement of layout.collectiblePlacements) {
@@ -386,8 +397,12 @@ export class ChunkStreamer {
   private spawnLorePage(key: string, chunk: LoadedChunk, location: NonNullable<ChunkLayout["lorePage"]>): void {
     const id = `${this.profile.seed}:lore`;
     const fragment = this.lorePageFragment();
-    if (fragment === null || this.grabbables.isItemAlive(id)) return;
-    createLoreObject(fragment)
+    if (this.loaded.get(key) !== chunk || fragment === null || this.grabbables.isItemAlive(id)) return;
+    // Objet préparé au changement de level, s'il porte bien cette bande (consommé : si le chunk se
+    // recharge plus tard, la page est redessinée).
+    const prepared = this.preparedLore?.fragment === fragment ? this.preparedLore.lore : null;
+    if (prepared) this.preparedLore = null;
+    (prepared ?? createLoreObject(fragment))
       .then((lore) => {
         this.spawnQueue.push(() => {
           if (this.loaded.get(key) !== chunk || this.grabbables.isItemAlive(id)) {
@@ -408,6 +423,22 @@ export class ChunkStreamer {
         });
       })
       .catch(() => {});
+  }
+
+  /** Dessine d'avance la bande perdue attendue dans ce level (voir `preparedLore`). */
+  private prepareLorePage(): void {
+    this.discardPreparedLore();
+    const fragment = this.lorePageFragment();
+    if (fragment === null) return;
+    const lore = createLoreObject(fragment);
+    lore.catch(() => {});
+    this.preparedLore = { fragment, lore };
+  }
+
+  private discardPreparedLore(): void {
+    const prepared = this.preparedLore;
+    this.preparedLore = null;
+    prepared?.lore.then((lore) => lore.dispose()).catch(() => {});
   }
 
   private addBoxCollider(body: RAPIER.RigidBody, segment: WallSegment): void {

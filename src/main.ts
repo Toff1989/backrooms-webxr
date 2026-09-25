@@ -3,7 +3,7 @@ import { VRButton } from "three/addons/webxr/VRButton.js";
 import { AmbientHum } from "./assets/audio/ambientHum";
 import { getLanguage, onLanguageChange, setLanguage, t, type Language } from "./i18n";
 import { runWarmupStep } from "./assets/audio/synth";
-import { installDebugLog, log } from "./debug/debugLog";
+import { DEBUG_ENABLED, installDebugLog, log } from "./debug/debugLog";
 import { PhysicsWorld } from "./physics/physicsWorld";
 import { CamcorderHud } from "./player/camcorderHud";
 import { ComfortVignette } from "./player/comfortVignette";
@@ -42,6 +42,7 @@ import { Poltergeist } from "./world/poltergeist";
 import { initMaterials } from "./world/materials";
 import { endRun, reportLevel, startRun, type RunSessionInfo } from "./world/runSession";
 import { setFlashlightBounce, updateVhsTime } from "./world/vhsMaterial";
+import { Warmup } from "./world/warmup";
 
 installDebugLog();
 
@@ -72,6 +73,9 @@ renderer.xr.setFoveation(1);
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.xr.enabled = true;
 renderer.outputColorSpace = THREE.SRGBColorSpace;
+// Vérification des shaders (lecture synchrone des journaux de compilation) : utile en debug
+// seulement — en jeu, elle force le fil principal à attendre chaque compilation.
+renderer.debug.checkShaderErrors = DEBUG_ENABLED;
 appRoot.appendChild(renderer.domElement);
 // Pas de bouton "Entrer en VR" proposé par le navigateur (offerSession) : il lance la session
 // sans aucun geste sur la page, et le navigateur refuse alors de démarrer le son jusqu'au
@@ -121,7 +125,8 @@ const input = new XrInput(renderer, player.body);
 const hands = [new Hand(input.left, physics), new Hand(input.right, physics)];
 const sfx = new Sfx(audioListener);
 
-const comfortVignette = new ComfortVignette(camera);
+const vhsOverlay = new VhsOverlay(camera);
+const comfortVignette = new ComfortVignette(vhsOverlay);
 /** Vignette de confort : réglable dans les options (écran) et dans le menu du casque, mémorisée. */
 const VIGNETTE_KEY = "backrooms-vr:vignette";
 const vignetteToggle = document.querySelector<HTMLInputElement>("#vignette-toggle");
@@ -141,7 +146,6 @@ function setVignette(enabled: boolean): void {
     // Stockage indisponible : réglage valable pour cette session seulement.
   }
 }
-const vhsOverlay = new VhsOverlay(camera);
 const hud = new CamcorderHud(camera);
 /** Bandes perdues : cassettes lues dans le viseur, polaroids photographiés derrière le joueur. */
 const tapePlayer = new TapePlayer(audioListener, hud);
@@ -182,6 +186,10 @@ const blackout = new Blackout(scene, audioListener);
 const cadreur = new Cadreur(scene, audioListener, physics);
 /** Le bruit (télé, réveil, objets lancés) attire le Cadreur, partout. */
 onNoise((event) => cadreur.hear(event, levelManager.depth));
+
+/** Pré-chauffage (modèles, enveloppes physiques, shaders, textures) : voir `warmup.ts`. */
+const warmup = new Warmup(renderer, scene, camera);
+warmup.start([cadreur.ready, ...hands.map((hand) => hand.models)]);
 
 /** Bonus de collection : recalculés à chaque rangement/sortie d'objet. */
 function applyPerks(): void {
@@ -378,6 +386,29 @@ function restartWorld(seed: string): void {
 beginNewRun(false);
 void loreJournal.sync();
 
+// Mode debug : commandes pour les bancs de test automatisés (session XR émulée) — déplacer le
+// joueur d'un coup (streaming de chunks dans le pire cas), descendre, ouvrir l'inventaire.
+if (DEBUG_ENABLED) {
+  (window as unknown as Record<string, unknown>)["__game"] = {
+    teleport: (x: number, z: number) => {
+      player.teleport(new THREE.Vector3(x, 0, z));
+      grabSystem.onTeleport();
+    },
+    descend: () => goDeeper(false),
+    toggleInventory: () => inventoryMenu.toggle(),
+    head: () => ({ x: player.headWorld.x, z: player.headWorld.z }),
+    exit: () => levelManager.exitPosition,
+    awakeBodies: () => {
+      let awake = 0;
+      physics.world.bodies.forEach((body) => {
+        if (body.isDynamic() && !body.isSleeping()) awake++;
+      });
+      return awake;
+    },
+    renderer,
+  };
+}
+
 /**
  * Son : les navigateurs (dont celui du Quest) ne démarrent l'audio que pendant un geste de
  * l'utilisateur. L'événement "sessionstart" n'en est pas toujours un : on relance donc le
@@ -395,12 +426,21 @@ function resumeAudio(reason: string): void {
 for (const type of ["pointerdown", "pointerup", "click", "keydown", "touchstart"]) document.addEventListener(type, () => resumeAudio(type), { capture: true });
 audioListener.context.addEventListener("statechange", () => log("audio", { action: "statechange", state: audioListener.context.state }));
 
+/** Cadence visée en VR (Hz). */
+const TARGET_FRAME_RATE = 72;
+
 renderer.xr.addEventListener("sessionstart", () => {
   resumeAudio("sessionstart");
   ambientHum.start();
   levelManager.onSessionStart();
   const session = renderer.xr.getSession();
   if (session) {
+    // Cadence fixée à 72 Hz (budget de 13,9 ms, celui que suit `PerfStats`) si le casque en
+    // propose une plus haute par défaut : 72 images stables valent mieux qu'un 90 Hz qui
+    // décroche (chaque frame manquée se voit, reprojetée). Pratique courante sur Quest.
+    if (session.supportedFrameRates?.includes(TARGET_FRAME_RATE) && session.frameRate !== TARGET_FRAME_RATE) {
+      session.updateTargetFrameRate?.(TARGET_FRAME_RATE).catch((error: unknown) => log("xr", { action: "frame-rate-failed", error: String(error) }));
+    }
     for (const type of ["selectstart", "squeezestart"] as const) session.addEventListener(type, () => resumeAudio(`xr-${type}`));
     log("xr", {
       action: "sessionstart",
@@ -560,6 +600,9 @@ renderer.setAnimationLoop((timestamp) => {
   updateVhsTime(elapsedSeconds);
   runWarmupStep(renderer.xr.isPresenting);
   perfStats.end("effets");
+  perfStats.begin("préchauffage");
+  warmup.step();
+  perfStats.end("préchauffage");
   perfStats.begin("vues");
   liveViews.render(deltaSeconds);
   perfStats.end("vues");

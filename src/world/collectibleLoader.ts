@@ -41,7 +41,7 @@ import watchUrl from "../assets/models/collectibles/watch.glb";
 import woodenSpoonUrl from "../assets/models/collectibles/woodenSpoon.glb";
 import wrenchUrl from "../assets/models/collectibles/wrench.glb";
 import type { CollectibleKind } from "../shared/collectibles";
-import { loadTemplateModel } from "./gltfLoader";
+import { loadedTemplates, loadTemplateModel } from "./gltfLoader";
 
 /**
  * Objets de collection (fiche projet étape 6) : vrais modèles CC0 distincts (Poly
@@ -116,4 +116,10 @@ function loadTemplate(kind: CollectibleKind | SpecialModelKind): Promise<THREE.O
 export async function spawnCollectibleModel(kind: CollectibleKind | SpecialModelKind): Promise<{ model: THREE.Object3D; template: THREE.Object3D }> {
   const template = await loadTemplate(kind);
   return { model: template.clone(true), template };
+}
+
+/** Tous les modèles d'objets (collection et spéciaux), chargés d'avance (pré-chauffage, voir `warmup.ts`). */
+export function preloadCollectibleTemplates(): Promise<Array<{ kind: CollectibleKind | SpecialModelKind; template: THREE.Object3D }>> {
+  const kinds = [...Object.keys(COLLECTIBLE_URLS), ...Object.keys(SPECIAL_MODEL_URLS)] as Array<CollectibleKind | SpecialModelKind>;
+  return loadedTemplates(kinds.map((kind) => [kind, loadTemplate(kind)]));
 }

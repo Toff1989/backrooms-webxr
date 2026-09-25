@@ -30,6 +30,29 @@ export function loadTemplateModel(url: string): Promise<THREE.Object3D> {
   });
 }
 
+/** Modèles effectivement chargés parmi `entries` (un échec de chargement est ignoré, pas propagé). */
+export async function loadedTemplates<K extends string>(entries: Array<[K, Promise<THREE.Object3D>]>): Promise<Array<{ kind: K; template: THREE.Object3D }>> {
+  const results = await Promise.allSettled(entries.map(([, promise]) => promise));
+  return results.flatMap((result, index) => (result.status === "fulfilled" ? [{ kind: entries[index]![0], template: result.value }] : []));
+}
+
+/** Opacité maximale d'un verre rendu translucide au lieu de réfractif (voir `dropTransmission`). */
+const GLASS_OPACITY = 0.35;
+
+/**
+ * Verre réfractif (KHR_materials_transmission : horloge murale, ampoule, loupe) : dès qu'un tel
+ * matériau est à l'écran, three.js re-rend toute la scène opaque dans une texture (et en calcule
+ * les mipmaps), à chaque frame et pour chaque œil — un deuxième rendu complet pour une vitre de
+ * quelques centimètres (mesuré : ~48 ms de plus sur une frame du banc de test). Un verre
+ * simplement translucide donne le même effet sous le grain VHS.
+ */
+function dropTransmission(material: THREE.MeshPhysicalMaterial): void {
+  material.transmission = 0;
+  material.transparent = true;
+  material.depthWrite = false;
+  material.opacity = Math.min(material.opacity, GLASS_OPACITY);
+}
+
 function mergeByMaterial(root: THREE.Object3D): THREE.Object3D {
   root.updateMatrixWorld(true);
   const rootInverse = new THREE.Matrix4().copy(root.matrixWorld).invert();
@@ -46,6 +69,7 @@ function mergeByMaterial(root: THREE.Object3D): THREE.Object3D {
 
   const merged = new THREE.Group();
   for (const [material, geometries] of groups) {
+    if (material instanceof THREE.MeshPhysicalMaterial && material.transmission > 0) dropTransmission(material);
     if (material instanceof THREE.MeshStandardMaterial) applyVhsEffect(material);
     // mergeGeometries exige des géométries toutes indexées (ou toutes non indexées).
     const anyNonIndexed = geometries.some((geometry) => geometry.index === null);
