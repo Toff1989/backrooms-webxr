@@ -35,10 +35,11 @@ const tmpLocal = new THREE.Vector3();
  * Intervalle minimal (ms) entre deux redessins effectifs d'un panneau. Un survol qui change
  * (rayon laser qui tremble pile à la frontière de deux cases) peut appeler `invalidate()` à
  * chaque frame ; sans ce plancher, chaque appel redessine tout le canvas (fillText/roundRect en
- * nombre) et réuploade la texture au GPU — coûteux, et inutile à plus de ~20 Hz pour une simple
- * surbrillance de survol. L'état affiché reste toujours le plus récent, juste légèrement différé.
+ * nombre) et réuploade la texture au GPU — coûteux et mesuré comme source d'à-coups pendant
+ * l'interaction, inutile à plus de ~11 Hz pour une simple surbrillance de survol. L'état affiché
+ * reste toujours le plus récent, juste légèrement différé.
  */
-const MIN_REDRAW_INTERVAL_MS = 45;
+const MIN_REDRAW_INTERVAL_MS = 90;
 
 export abstract class UiPanel {
   readonly group = new THREE.Group();
@@ -63,7 +64,9 @@ export abstract class UiPanel {
 
     this.texture = new THREE.CanvasTexture(this.canvas);
     this.texture.colorSpace = THREE.SRGBColorSpace;
-    this.texture.anisotropy = 4;
+    this.texture.generateMipmaps = false;
+    this.texture.minFilter = THREE.LinearFilter;
+    this.texture.anisotropy = 1;
     this.mesh = new THREE.Mesh(
       new THREE.PlaneGeometry(widthMeters, heightMeters),
       new THREE.MeshBasicMaterial({ map: this.texture, transparent: true, side: THREE.DoubleSide, depthWrite: false, fog: false }),

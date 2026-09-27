@@ -351,13 +351,30 @@ export class InventoryMenu extends UiPanel {
     this.group.rotateX(-MENU_TILT);
   }
 
+  /**
+   * Ne recrée que les cases dont l'objet a changé (page tournée, objet rangé/sorti ailleurs) :
+   * un simple survol ou déplacement dans l'inventaire ne doit pas relancer un clonage de modèle
+   * pour les 10 cases à chaque fois — source de à-coups mesurés pendant l'interaction.
+   */
   private rebuildMiniatures(): void {
+    if (!this.visible) {
+      for (const miniature of this.miniatures.values()) miniature.pivot.removeFromParent();
+      this.miniatures.clear();
+      this.buildToken++;
+      return;
+    }
     const token = ++this.buildToken;
-    for (const miniature of this.miniatures.values()) miniature.pivot.removeFromParent();
-    this.miniatures.clear();
-    if (!this.visible) return;
+    const entries = this.entriesOnPage();
+    for (const [slot, miniature] of this.miniatures) {
+      const entry = entries[slot];
+      if (!entry || entry.id !== miniature.entryId) {
+        miniature.pivot.removeFromParent();
+        this.miniatures.delete(slot);
+      }
+    }
 
-    this.entriesOnPage().forEach((entry, slot) => {
+    entries.forEach((entry, slot) => {
+      if (this.miniatures.has(slot)) return;
       spawnCollectibleModel(entry.kind)
         .then(({ model, template }) => {
           if (token !== this.buildToken) return;

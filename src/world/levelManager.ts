@@ -76,13 +76,16 @@ export class LevelManager {
     this.floorCeiling = new FloorCeiling(scene);
     this.floorCeiling.update(SPAWN_LOCAL_POSITION);
     this.chunkStreamer = new ChunkStreamer(scene, audioListener, physics, grabbables, isItemStored, () => this.pinnedLoreFragment ?? nextLoreFragment(), this.profile);
-    this.chunkStreamer.primeArea(SPAWN_LOCAL_POSITION);
-
     const exitPosition = getExitWorldPosition(this.profile);
     this.exitWorldX = exitPosition.x;
     this.exitWorldZ = exitPosition.z;
     this.exitBeacon = this.createExitBeacon();
     this.scene.add(this.exitBeacon.group);
+  }
+
+  /** Amorçage synchrone du premier niveau, à effectuer derrière l'écran de chargement. */
+  primeInitialArea(): void {
+    this.chunkStreamer.primeArea(SPAWN_LOCAL_POSITION);
   }
 
   /** À appeler au démarrage de la session XR (politique d'autoplay des navigateurs). */

@@ -48,6 +48,11 @@ installDebugLog();
 
 const appRoot = document.getElementById("app");
 if (!appRoot) throw new Error("#app introuvable dans index.html");
+const loadingScreen = document.getElementById("loading-screen");
+
+function nextPaint(): Promise<void> {
+  return new Promise((resolve) => requestAnimationFrame(() => resolve()));
+}
 
 // Teinte proche du noir, légèrement chaude (cohérente avec la teinte jaunâtre délavée du look VHS).
 const BACKGROUND_COLOR = 0x0a0805;
@@ -56,7 +61,7 @@ const physics = await PhysicsWorld.create();
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(BACKGROUND_COLOR);
-scene.fog = new THREE.FogExp2(BACKGROUND_COLOR, 0.035);
+scene.fog = new THREE.FogExp2(BACKGROUND_COLOR, 0.05);
 
 const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.03, 60);
 
@@ -68,7 +73,10 @@ const renderer = new THREE.WebGLRenderer({ antialias: false });
 // (framebufferScaleFactor). Rendu fovéal au maximum : périphérie moins détaillée, gros
 // gain GPU sur Quest, invisible avec le grain VHS.
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
-renderer.xr.setFramebufferScaleFactor(1);
+// Légèrement sous la résolution native du casque : moins de pixels à calculer (lampe torche
+// et overlay VHS tournent sur tout le champ de vision, à chaque frame), donc moins de charge
+// GPU et de conso batterie — perte de netteté négligeable, déjà masquée par le grain VHS.
+renderer.xr.setFramebufferScaleFactor(0.85);
 renderer.xr.setFoveation(1);
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.xr.enabled = true;
@@ -127,6 +135,10 @@ const sfx = new Sfx(audioListener);
 
 const vhsOverlay = new VhsOverlay(camera);
 const comfortVignette = new ComfortVignette(vhsOverlay);
+vhsOverlay.blueScreen(2.5, ["CHARGEMENT", t("blue.level", { n: 0 })]);
+// Laisser le navigateur peindre l'écran avant la génération synchrone des chunks initiaux.
+await nextPaint();
+levelManager.primeInitialArea();
 /** Vignette de confort : réglable dans les options (écran) et dans le menu du casque, mémorisée. */
 const VIGNETTE_KEY = "backrooms-vr:vignette";
 const vignetteToggle = document.querySelector<HTMLInputElement>("#vignette-toggle");
@@ -609,6 +621,7 @@ renderer.setAnimationLoop((timestamp) => {
   perfStats.begin("rendu");
   perfStats.beginGpu();
   renderer.render(scene, camera);
+  loadingScreen?.classList.add("is-hidden");
   perfStats.endGpu();
   perfStats.end("rendu");
   perfStats.endFrame(deltaSeconds);

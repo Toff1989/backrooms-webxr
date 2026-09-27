@@ -124,6 +124,7 @@ function faceOf(g: Grabbable, axes?: THREE.Vector3[]): ModelFace | null {
   return axes ? findModelFace(g.object, undefined, axes) : findModelFace(g.object);
 }
 const FRONT_AXES = [new THREE.Vector3(0, 0, 1), new THREE.Vector3(0, 0, -1)];
+const TV_FRONT = new THREE.Vector3(0, 0, 1);
 const UP_AXES = [new THREE.Vector3(0, 1, 0)];
 
 /** L'objet est-il dans le champ de vision du joueur ? */
@@ -192,7 +193,7 @@ function atEye(g: Grabbable, w: InteractionWorld, distance: number): boolean {
 
 /** Télévision : neige qui grésille, puis passe en direct après quelques secondes. */
 const television: Factory = (g, w, system) => {
-  const face = faceOf(g, FRONT_AXES);
+  const face = findModelFace(g.object, TV_FRONT);
   // Pas de décalage artificiel ("raise") : l'écran se pose exactement sur la face détectée du
   // boîtier, pour ne pas paraître flotter au-dessus du modèle 3D.
   const screen = face ? new FaceCanvas(g.object, face, 160, 120, { shrink: 0.68, glow: true }) : null;
@@ -1018,7 +1019,8 @@ const BEHAVIOURS: Record<string, Factory> = {
  */
 export function prepareInteractionFaces(kind: string, template: THREE.Object3D): void {
   const behaviour = BEHAVIOURS[kind];
-  if (behaviour === television || behaviour === chalkboard) findModelFace(template, undefined, FRONT_AXES);
+  if (behaviour === television) findModelFace(template, TV_FRONT);
+  else if (behaviour === chalkboard) findModelFace(template, undefined, FRONT_AXES);
   else if (behaviour === compass || behaviour === digitalWatch) findModelFace(template, undefined, UP_AXES);
   else if (behaviour === magnifyingGlass) findModelFace(template);
   else if (behaviour === photo) {

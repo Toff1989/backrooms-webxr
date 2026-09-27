@@ -4,7 +4,7 @@ import { getCeilingMaterial } from "./materials";
 const BASE_CEILING_EMISSIVE = 2.2;
 const BASE_HEMISPHERE = 0.9;
 const BASE_AMBIENT = 0.25;
-const BASE_FOG_DENSITY = 0.035;
+const BASE_FOG_DENSITY = 0.05;
 /**
  * Chaque niveau plus bas assombrit un peu l'éclairage des zones encore allumées (plancher à
  * 50 %). L'essentiel de l'obscurité vient désormais des zones éteintes (`lightField.ts`, plus

@@ -20,6 +20,25 @@
         position: fixed;
         inset: 0;
       }
+      #loading-screen {
+        position: fixed;
+        inset: 0;
+        z-index: 20;
+        display: grid;
+        place-items: center;
+        background: #05179e;
+        color: #fff;
+        font: 600 16px/1.4 monospace;
+        letter-spacing: 0.08em;
+        transition: opacity 280ms ease;
+      }
+      #loading-screen.is-hidden {
+        opacity: 0;
+        pointer-events: none;
+      }
+      #loading-screen p {
+        margin: 0;
+      }
       canvas {
         display: block;
       }
@@ -101,6 +120,9 @@
   </head>
   <body>
     <div id="app"></div>
+    <div id="loading-screen" role="status" aria-live="polite">
+      <p>▶ PLAY · CHARGEMENT · NIV 0</p>
+    </div>
     <div id="options-panel">
       <h1 data-i18n="options.title">Options</h1>
       <label>

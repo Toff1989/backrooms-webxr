@@ -6,10 +6,10 @@ import type { CollectionEntry } from "./collection";
 import { applyVhsEffect } from "./vhsMaterial";
 
 /**
- * Au-delà (m) du joueur, un objet n'est plus dessiné : noyé dans le brouillard, il coûtait
- * quand même un draw call (une centaine de meubles chargés sur les 25 chunks).
+ * Au-delà (m) du joueur, un objet n'est plus dessiné : assez loin pour éviter un pop visible,
+ * mais bien en dessous du rayon de streaming pour contenir les draw calls.
  */
-const RENDER_DISTANCE = 17;
+const RENDER_DISTANCE = 25;
 
 /** Au-delà, un objet ne se soulève pas (on peut seulement le pousser) — fiche : physique réaliste. */
 export const MAX_LIFT_MASS = 32;
