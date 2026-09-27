@@ -1,8 +1,22 @@
 import * as THREE from "three";
+import metal01Url from "../assets/audio/cc0/metal_01.ogg?url";
+import metal03Url from "../assets/audio/cc0/metal_03.ogg?url";
+import paper01Url from "../assets/audio/cc0/paper_01.ogg?url";
+import paper02Url from "../assets/audio/cc0/paper_02.ogg?url";
+import slam01Url from "../assets/audio/cc0/slam_01.ogg?url";
+import switch01Url from "../assets/audio/cc0/switch_01.ogg?url";
 import { bandpass, createSamples, fadeEdges, highpass, lowpass, normalize, queueWarmup, toBuffer } from "../assets/audio/synth";
 
 const SOUND_NAMES = ["store", "take", "grab", "click", "denied", "battery"] as const;
 type SoundName = (typeof SOUND_NAMES)[number];
+const EXTERNAL_SOUNDS: Partial<Record<SoundName, string>> = {
+  store: paper01Url,
+  take: paper02Url,
+  grab: metal03Url,
+  click: switch01Url,
+  denied: slam01Url,
+  battery: metal01Url,
+};
 
 /**
  * Sons d'interaction générés procéduralement (pas de fichier audio), volontairement
@@ -12,6 +26,7 @@ type SoundName = (typeof SOUND_NAMES)[number];
  */
 export class Sfx {
   private readonly buffers = new Map<SoundName, AudioBuffer>();
+  private readonly externalBuffers = new Map<SoundName, AudioBuffer>();
   private readonly voices: THREE.Audio[] = [];
   private nextVoice = 0;
 
@@ -22,6 +37,21 @@ export class Sfx {
       this.voices.push(audio);
     }
     for (const name of SOUND_NAMES) queueWarmup(() => this.bufferFor(name));
+    for (const name of SOUND_NAMES) {
+      const url = EXTERNAL_SOUNDS[name];
+      if (url) void this.loadExternal(name, url);
+    }
+  }
+
+  private async loadExternal(name: SoundName, url: string): Promise<void> {
+    try {
+      const response = await fetch(url);
+      if (!response.ok) return;
+      const data = await response.arrayBuffer();
+      this.externalBuffers.set(name, await this.listener.context.decodeAudioData(data));
+    } catch {
+      // The generated sound remains available when an asset cannot be decoded.
+    }
   }
 
   private bufferFor(name: SoundName): AudioBuffer {
@@ -36,7 +66,7 @@ export class Sfx {
   play(name: SoundName, volume = 0.5): void {
     const context = this.listener.context;
     if (context.state !== "running") return;
-    const buffer = this.bufferFor(name);
+    const buffer = this.externalBuffers.get(name) ?? this.bufferFor(name);
     const voice = this.voices[this.nextVoice]!;
     this.nextVoice = (this.nextVoice + 1) % this.voices.length;
     if (voice.isPlaying) voice.stop();

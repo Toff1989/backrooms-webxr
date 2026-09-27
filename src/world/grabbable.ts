@@ -28,6 +28,9 @@ const BOX_COLLIDER_PROPS = new Set<PropKind>([
   "television",
 ]);
 
+/** Meubles de soutien ou trop encombrants pour être saisis : on ne peut que les pousser. */
+const NON_GRABBABLE_PROPS = new Set<PropKind>(["bookshelf", "cabinet", "coffeeTable", "metalShelves", "officeDesk", "schoolDesk", "sofa", "storageCart"]);
+
 const PROP_MASS: Record<PropKind, number> = {
   chair: 6,
   schoolDesk: 14,
@@ -124,6 +127,8 @@ export class Grabbable {
   readonly kind: string | null;
   /** Centre de la boîte englobante, en espace local du corps (échelle comprise). */
   readonly localCenter: THREE.Vector3;
+  /** Meuble de soutien ou trop encombrant : jamais saisissable, seulement poussable. */
+  readonly fixed: boolean;
   /** Main qui tient l'objet (opaque ici, voir `GrabSystem`). */
   heldBy: object | null = null;
 
@@ -141,6 +146,7 @@ export class Grabbable {
     this.item = init.item;
     this.lorePage = init.lorePage ?? null;
     this.kind = init.item?.kind ?? init.propKind ?? null;
+    this.fixed = init.propKind !== undefined && NON_GRABBABLE_PROPS.has(init.propKind);
     this.onDispose = init.onDispose;
     // Meuble : endormi, fortement amorti. Petit objet (collection, page) : libre, il roule.
     const furniture = init.item === null && this.lorePage === null;

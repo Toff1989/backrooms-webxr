@@ -35,10 +35,14 @@ import { InteractionSystem } from "./world/interactions";
 import { onNoise } from "./world/noise";
 import { ObjectAudio } from "./world/objectAudio";
 import { LevelManager, SPAWN_LOCAL_POSITION } from "./world/levelManager";
+import { COLLECTIBLE_KINDS, generateCollectibleLore, getCollectibleRarity, type CollectibleKind } from "./shared/collectibles";
+import { PROP_HALF_EXTENTS, type PropKind } from "./shared/props";
 import { loreFormat } from "./shared/lore";
 import { LoreJournal } from "./world/loreJournal";
 import { configureLoreServices, updateLoreObjects } from "./world/lorePage";
 import { Poltergeist } from "./world/poltergeist";
+import { spawnCollectibleModel } from "./world/collectibleLoader";
+import { spawnProp } from "./world/propLoader";
 import { initMaterials } from "./world/materials";
 import { endRun, reportLevel, startRun, type RunSessionInfo } from "./world/runSession";
 import { setFlashlightBounce, updateVhsTime } from "./world/vhsMaterial";
@@ -135,7 +139,6 @@ const sfx = new Sfx(audioListener);
 
 const vhsOverlay = new VhsOverlay(camera);
 const comfortVignette = new ComfortVignette(vhsOverlay);
-vhsOverlay.blueScreen(2.5, ["CHARGEMENT", t("blue.level", { n: 0 })]);
 // Laisser le navigateur peindre l'écran avant la génération synchrone des chunks initiaux.
 await nextPaint();
 levelManager.primeInitialArea();
@@ -217,6 +220,8 @@ let currentSession: RunSessionInfo | null = null;
 
 // Déclarée avant les menus : leurs actions y font référence (appelées plus tard, au clic).
 let grabSystem: GrabSystem;
+const DEBUG_SPAWN_KINDS: Array<CollectibleKind | PropKind> = [...COLLECTIBLE_KINDS, ...(Object.keys(PROP_HALF_EXTENTS) as PropKind[])];
+let debugSpawnIndex = 0;
 
 const inventoryMenu = new InventoryMenu(
   collectionStore,
@@ -264,6 +269,15 @@ const inventoryMenu = new InventoryMenu(
         run: () => {
           flashlight.recharge(1);
           return t("debug.batteryDone");
+        },
+      },
+      {
+        label: () => t("debug.spawn", { kind: DEBUG_SPAWN_KINDS[debugSpawnIndex % DEBUG_SPAWN_KINDS.length]! }),
+        run: () => {
+          const kind = DEBUG_SPAWN_KINDS[debugSpawnIndex % DEBUG_SPAWN_KINDS.length]!;
+          debugSpawnIndex = (debugSpawnIndex + 1) % DEBUG_SPAWN_KINDS.length;
+          void spawnDebugObject(kind);
+          return t("debug.spawnStarted", { kind });
         },
       },
     ],
@@ -336,6 +350,44 @@ const interactions = new InteractionSystem({
     return position ? { position: new THREE.Vector3(position.x, 1.8, position.z), target: player.headWorld } : null;
   },
 });
+
+const DEBUG_SPAWN_UP = new THREE.Vector3(0, 1, 0);
+const debugSpawnDirection = new THREE.Vector3();
+
+async function spawnDebugObject(kind: CollectibleKind | PropKind): Promise<void> {
+  camera.getWorldDirection(debugSpawnDirection);
+  debugSpawnDirection.y = 0;
+  if (debugSpawnDirection.lengthSq() < 1e-6) debugSpawnDirection.set(0, 0, -1);
+  debugSpawnDirection.normalize();
+  const position = player.headWorld.clone().addScaledVector(debugSpawnDirection, 1.2);
+  const rotation = Math.atan2(-debugSpawnDirection.x, -debugSpawnDirection.z);
+
+  if ((COLLECTIBLE_KINDS as readonly string[]).includes(kind)) {
+    const collectibleKind = kind as CollectibleKind;
+    const { model, template } = await spawnCollectibleModel(collectibleKind);
+    const lore = generateCollectibleLore(collectibleKind, 0.5, 0.5);
+    grabbables.createCollectible(
+      {
+        id: `debug-${collectibleKind}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        kind: collectibleKind,
+        rarity: getCollectibleRarity(collectibleKind),
+        scale: 1,
+        depth: levelManager.depth,
+        ...lore,
+        collectedAt: 0,
+      },
+      model,
+      template,
+      position,
+      new THREE.Quaternion().setFromAxisAngle(DEBUG_SPAWN_UP, rotation),
+    );
+  } else {
+    const propKind = kind as PropKind;
+    const { model, template } = await spawnProp(propKind);
+    grabbables.createProp(propKind, model, template, position.x, position.z, rotation);
+  }
+  log("debug", { action: "spawn", kind });
+}
 
 /** Place le joueur au spawn du level courant (changement de level, nouvelle run). */
 function respawn(): void {
@@ -410,6 +462,10 @@ if (DEBUG_ENABLED) {
     toggleInventory: () => inventoryMenu.toggle(),
     head: () => ({ x: player.headWorld.x, z: player.headWorld.z }),
     exit: () => levelManager.exitPosition,
+    spawn: (kind: string) => {
+      if (!DEBUG_SPAWN_KINDS.some((candidate) => candidate === kind)) return Promise.reject(new Error(`Unknown debug spawn kind: ${kind}`));
+      return spawnDebugObject(kind as CollectibleKind | PropKind);
+    },
     awakeBodies: () => {
       let awake = 0;
       physics.world.bodies.forEach((body) => {
@@ -445,6 +501,7 @@ renderer.xr.addEventListener("sessionstart", () => {
   resumeAudio("sessionstart");
   ambientHum.start();
   levelManager.onSessionStart();
+  vhsOverlay.blueScreen(2.5, ["CHARGEMENT", t("blue.level", { n: 0 })]);
   const session = renderer.xr.getSession();
   if (session) {
     // Cadence fixée à 72 Hz (budget de 13,9 ms, celui que suit `PerfStats`) si le casque en

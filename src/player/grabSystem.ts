@@ -453,7 +453,7 @@ export class GrabSystem {
       this.grabBall,
       (collider) => {
         const grabbable = this.registry.fromCollider(collider.handle);
-        if (grabbable && !grabbable.heldBy && !this.isRemoteTarget(grabbable)) {
+        if (grabbable && !grabbable.heldBy && !grabbable.fixed && !this.isRemoteTarget(grabbable)) {
           const projection = collider.projectPoint(hand.palm, true);
           const gap = projection ? hand.palm.distanceTo(tmpVec.set(projection.point.x, projection.point.y, projection.point.z)) : NEAR_GRAB_RADIUS;
           // À distance égale, on préfère le petit objet de collection au meuble qu'il touche.
@@ -497,7 +497,7 @@ export class GrabSystem {
     if (!hit) return null;
     const point = new THREE.Vector3().copy(hand.aimOrigin).addScaledVector(hand.aimDirection, hit.time_of_impact);
     const grabbable = this.registry.fromCollider(hit.collider.handle);
-    return { grabbable: grabbable && this.holdersOf(grabbable).length === 0 ? grabbable : null, point };
+    return { grabbable: grabbable && !grabbable.fixed && this.holdersOf(grabbable).length === 0 ? grabbable : null, point };
   }
 
   private setHovered(hand: Hand, grabbable: Grabbable | null): void {

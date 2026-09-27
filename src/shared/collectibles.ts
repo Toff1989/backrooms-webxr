@@ -16,7 +16,6 @@ export type CollectibleKind =
   | "bleach"
   | "cigaretteCase"
   | "cigarettePack"
-  | "circuitBoard"
   | "cleanerTin"
   | "combWrench"
   | "hammer"
@@ -44,7 +43,6 @@ export type CollectibleKind =
   | "lighter"
   | "wallClock"
   | "vase"
-  | "spacecraftInstrument"
   | "compass";
 
 export type CollectibleRarity = "common" | "rare" | "legendary";
@@ -70,7 +68,6 @@ const KIND_DATA: Record<CollectibleKind, KindData> = {
   bleach: { rarity: "common", nameFr: "bouteille d'eau de javel", nameEn: "bleach bottle" },
   cigaretteCase: { rarity: "common", nameFr: "étui à cigarettes", nameEn: "cigarette case" },
   cigarettePack: { rarity: "common", nameFr: "paquet de cigarettes", nameEn: "cigarette pack" },
-  circuitBoard: { rarity: "common", nameFr: "carte électronique", nameEn: "circuit board" },
   cleanerTin: { rarity: "common", nameFr: "boîte de cirage", nameEn: "tin of cleaner" },
   combWrench: { rarity: "common", nameFr: "clé plate", nameEn: "combination wrench" },
   hammer: { rarity: "common", nameFr: "marteau de menuisier", nameEn: "cross-pein hammer" },
@@ -102,7 +99,6 @@ const KIND_DATA: Record<CollectibleKind, KindData> = {
 
   // Légendaire — ne devrait pas se trouver dans les Backrooms.
   vase: { rarity: "legendary", nameFr: "vase en céramique antique", nameEn: "antique ceramic vase" },
-  spacecraftInstrument: { rarity: "legendary", nameFr: "instrument de vaisseau spatial", nameEn: "vintage spacecraft instrument" },
   compass: { rarity: "legendary", nameFr: "boussole de marin", nameEn: "seadog's compass" },
 };
 

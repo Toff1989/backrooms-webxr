@@ -57,6 +57,7 @@ const IMPACT_MIN_SPEED = 1.2;
 
 const tmp = new THREE.Vector3();
 const tmp2 = new THREE.Vector3();
+const tmp3 = new THREE.Vector3();
 
 /** Tirage déterministe [0..1) propre à un objet (identifiant de collection, sinon position de départ). */
 function objectRoll(g: Grabbable, salt: number): number {
@@ -85,8 +86,11 @@ class FaceCanvas {
   readonly ctx: CanvasRenderingContext2D;
   readonly texture: THREE.CanvasTexture;
   readonly mesh: THREE.Mesh;
+  private readonly material: THREE.Material;
+  private readonly originalMaterial: THREE.Material | THREE.Material[] | null;
+  private readonly ownsMesh: boolean;
 
-  constructor(owner: THREE.Object3D, face: ModelFace, width: number, height: number, options: { shrink?: number; glow?: boolean; transparent?: boolean; raise?: number } = {}) {
+  constructor(owner: THREE.Object3D, face: ModelFace | null, width: number, height: number, options: { shrink?: number; glow?: boolean; transparent?: boolean; raise?: number; existingMesh?: THREE.Mesh } = {}) {
     this.canvas.width = width;
     this.canvas.height = height;
     this.ctx = this.canvas.getContext("2d")!;
@@ -97,10 +101,17 @@ class FaceCanvas {
       : new THREE.MeshStandardMaterial({ map: this.texture, roughness: 0.9, transparent: options.transparent ?? false, emissiveMap: this.texture, emissive: 0xffffff, emissiveIntensity: 0.12 });
     material.polygonOffset = true;
     material.polygonOffsetFactor = -2;
-    this.mesh = createFacePlane(face, material, options.shrink ?? 1, width / height);
-    // Décalage vers le haut de la face (écran d'une télé au-dessus de ses boutons).
-    if (options.raise) this.mesh.position.addScaledVector(face.up, face.height * options.raise);
-    owner.add(this.mesh);
+    this.material = material;
+    this.originalMaterial = options.existingMesh?.material ?? null;
+    this.ownsMesh = !options.existingMesh;
+    this.mesh = options.existingMesh ?? createFacePlane(face!, material, options.shrink ?? 1, width / height);
+    if (options.existingMesh) {
+      this.mesh.material = material;
+    } else {
+      // Décalage vers le haut de la face (écran d'une télé au-dessus de ses boutons).
+      if (options.raise) this.mesh.position.addScaledVector(face!.up, face!.height * options.raise);
+      owner.add(this.mesh);
+    }
   }
 
   set visible(value: boolean) {
@@ -112,10 +123,11 @@ class FaceCanvas {
   }
 
   dispose(): void {
-    this.mesh.removeFromParent();
+    if (this.ownsMesh) this.mesh.removeFromParent();
+    else if (this.originalMaterial) this.mesh.material = this.originalMaterial;
     this.texture.dispose();
-    (this.mesh.material as THREE.Material).dispose();
-    this.mesh.geometry.dispose();
+    this.material.dispose();
+    if (this.ownsMesh) this.mesh.geometry.dispose();
   }
 }
 
@@ -126,6 +138,17 @@ function faceOf(g: Grabbable, axes?: THREE.Vector3[]): ModelFace | null {
 const FRONT_AXES = [new THREE.Vector3(0, 0, 1), new THREE.Vector3(0, 0, -1)];
 const TV_FRONT = new THREE.Vector3(0, 0, 1);
 const UP_AXES = [new THREE.Vector3(0, 1, 0)];
+
+function findTelevisionScreen(root: THREE.Object3D): THREE.Mesh | null {
+  let result: THREE.Mesh | null = null;
+  root.traverse((child) => {
+    if (result || !(child instanceof THREE.Mesh)) return;
+    const materials = Array.isArray(child.material) ? child.material : [child.material];
+    const names = [child.name, ...materials.map((material) => material.name)].join(" ");
+    if (/television[_ -]?02|screen|display/i.test(names)) result = child;
+  });
+  return result;
+}
 
 /** L'objet est-il dans le champ de vision du joueur ? */
 function inView(w: InteractionWorld, position: THREE.Vector3, cos = 0.5): boolean {
@@ -149,54 +172,19 @@ function placeBehindPlayer(w: InteractionWorld, camera: THREE.PerspectiveCamera)
   camera.lookAt(head.x + tmp.x * 3, head.y - 0.2, head.z + tmp.z * 3);
 }
 
-/** Masque d'opacité : un disque (loupe) ou deux disques accolés (jumelles). */
-function circleMask(double: boolean): THREE.CanvasTexture {
-  const canvas = document.createElement("canvas");
-  canvas.width = double ? 256 : 128;
-  canvas.height = 128;
-  const ctx = canvas.getContext("2d")!;
-  ctx.fillStyle = "#000";
-  ctx.fillRect(0, 0, canvas.width, 128);
-  const disc = (x: number): void => {
-    const gradient = ctx.createRadialGradient(x, 64, 48, x, 64, 64);
-    gradient.addColorStop(0, "#fff");
-    gradient.addColorStop(1, "#000");
-    ctx.fillStyle = gradient;
-    ctx.beginPath();
-    ctx.arc(x, 64, 64, 0, Math.PI * 2);
-    ctx.fill();
-  };
-  if (double) {
-    disc(78);
-    disc(178);
-  } else disc(64);
-  return new THREE.CanvasTexture(canvas);
-}
-
-/** Calque fixé devant les yeux (jumelles, viseur) : affiché seulement quand l'objet est porté au visage. */
-function eyeOverlay(w: InteractionWorld, width: number, height: number, material: THREE.MeshBasicMaterial): THREE.Mesh {
-  const mesh = new THREE.Mesh(new THREE.PlaneGeometry(width, height), material);
-  mesh.position.set(0, 0, -0.2);
-  mesh.renderOrder = 995;
-  mesh.frustumCulled = false;
-  mesh.visible = false;
-  w.camera.add(mesh);
-  return mesh;
-}
-
-/** L'objet tenu est-il porté au visage ? */
-function atEye(g: Grabbable, w: InteractionWorld, distance: number): boolean {
-  return !!g.heldBy && g.object.position.distanceTo(w.head()) < distance;
-}
-
 // ---------------------------------------------------------------- Mobilier
 
 /** Télévision : neige qui grésille, puis passe en direct après quelques secondes. */
 const television: Factory = (g, w, system) => {
-  const face = findModelFace(g.object, TV_FRONT);
+  const existingScreen = findTelevisionScreen(g.object);
+  const face = existingScreen ? null : findModelFace(g.object, TV_FRONT);
   // Pas de décalage artificiel ("raise") : l'écran se pose exactement sur la face détectée du
   // boîtier, pour ne pas paraître flotter au-dessus du modèle 3D.
-  const screen = face ? new FaceCanvas(g.object, face, 160, 120, { shrink: 0.68, glow: true }) : null;
+  const screen = existingScreen
+    ? new FaceCanvas(g.object, null, 160, 120, { existingMesh: existingScreen, glow: true })
+    : face
+      ? new FaceCanvas(g.object, face, 160, 120, { shrink: 0.68, glow: true })
+      : null;
   if (screen) {
     screen.visible = false;
     system.displays.add(screen.mesh);
@@ -314,20 +302,26 @@ const television: Factory = (g, w, system) => {
 };
 
 /** Écran de projection : quand on s'approche, le projecteur (invisible) démarre — amorce, compte à rebours. */
-/** Tableau noir : quand on a le dos tourné, un message apparaît à la craie. */
+/** Tableau noir : un message apparaît après un court regard posé sur sa surface. */
 const chalkboard: Factory = (g, w) => {
   const face = faceOf(g, FRONT_AXES);
-  const board = face ? new FaceCanvas(g.object, face, 256, 192, { shrink: 0.8, transparent: true }) : null;
+  // shrink réduit (marge sur le cadre du tableau) ; raise recentre le message sur la surface
+  // écrite (le bas du tableau, souvent occupé par un porte-craie, tirait le texte vers le bas).
+  const board = face ? new FaceCanvas(g.object, face, 256, 192, { shrink: 0.68, transparent: true, glow: true, raise: 0.1 }) : null;
   let written = false;
-  let unseen = 0;
-  const delay = 3 + objectRoll(g, 1) * 6;
+  let looked = 0;
+  const delay = 0.25 + objectRoll(g, 1) * 0.25;
   return {
     update: (dt, near) => {
       if (written || !board || !near) return;
-      const position = g.object.position;
-      const close = position.distanceTo(w.head()) < 9;
-      unseen = close && !inView(w, position, 0.3) ? unseen + dt : 0;
-      if (unseen < delay) return;
+      const center = g.object.localToWorld(face!.center.clone());
+      const normal = face!.normal.clone().transformDirection(g.object.matrixWorld).normalize();
+      const toPlayer = tmp.subVectors(w.head(), center).normalize();
+      w.camera.getWorldDirection(tmp2);
+      const toBoard = tmp3.subVectors(center, w.head()).normalize();
+      const looking = center.distanceTo(w.head()) < 9 && normal.dot(toPlayer) > 0.25 && tmp2.dot(toBoard) > 0.78;
+      looked = looking ? looked + dt : 0;
+      if (looked < delay) return;
       written = true;
       const messages = tList("interact.chalk");
       const message = messages[Math.floor(objectRoll(g, 2) * messages.length)]!.replace("{take}", String(w.take()));
@@ -381,10 +375,10 @@ const storageCart: Factory = (g, w) => {
   };
 };
 
-/** Étagère métallique : bousculée, elle tremble et tout ce qu'elle porte cliquette. */
-const metalShelves: Factory = (g, w) => {
+/** Étagère métallique : bousculée, elle tremble et tout ce qu'elle porte cliquette ; heurtée, elle sonne aussi le choc. */
+const metalShelves: Factory = (g, w, system) => {
   let cooldown = 0;
-  return {
+  const shake: Behaviour = {
     update: (dt) => {
       cooldown -= dt;
       if (cooldown > 0 || g.body.isSleeping()) return;
@@ -396,23 +390,27 @@ const metalShelves: Factory = (g, w) => {
       noiseAt(g, 0.4);
     },
   };
+  return merge(shake, impactNoise("clank", 1.6, 0.4)(g, w, system));
 };
 
-/** Panneau « sol glissant » : se plie et se déplie. */
-const wetFloorSign: Factory = (g, w) => {
+/** Panneau « sol glissant » : se plie et se déplie (clac plastique) ; sonne aussi s'il est heurté. */
+const wetFloorSign: Factory = (g, w, system) => {
   let folded = false;
-  const toggle = (): void => {
-    folded = !folded;
-    for (const child of g.object.children) child.scale.z = folded ? 0.2 : 1;
-    w.audio.playAt("creak", g.object.position, 0.6);
+  const toggle: Behaviour = {
+    use: () => {
+      folded = !folded;
+      for (const child of g.object.children) child.scale.z = folded ? 0.2 : 1;
+      w.audio.playAt("plasticClack", g.object.position, 0.5);
+    },
   };
-  return { use: toggle, poke: toggle };
+  toggle.poke = toggle.use;
+  return merge(toggle, impactNoise("thump", 1.1, 0.3)(g, w, system));
 };
 
-/** Fauteuil : quand personne ne le regarde, il pivote. */
-const armChair: Factory = (g, w) => {
+/** Fauteuil : quand personne ne le regarde, il pivote ; heurté, il fait un bruit sourd. */
+const armChair: Factory = (g, w, system) => {
   let timer = 10 + objectRoll(g, 4) * 15;
-  return {
+  const pivot: Behaviour = {
     update: (dt, near) => {
       if (!near || g.heldBy) return;
       timer -= dt;
@@ -426,18 +424,22 @@ const armChair: Factory = (g, w) => {
       g.body.setRotation(rotated, true);
     },
   };
+  return merge(pivot, impactNoise("thump", 1.5, 0.3)(g, w, system));
 };
 
-/** Tabouret métallique : on le fait tourner d'une pichenette. */
-const metalStool: Factory = (g, w) => {
-  const spin = (): void => {
-    g.body.applyTorqueImpulse({ x: 0, y: 1.2, z: 0 }, true);
-    // "creak" (grincement métallique) plutôt que "squeak" (couic de jouet) : un tabouret qui
-    // tourne ne devrait pas sonner comme un canard en caoutchouc.
-    w.audio.playAt("creak", g.object.position, 0.5);
-    noiseAt(g, 0.2);
+/** Tabouret métallique : on le fait tourner d'une pichenette ; heurté, il sonne aussi le choc. */
+const metalStool: Factory = (g, w, system) => {
+  const spin: Behaviour = {
+    use: () => {
+      g.body.applyTorqueImpulse({ x: 0, y: 1.2, z: 0 }, true);
+      // "creak" (grincement métallique) plutôt que "squeak" (couic de jouet) : un tabouret qui
+      // tourne ne devrait pas sonner comme un canard en caoutchouc.
+      w.audio.playAt("creak", g.object.position, 0.5);
+      noiseAt(g, 0.2);
+    },
   };
-  return { poke: spin, use: spin };
+  spin.poke = spin.use;
+  return merge(spin, impactNoise("clank", 1.4, 0.3)(g, w, system));
 };
 
 // ---------------------------------------------------------------- Objets de collection
@@ -500,15 +502,32 @@ function impactNoise(sound: "gong" | "clank" | "thump" | "bang", minSpeed: numbe
 }
 
 /** Objet fragile : se brise s'il heurte quelque chose trop fort (et disparaît). */
-function breakable(minSpeed: number, loudness: number): Factory {
+function breakable(minSpeed: number, loudness: number, sound: "shatter" | "potBreak" = "shatter"): Factory {
   return (g, w) => ({
     impact: (speed) => {
       if (speed < minSpeed) return;
-      w.audio.playAt("shatter", g.object.position, 0.9);
+      w.audio.playAt(sound, g.object.position, 0.9);
       noiseAt(g, loudness);
       w.registry.remove(g);
     },
   });
+}
+
+/** Combine plusieurs comportements sur le même objet (ex. rester poussable ET faire du bruit au choc). */
+function merge(...parts: Behaviour[]): Behaviour {
+  return {
+    use: parts.find((p) => p.use)?.use,
+    poke: parts.find((p) => p.poke)?.poke,
+    impact: parts.find((p) => p.impact)?.impact,
+    grab: parts.find((p) => p.grab)?.grab,
+    oil: parts.find((p) => p.oil)?.oil,
+    update: (dt, near) => {
+      for (const part of parts) part.update?.(dt, near);
+    },
+    dispose: () => {
+      for (const part of parts) part.dispose?.();
+    },
+  };
 }
 
 /** Petit geste sonore à la gâchette (ouvrir un étui, presser un jouet...). */
@@ -543,21 +562,37 @@ const can: Factory = (g, w, system) => {
   };
 };
 
-/** Aérosol : pulvérise un petit nuage ; le lubrifiant fait taire un chariot qui grince. */
+/** Intervalle (s) entre deux jets, gâchette maintenue enfoncée. */
+const SPRAY_INTERVAL = 0.3;
+
+/** Aérosol : pulvérise un petit nuage tant que la gâchette reste enfoncée ; le lubrifiant fait taire un chariot qui grince. */
 function sprayCan(lubricant: boolean): Factory {
   return (g, w, system) => {
     // La buse, pas le centre du bidon : sinon le nuage part du mauvais endroit à l'usage.
     const nozzleLocal = topLocalPoint(g.object);
+    let timer = 0;
+    const spray = (hand: Hand): void => {
+      const nozzleWorld = g.object.localToWorld(nozzleLocal.clone());
+      w.audio.playAt("spray", nozzleWorld, 0.6);
+      noiseAt(g, 0.15);
+      system.puff(nozzleWorld, hand.aimDirection);
+      if (!lubricant) return;
+      for (const other of w.registry.all) {
+        if (other.kind === "storageCart" && other.object.position.distanceTo(g.object.position) < 1.4) system.behaviourOf(other)?.oil?.();
+      }
+    };
     return {
       use: (hand) => {
-        const nozzleWorld = g.object.localToWorld(nozzleLocal.clone());
-        w.audio.playAt("spray", nozzleWorld, 0.6);
-        noiseAt(g, 0.15);
-        system.puff(nozzleWorld, hand.aimDirection);
-        if (!lubricant) return;
-        for (const other of w.registry.all) {
-          if (other.kind === "storageCart" && other.object.position.distanceTo(g.object.position) < 1.4) system.behaviourOf(other)?.oil?.();
-        }
+        timer = SPRAY_INTERVAL;
+        spray(hand);
+      },
+      update: (dt) => {
+        const hand = g.heldBy as Hand | null;
+        if (!hand || hand.input.trigger.value <= 0.5) return;
+        timer -= dt;
+        if (timer > 0) return;
+        timer = SPRAY_INTERVAL;
+        spray(hand);
       },
     };
   };
@@ -569,13 +604,28 @@ const photo: Factory = (g, w) => {
   if (!front) return {};
   const back = findModelFace(g.object, front.normal.clone().negate());
   const frontCanvas = new FaceCanvas(g.object, front, 192, 192, { shrink: 0.82 });
-  frontCanvas.visible = false;
+  drawFoundPhoto(frontCanvas.ctx, objectRoll(g, 7));
+  frontCanvas.commit();
+  frontCanvas.visible = true;
   const backCanvas = back ? new FaceCanvas(g.object, back, 192, 192, { shrink: 0.9 }) : null;
   if (backCanvas) {
     const texts = tList("interact.photoBacks");
     const ctx = backCanvas.ctx;
-    ctx.fillStyle = "#e6e2d8";
+    ctx.fillStyle = "#d8cfbd";
     ctx.fillRect(0, 0, 192, 192);
+    ctx.strokeStyle = "rgba(120, 92, 55, 0.28)";
+    ctx.lineWidth = 2;
+    for (let y = 18; y < 192; y += 18) {
+      ctx.beginPath();
+      ctx.moveTo(10, y);
+      ctx.lineTo(182, y);
+      ctx.stroke();
+    }
+    ctx.strokeStyle = "rgba(160, 48, 42, 0.45)";
+    ctx.beginPath();
+    ctx.moveTo(30, 8);
+    ctx.lineTo(30, 184);
+    ctx.stroke();
     ctx.fillStyle = "#1c2753";
     ctx.font = `20px ${HANDWRITING_FONT}`;
     const words = (texts[Math.floor(objectRoll(g, 6) * texts.length)] ?? "").split(" ");
@@ -590,6 +640,9 @@ const photo: Factory = (g, w) => {
       } else line = candidate;
     }
     ctx.fillText(line, 14, y);
+    ctx.fillStyle = "rgba(110, 64, 36, 0.7)";
+    ctx.font = "bold 9px monospace";
+    ctx.fillText("ARCHIVE / 04", 112, 178);
     backCanvas.commit();
   }
   let unseen = 0;
@@ -616,13 +669,48 @@ const photo: Factory = (g, w) => {
   };
 };
 
-/** Cadran dessiné à la demande (boussole, montre digitale), rafraîchi quand on est près. */
-function dial(size: number, rate: number, draw: (ctx: CanvasRenderingContext2D, g: Grabbable, w: InteractionWorld, face: ModelFace) => void): Factory {
+function drawFoundPhoto(ctx: CanvasRenderingContext2D, seed: number): void {
+  const sky = ctx.createLinearGradient(0, 0, 0, 192);
+  sky.addColorStop(0, "#1b2630");
+  sky.addColorStop(1, "#746d55");
+  ctx.fillStyle = sky;
+  ctx.fillRect(0, 0, 192, 192);
+  ctx.fillStyle = "#c5b65d";
+  ctx.fillRect(0, 112, 192, 80);
+  ctx.strokeStyle = "rgba(40, 36, 24, 0.35)";
+  ctx.lineWidth = 2;
+  for (let x = -32; x < 224; x += 32) {
+    ctx.beginPath();
+    ctx.moveTo(96, 110);
+    ctx.lineTo(x, 192);
+    ctx.stroke();
+  }
+  ctx.fillStyle = "rgba(8, 10, 12, 0.78)";
+  const figureX = 72 + seed * 48;
+  ctx.beginPath();
+  ctx.arc(figureX, 78, 13, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillRect(figureX - 12, 91, 24, 62);
+  ctx.fillStyle = "rgba(255, 242, 183, 0.65)";
+  ctx.fillRect(137, 42, 3, 54);
+  const vignette = ctx.createRadialGradient(96, 96, 42, 96, 96, 132);
+  vignette.addColorStop(0, "rgba(0, 0, 0, 0)");
+  vignette.addColorStop(1, "rgba(0, 0, 0, 0.52)");
+  ctx.fillStyle = vignette;
+  ctx.fillRect(0, 0, 192, 192);
+}
+
+/**
+ * Cadran dessiné à la demande (boussole, montre digitale), rafraîchi quand on est près.
+ * `raise` recale le calque contre l'axe imprimé sur le modèle (positif : vers l'avant du cadran,
+ * négatif : vers le joueur) quand la boîte englobante détectée ne tombe pas pile sur le dessin.
+ */
+function dial(size: number, rate: number, raise: number, draw: (ctx: CanvasRenderingContext2D, g: Grabbable, w: InteractionWorld, face: ModelFace) => void): Factory {
   return (g, w) => {
     // Cadran sur le dessus de l'objet (sa plus grande face serait le dessous, posé à plat).
     const face = faceOf(g, UP_AXES);
     if (!face) return {};
-    const canvas = new FaceCanvas(g.object, face, size, size, { shrink: 0.7, glow: true, transparent: true });
+    const canvas = new FaceCanvas(g.object, face, size, size, { shrink: 0.7, glow: true, transparent: true, raise });
     let timer = 0;
     return {
       update: (dt, near) => {
@@ -637,7 +725,7 @@ function dial(size: number, rate: number, draw: (ctx: CanvasRenderingContext2D, 
   };
 }
 
-const compass = dial(128, 0.1, (ctx, g, w, face) => {
+const compass = dial(128, 0.1, -0.08, (ctx, g, w, face) => {
   const exit = w.exitPosition();
   // Direction de la sortie dans le repère de l'objet, projetée sur le plan du cadran.
   const worldDirection = tmp.set(exit.x - g.object.position.x, 0, exit.z - g.object.position.z).normalize();
@@ -663,7 +751,7 @@ const compass = dial(128, 0.1, (ctx, g, w, face) => {
   ctx.restore();
 });
 
-const digitalWatch = dial(128, 1, (ctx, _g, w) => {
+const digitalWatch = dial(128, 1, 0.08, (ctx, _g, w) => {
   const total = Math.floor(w.runSeconds());
   ctx.fillStyle = "#9fb08a";
   ctx.fillRect(0, 28, 128, 72);
@@ -738,6 +826,34 @@ const multimeter: Factory = (g, w) => {
 };
 
 /** Ventouse : gâchette contre un mur, elle s'y colle ; on la reprend pour la décoller. */
+/** Gâchette pointée vers un mur proche : l'objet s'y colle (fixe) ; le reprendre en main l'en détache. */
+function wallMountable(sound: "suction" | "metalClick", volume = 0.7): Factory {
+  return (g, w) => {
+    const ray = new RAPIER.Ray({ x: 0, y: 0, z: 0 }, { x: 0, y: 0, z: 1 });
+    let stuck = false;
+    return {
+      use: (hand) => {
+        if (stuck) return;
+        const origin = g.object.position;
+        ray.origin = { x: origin.x, y: origin.y, z: origin.z };
+        ray.dir = { x: hand.aimDirection.x, y: hand.aimDirection.y, z: hand.aimDirection.z };
+        const hit = w.physics.world.castRay(ray, 0.35, true, undefined, CollisionGroups.queryWalls);
+        if (!hit) return;
+        w.drop(g);
+        stuck = true;
+        g.body.setBodyType(RAPIER.RigidBodyType.Fixed, true);
+        w.audio.playAt(sound, origin, volume);
+      },
+      grab: () => {
+        if (!stuck) return;
+        stuck = false;
+        g.body.setBodyType(RAPIER.RigidBodyType.Dynamic, true);
+        w.audio.playAt(sound, g.object.position, volume * 0.75);
+      },
+    };
+  };
+}
+
 const plunger: Factory = (g, w) => {
   const ray = new RAPIER.Ray({ x: 0, y: 0, z: 0 }, { x: 0, y: 0, z: 1 });
   let stuck = false;
@@ -763,25 +879,6 @@ const plunger: Factory = (g, w) => {
 };
 
 /** Instrument de bord : les aiguilles s'affolent près du Cadreur (grésillements, tremblement). */
-const spacecraftInstrument: Factory = (g, w) => {
-  let tick = 0;
-  return {
-    update: (dt, near) => {
-      if (!near || g.object.position.distanceTo(w.head()) > 3) return;
-      const cadreur = w.cadreurPosition();
-      const distance = cadreur ? Math.hypot(cadreur.x - g.object.position.x, cadreur.z - g.object.position.z) : Infinity;
-      const intensity = distance < 25 ? 1 - distance / 25 : 0;
-      tick -= dt;
-      if (tick <= 0 && intensity > 0) {
-        tick = 0.05 + (1 - intensity) * 0.6 * Math.random();
-        w.audio.playAt("crackle", g.object.position, 0.3 + intensity * 0.4);
-      }
-      const jitter = intensity > 0.5 ? (intensity - 0.5) * 0.006 : 0;
-      for (const child of g.object.children) child.position.set((Math.random() - 0.5) * jitter, (Math.random() - 0.5) * jitter, 0);
-    },
-  };
-};
-
 /** Montre à gousset : ouverte, elle fait tic-tac. */
 const pocketWatch: Factory = (g, w) => {
   let open = false;
@@ -800,22 +897,23 @@ const pocketWatch: Factory = (g, w) => {
   };
 };
 
-/** Horloge murale : tic-tac… qui s'arrête quand le Cadreur approche. */
-const wallClock: Factory = (g, w) => {
+/** Horloge murale : tic-tac… qui s'arrête quand le Cadreur approche. Gâchette contre un mur : se fixe dessus. */
+const wallClock: Factory = (g, w, system) => {
   let loop: LoopHandle | null = null;
-  return {
+  const ticking: Behaviour = {
     update: (_dt, near) => {
       const cadreur = w.cadreurPosition();
       const silenced = !!cadreur && Math.hypot(cadreur.x - g.object.position.x, cadreur.z - g.object.position.z) < 10;
-      const ticking = near && g.object.position.distanceTo(w.head()) < 7 && !silenced;
-      if (ticking && !loop) loop = w.audio.loop("tick", g.object, 0.45);
-      else if (!ticking && loop) {
+      const shouldTick = near && g.object.position.distanceTo(w.head()) < 7 && !silenced;
+      if (shouldTick && !loop) loop = w.audio.loop("tick", g.object, 0.45);
+      else if (!shouldTick && loop) {
         loop.stop();
         loop = null;
       }
     },
     dispose: () => loop?.stop(),
   };
+  return merge(ticking, wallMountable("metalClick", 0.55)(g, w, system));
 };
 
 /** Lueur additive d'une flamme (même esprit que le halo de l'ampoule, pas de lumière dynamique). */
@@ -852,11 +950,10 @@ const lighter: Factory = (g, w) => {
       w.audio.playAt("flick", g.object.position, 0.5);
       flame.visible = on;
     },
-    update: (dt) => {
+    update: (_dt) => {
       if (!on) return;
       const jitter = 1 + Math.sin(performance.now() * 0.03) * 0.08 + (Math.random() - 0.5) * 0.1;
       flame.scale.set(0.045 * jitter, 0.06 * (1 + (Math.random() - 0.5) * 0.15), 1);
-      flame.position.y += Math.sin(dt * 40) * 0.0003;
     },
     dispose: () => {
       flame.removeFromParent();
@@ -870,8 +967,12 @@ const lighter: Factory = (g, w) => {
  * Caméra de surveillance : on la pointe où l'on veut surveiller, on la pose (on la lâche) ; son
  * image passe alors sur les télés allumées.
  */
+/** Portée (m) de la recherche d'un mur proche, à la pose de la caméra de surveillance. */
+const SECURITY_MOUNT_RANGE = 0.6;
+
 const securityCamera: Factory = (g, w, system) => {
   const direction = new THREE.Vector3(0, 0, -1);
+  const ray = new RAPIER.Ray({ x: 0, y: 0, z: 0 }, { x: 0, y: 0, z: 1 });
   let wasHeld = false;
   return {
     update: () => {
@@ -883,85 +984,33 @@ const securityCamera: Factory = (g, w, system) => {
       }
       if (!wasHeld) return;
       wasHeld = false;
+      // Un mur dans l'axe visé, à portée : la caméra s'y fixe plutôt que de tomber au sol.
+      const origin = g.object.position;
+      ray.origin = { x: origin.x, y: origin.y, z: origin.z };
+      ray.dir = { x: direction.x, y: direction.y, z: direction.z };
+      const hit = w.physics.world.castRay(ray, SECURITY_MOUNT_RANGE, true, undefined, CollisionGroups.queryWalls);
+      if (hit) {
+        g.object.position.addScaledVector(direction, hit.timeOfImpact - 0.02);
+        g.body.setTranslation(g.object.position, true);
+        g.body.setBodyType(RAPIER.RigidBodyType.Fixed, true);
+      }
       system.placeSecurityCamera(g, direction);
-      log("interact", { action: "security-placed" });
+      log("interact", { action: "security-placed", mounted: !!hit });
       w.audio.playAt("beep", g.object.position, 0.4);
+    },
+    grab: () => {
+      // Reprise en main : décollée si elle était fixée à un mur.
+      if (g.body.isFixed()) g.body.setBodyType(RAPIER.RigidBodyType.Dynamic, true);
     },
     dispose: () => system.removeSecurityCamera(g),
   };
 };
 
-/** Jumelles : portées aux yeux, un zoom ×5 dans l'axe du regard (deux disques). */
-const binoculars: Factory = (g, w) => {
-  const mask = circleMask(true);
-  const overlay = eyeOverlay(w, 0.22, 0.11, new THREE.MeshBasicMaterial({ alphaMap: mask, transparent: true, depthTest: false, depthWrite: false, toneMapped: false }));
-  return {
-    update: () => {
-      const visible = atEye(g, w, 0.2);
-      if (visible && !overlay.visible) log("interact", { action: "view", kind: "binoculars" });
-      overlay.visible = visible;
-      if (!overlay.visible) return;
-      const view = w.views.use("binoculars", 256, 128, 15, 11);
-      w.camera.getWorldPosition(view.camera.position);
-      w.camera.getWorldQuaternion(view.camera.quaternion);
-      const material = overlay.material as THREE.MeshBasicMaterial;
-      if (material.map !== view.texture) {
-        material.map = view.texture;
-        material.needsUpdate = true;
-      }
-    },
-    dispose: () => {
-      overlay.removeFromParent();
-      overlay.geometry.dispose();
-      (overlay.material as THREE.Material).dispose();
-      mask.dispose();
-    },
-  };
-};
-
-/** Loupe : ce qu'on regarde à travers le verre apparaît grossi (×2,5). */
-const magnifyingGlass: Factory = (g, w, system) => {
-  const face = faceOf(g);
-  if (!face) return {};
-  const mask = circleMask(false);
-  const material = new THREE.MeshBasicMaterial({ alphaMap: mask, transparent: true, toneMapped: false });
-  const lens = createFacePlane(face, material, 0.85, 1);
-  lens.visible = false;
-  g.object.add(lens);
-  system.displays.add(lens);
-  const center = new THREE.Vector3();
-  return {
-    update: () => {
-      const visible = !!g.heldBy && g.object.position.distanceTo(w.head()) < 0.8;
-      if (visible && !lens.visible) log("interact", { action: "view", kind: "magnifyingGlass" });
-      lens.visible = visible;
-      if (!lens.visible) return;
-      lens.getWorldPosition(center);
-      const head = w.head();
-      const distance = Math.max(0.05, center.distanceTo(head));
-      const radius = (face.width * 0.85 * g.object.scale.x) / 2;
-      const fov = THREE.MathUtils.radToDeg((2 * Math.atan(radius / distance)) / 2.5);
-      const view = w.views.use("loupe", 160, 160, 15, THREE.MathUtils.clamp(fov, 2, 40), [...system.displays]);
-      view.camera.position.copy(head);
-      view.camera.lookAt(center);
-      if (material.map !== view.texture) {
-        material.map = view.texture;
-        material.needsUpdate = true;
-      }
-    },
-    dispose: () => {
-      system.displays.delete(lens);
-      lens.geometry.dispose();
-      material.dispose();
-      mask.dispose();
-    },
-  };
-};
+// Jumelles et loupe : effet de vue rapprochée retiré (cassé — plus de comportement propre pour
+// l'instant, voir le journal des objets). Les deux restent des objets de collection normaux.
 
 const BEHAVIOURS: Record<string, Factory> = {
   securityCamera,
-  binoculars,
-  magnifyingGlass,
   television,
   chalkboard,
   storageCart,
@@ -970,6 +1019,17 @@ const BEHAVIOURS: Record<string, Factory> = {
   armChair,
   metalStool,
   alarmClock,
+  chair: impactNoise("thump", 1.2, 0.25),
+  monoblocChair: impactNoise("thump", 1.2, 0.25),
+  schoolDesk: impactNoise("thump", 1.6, 0.3),
+  officeDesk: impactNoise("thump", 1.8, 0.35),
+  cabinet: impactNoise("clank", 1.8, 0.35),
+  sofa: impactNoise("thump", 2, 0.4),
+  coffeeTable: impactNoise("thump", 1.4, 0.3),
+  bookshelf: impactNoise("thump", 2, 0.4),
+  cardboardBox: impactNoise("thump", 0.8, 0.2),
+  plasticCrate: impactNoise("thump", 0.8, 0.2),
+  pottedPlant: impactNoise("thump", 0.6, 0.15),
   brassPot: (g, w, s) => ({
     ...impactNoise("gong", 2, 0.8)(g, w, s),
     use: () => {
@@ -980,7 +1040,7 @@ const BEHAVIOURS: Record<string, Factory> = {
   can,
   football: impactNoise("thump", 1.5, 0.4),
   hammer: impactNoise("bang", 3, 0.9),
-  vase: breakable(2.5, 0.8),
+  vase: breakable(2.5, 0.8, "potBreak"),
   lightbulb,
   toy: useSound("squeak", 0.5),
   kettle: useSound("whistle", 0.8, 0.8, 3.2),
@@ -997,7 +1057,6 @@ const BEHAVIOURS: Record<string, Factory> = {
   lighter,
   multimeter,
   plunger,
-  spacecraftInstrument,
   watch: pocketWatch,
   wallClock,
   // Petits outils sans comportement propre : au moins un bruit de choc plausible au lancer.
@@ -1022,7 +1081,6 @@ export function prepareInteractionFaces(kind: string, template: THREE.Object3D):
   if (behaviour === television) findModelFace(template, TV_FRONT);
   else if (behaviour === chalkboard) findModelFace(template, undefined, FRONT_AXES);
   else if (behaviour === compass || behaviour === digitalWatch) findModelFace(template, undefined, UP_AXES);
-  else if (behaviour === magnifyingGlass) findModelFace(template);
   else if (behaviour === photo) {
     const front = findModelFace(template);
     if (front) findModelFace(template, front.normal.clone().negate());
@@ -1128,7 +1186,8 @@ export class InteractionSystem {
     for (const [g, behaviour] of this.behaviours) {
       const near = g.object.position.distanceTo(head) < NEAR_DISTANCE;
       behaviour.update?.(deltaSeconds, near);
-      if (behaviour.impact && !g.heldBy && this.behaviours.has(g)) this.detectImpact(g, behaviour);
+      // Choc détecté aussi en main (heurter un mur en le tenant) : même heuristique que lancé/tombé.
+      if (behaviour.impact && this.behaviours.has(g)) this.detectImpact(g, behaviour);
     }
     this.detectPokes(hands);
     this.updatePuffs(deltaSeconds);

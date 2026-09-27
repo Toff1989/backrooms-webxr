@@ -6,7 +6,6 @@ import brassPotUrl from "../assets/models/collectibles/brassPot.glb";
 import canUrl from "../assets/models/collectibles/can.glb";
 import cigaretteCaseUrl from "../assets/models/collectibles/cigaretteCase.glb";
 import cigarettePackUrl from "../assets/models/collectibles/cigarettePack.glb";
-import circuitBoardUrl from "../assets/models/collectibles/circuitBoard.glb";
 import cleanerUrl from "../assets/models/collectibles/cleaner.glb";
 import cleanerTinUrl from "../assets/models/collectibles/cleanerTin.glb";
 import combWrenchUrl from "../assets/models/collectibles/combWrench.glb";
@@ -30,7 +29,6 @@ import plungerUrl from "../assets/models/collectibles/plunger.glb";
 import screwdriverUrl from "../assets/models/collectibles/screwdriver.glb";
 import screwdriverFlatUrl from "../assets/models/collectibles/screwdriverFlat.glb";
 import securityCameraUrl from "../assets/models/collectibles/securityCamera.glb";
-import spacecraftInstrumentUrl from "../assets/models/collectibles/spacecraftInstrument.glb";
 import tapeUrl from "../assets/models/collectibles/tape.glb";
 import toolboxUrl from "../assets/models/collectibles/toolbox.glb";
 import toyUrl from "../assets/models/collectibles/toy.glb";
@@ -59,7 +57,6 @@ const COLLECTIBLE_URLS: Record<CollectibleKind, string> = {
   bleach: bleachUrl,
   cigaretteCase: cigaretteCaseUrl,
   cigarettePack: cigarettePackUrl,
-  circuitBoard: circuitBoardUrl,
   cleanerTin: cleanerTinUrl,
   combWrench: combWrenchUrl,
   hammer: hammerUrl,
@@ -87,7 +84,6 @@ const COLLECTIBLE_URLS: Record<CollectibleKind, string> = {
   lighter: lighterUrl,
   wallClock: wallClockUrl,
   vase: vaseUrl,
-  spacecraftInstrument: spacecraftInstrumentUrl,
   compass: compassUrl,
 };
 

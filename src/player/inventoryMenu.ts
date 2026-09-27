@@ -7,6 +7,7 @@ import { spawnCollectibleModel } from "../world/collectibleLoader";
 import { SORT_MODES, type CollectionEntry, type CollectionStore } from "../world/collection";
 import { computePerks } from "../world/collectionPerks";
 import { wrapLines } from "../world/loreArt";
+import { applyVhsEffect } from "../world/vhsMaterial";
 import type { Hand } from "./hand";
 import type { Sfx } from "./sfx";
 
@@ -25,7 +26,7 @@ const GRID_X = (WIDTH * PX_PER_M - (COLUMNS * SLOT_SIZE + (COLUMNS - 1) * SLOT_G
 const GRID_Y = 78;
 
 /** Taille (m) de la miniature 3D dans sa case, et son avancée devant le panneau. */
-const MINIATURE_SIZE = 0.078;
+const MINIATURE_SIZE = 0.086;
 const MINIATURE_DEPTH = 0.045;
 const SPIN_SPEED = 0.6;
 const HOVER_SPIN_SPEED = 2.2;
@@ -104,6 +105,7 @@ export class InventoryMenu extends UiPanel {
   private statusUntil = 0;
   private time = 0;
   private buildToken = 0;
+  private readonly miniatureLight = new THREE.PointLight(0xffe6bd, 0.9, 0.9, 2);
 
   constructor(
     private readonly store: CollectionStore,
@@ -114,6 +116,8 @@ export class InventoryMenu extends UiPanel {
   ) {
     super(WIDTH, HEIGHT, PX_PER_M);
     this.group.name = "inventory-menu";
+    this.miniatureLight.position.set(0, 0.02, 0.12);
+    this.group.add(this.miniatureLight);
     parent.add(this.group);
     store.onChange(() => {
       this.clampPage();
@@ -382,6 +386,19 @@ export class InventoryMenu extends UiPanel {
           const size = shape.box.getSize(new THREE.Vector3());
           const scale = MINIATURE_SIZE / Math.max(size.x, size.y, size.z, 0.01);
           const center = shape.box.getCenter(new THREE.Vector3());
+          model.traverse((child) => {
+            if (!(child instanceof THREE.Mesh)) return;
+            const materials = Array.isArray(child.material) ? child.material : [child.material];
+            const visibleMaterials = materials.map((material) => {
+              const clone = material.clone();
+              if (clone instanceof THREE.MeshStandardMaterial) {
+                clone.emissiveIntensity = Math.max(clone.emissiveIntensity, 0.08);
+                applyVhsEffect(clone, { zoneLighting: false });
+              }
+              return clone;
+            });
+            child.material = Array.isArray(child.material) ? visibleMaterials : visibleMaterials[0]!;
+          });
           model.scale.setScalar(scale);
           model.position.copy(center).multiplyScalar(-scale);
 

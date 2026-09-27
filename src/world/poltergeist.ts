@@ -1,4 +1,7 @@
 import * as THREE from "three";
+import metal01Url from "../assets/audio/cc0/metal_01.ogg?url";
+import wooden01Url from "../assets/audio/cc0/wooden_01.ogg?url";
+import wooden02Url from "../assets/audio/cc0/wooden_02.ogg?url";
 import { brownNoise, createSamples, fadeEdges, lowpass, normalize, queueWarmup, reverb, toBuffer } from "../assets/audio/synth";
 import type { GrabbableRegistry } from "./grabbable";
 
@@ -17,6 +20,7 @@ const IN_VIEW_MIN_DISTANCE = 9;
 export class Poltergeist {
   private readonly sound: THREE.PositionalAudio;
   private readonly buffers: AudioBuffer[] = [];
+  private readonly externalBuffers: AudioBuffer[] = [];
   private timer = 30;
   private readonly viewDirection = new THREE.Vector3();
   private readonly toObject = new THREE.Vector3();
@@ -31,6 +35,17 @@ export class Poltergeist {
     this.sound.setMaxDistance(20);
     scene.add(this.sound);
     for (let i = 0; i < 3; i++) queueWarmup(() => this.buffers.push(createScrapeBuffer(listener.context)));
+    for (const url of [wooden01Url, wooden02Url, metal01Url]) void this.loadExternal(listener.context, url);
+  }
+
+  private async loadExternal(context: BaseAudioContext, url: string): Promise<void> {
+    try {
+      const response = await fetch(url);
+      if (!response.ok) return;
+      this.externalBuffers.push(await context.decodeAudioData(await response.arrayBuffer()));
+    } catch {
+      // The procedural scrape remains available as a fallback.
+    }
   }
 
   update(deltaSeconds: number, camera: THREE.Camera, headPosition: THREE.Vector3, depth: number, darkness: number): void {
@@ -72,10 +87,11 @@ export class Poltergeist {
       target.body.applyTorqueImpulse({ x: 0, y: (Math.random() - 0.5) * mass * 0.6, z: 0 }, true);
     }
 
-    if (this.buffers.length > 0 && this.sound.context.state === "running") {
+    const buffers = this.externalBuffers.length > 0 ? this.externalBuffers : this.buffers;
+    if (buffers.length > 0 && this.sound.context.state === "running") {
       if (this.sound.isPlaying) this.sound.stop();
       this.sound.position.copy(target.object.position);
-      this.sound.setBuffer(this.buffers[Math.floor(Math.random() * this.buffers.length)]!);
+      this.sound.setBuffer(buffers[Math.floor(Math.random() * buffers.length)]!);
       this.sound.setVolume(0.8);
       this.sound.play();
     }

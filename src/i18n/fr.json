@@ -86,6 +86,8 @@
   "debug.cadreurDismissed": "Cadreur renvoyé.",
   "debug.levelDone": "Niveau suivant.",
   "debug.batteryDone": "Batterie de la lampe rechargée.",
+  "debug.spawn": "SPAWN {kind}",
+  "debug.spawnStarted": "Objet créé : {kind}.",
   "inv.journal": "JOURNAL",
   "journal.title": "BANDES PERDUES",
   "journal.tapesTab": "BANDES",
@@ -144,13 +146,13 @@
   "blue.take": "PRISE {n}",
   "fiche.full": "INTÉGRAL",
   "interact.chalk": [
-    "ON TE VOIT",
-    "PRISE {take}",
-    "NE TE RETOURNE PAS",
-    "TOUJOURS LÀ",
-    "REGARDE DEVANT TOI",
-    "ÇA CONTINUE",
-    "IL FILME ENCORE"
+    "On te voit",
+    "Prise {take}",
+    "Ne te retourne pas",
+    "Toujours là",
+    "Regarde devant toi",
+    "Ça continue",
+    "Il filme encore"
   ],
   "interact.photoBacks": [
     "Personne ne se souvient avoir pris cette photo.",

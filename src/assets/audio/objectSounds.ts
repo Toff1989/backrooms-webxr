@@ -15,6 +15,8 @@ export type ObjectSoundName =
   | "squeak"
   | "gong"
   | "shatter"
+  | "potBreak"
+  | "plasticClack"
   | "crumple"
   | "thump"
   | "bang"
@@ -28,7 +30,6 @@ export type ObjectSoundName =
   | "suction"
   | "rustle"
   | "metalClick"
-  | "crackle"
   | "buzz";
 
 /** Sons joués en boucle (attachés à l'objet tant qu'il est actif). */
@@ -132,12 +133,29 @@ export function createObjectSound(context: BaseAudioContext, name: ObjectSoundNa
       break;
     }
     case "shatter": {
-      // Verre / céramique qui éclate : choc puis éclats qui retombent.
+      // Verre qui éclate : choc puis éclats aigus qui retombent.
       data = createSamples(rate, 1);
       decayHit(data, rate, 0, 2800, 0.02, 1.2, 0.9);
       for (let k = 0; k < 26; k++) decayHit(data, rate, 0.02 + Math.random() * 0.7, 3000 + Math.random() * 5000, 0.006 + Math.random() * 0.01, 0.3 + Math.random() * 0.4, 0.3);
       highpass(data, rate, 1200);
       reverb(data, rate, 0.2, 0.8);
+      break;
+    }
+    case "potBreak": {
+      // Céramique qui se brise : choc plus sourd que le verre, éclats moins nombreux et plus graves.
+      data = createSamples(rate, 0.9);
+      decayHit(data, rate, 0, 1300, 0.03, 1.3, 0.75);
+      for (let k = 0; k < 14; k++) decayHit(data, rate, 0.02 + Math.random() * 0.5, 1200 + Math.random() * 2200, 0.01 + Math.random() * 0.015, 0.25 + Math.random() * 0.35, 0.4);
+      lowpass(data, rate, 4500);
+      reverb(data, rate, 0.15, 0.5);
+      break;
+    }
+    case "plasticClack": {
+      // Panneau en plastique qui se plie/déplie : clac sec et creux, pas un grincement.
+      data = createSamples(rate, 0.16);
+      decayHit(data, rate, 0, 900, 0.012, 1, 0.55);
+      decayHit(data, rate, 0.02, 550, 0.02, 0.5, 0.6);
+      bandpass(data, rate, 1400, 0.7);
       break;
     }
     case "crumple": {
@@ -250,13 +268,6 @@ export function createObjectSound(context: BaseAudioContext, name: ObjectSoundNa
       decayHit(data, rate, 0, 4200, 0.004, 1, 0.4);
       decayHit(data, rate, 0.035, 3600, 0.004, 0.6, 0.4);
       highpass(data, rate, 1500);
-      break;
-    }
-    case "crackle": {
-      // Grésillement bref (compteur, instrument affolé).
-      data = createSamples(rate, 0.03);
-      decayHit(data, rate, 0, 5000, 0.0015, 1, 0.95);
-      peak = 0.5;
       break;
     }
     case "buzz": {

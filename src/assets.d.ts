@@ -8,5 +8,10 @@ declare module "*.ktx2" {
   export default url;
 }
 
+declare module "*.ogg?url" {
+  const url: string;
+  export default url;
+}
+
 /** Identifiant de build (commit + date), injecté par vite.config.ts. */
 declare const __BUILD_ID__: string;
