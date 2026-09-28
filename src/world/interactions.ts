@@ -634,12 +634,12 @@ const photo: Factory = (g, w) => {
   drawFoundPhoto(frontCanvas.ctx, objectRoll(g, 7));
   frontCanvas.commit();
   frontCanvas.visible = true;
-  const backCanvas = back ? new FaceCanvas(g.object, back, 192, 192, { shrink: 0.9 }) : null;
+  // Transparent : pas de fond peint, seule l'encre est dessinée. Le dos réel du cadre (son bois,
+  // son grain) reste visible sous l'écriture au lieu d'être caché par un carton beige plaqué devant.
+  const backCanvas = back ? new FaceCanvas(g.object, back, 192, 192, { shrink: 0.9, transparent: true }) : null;
   if (backCanvas) {
     const texts = tList("interact.photoBacks");
     const ctx = backCanvas.ctx;
-    ctx.fillStyle = "#d8cfbd";
-    ctx.fillRect(0, 0, 192, 192);
     ctx.strokeStyle = "rgba(120, 92, 55, 0.28)";
     ctx.lineWidth = 2;
     for (let y = 18; y < 192; y += 18) {

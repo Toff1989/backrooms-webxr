@@ -20,12 +20,12 @@ const log = (line: string): void => {
   if (el) el.textContent = results.join("\n");
 };
 
-function frameCamera(camera: THREE.PerspectiveCamera, object: THREE.Object3D): void {
+function frameCamera(camera: THREE.PerspectiveCamera, object: THREE.Object3D, direction = new THREE.Vector3(1, 0, 0)): void {
   const box = new THREE.Box3().setFromObject(object);
   const size = box.getSize(new THREE.Vector3());
   const center = box.getCenter(new THREE.Vector3());
-  const distance = Math.max(size.x, size.y) / (2 * Math.tan((camera.fov * Math.PI) / 360)) + size.z * 3;
-  camera.position.set(center.x + distance * 1.1, center.y, center.z);
+  const distance = Math.max(size.x, size.y, size.z) / (2 * Math.tan((camera.fov * Math.PI) / 360)) + size.length();
+  camera.position.copy(center).addScaledVector(direction, distance * 1.1);
   camera.lookAt(center);
 }
 
@@ -90,6 +90,40 @@ async function run(): Promise<void> {
   renderer.render(scene, camera);
   log("Rendu 'photo posée' (damier de test à la place de la vraie image) affiché.");
   markReady("ON");
+  await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+
+  // --- Dos du cadre : message manuscrit en alpha, sans fond peint, sur le vrai bois du cadre ---
+  if (!front) {
+    markReady("BACK");
+    return;
+  }
+  const back = findModelFace(template, front.normal.clone().negate());
+  if (!back) {
+    log("Pas de face arrière détectée.");
+    markReady("BACK");
+    return;
+  }
+  frameCamera(camera, template, back.normal);
+
+  const backCanvas = new FaceCanvas(template, back, 192, 192, { shrink: 0.9, transparent: true });
+  const ctx = backCanvas.ctx;
+  ctx.strokeStyle = "rgba(120, 92, 55, 0.28)";
+  ctx.lineWidth = 2;
+  for (let y = 18; y < 192; y += 18) {
+    ctx.beginPath();
+    ctx.moveTo(10, y);
+    ctx.lineTo(182, y);
+    ctx.stroke();
+  }
+  ctx.fillStyle = "#1c2753";
+  ctx.font = "20px sans-serif";
+  ctx.fillText("test alpha", 14, 40);
+  backCanvas.commit();
+  backCanvas.visible = true;
+
+  renderer.render(scene, camera);
+  log("Rendu 'dos annoté' (texte en alpha, sans fond — le bois du cadre doit rester visible) affiché.");
+  markReady("BACK");
 }
 
 run().catch((error) => {
