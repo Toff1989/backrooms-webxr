@@ -145,7 +145,7 @@ function findTelevisionScreen(root: THREE.Object3D): THREE.Mesh | null {
     if (result || !(child instanceof THREE.Mesh)) return;
     const materials = Array.isArray(child.material) ? child.material : [child.material];
     const names = [child.name, ...materials.map((material) => material.name)].join(" ");
-    if (/television[_ -]?02|screen|display/i.test(names)) result = child;
+    if (/screen|display/i.test(names)) result = child;
   });
   return result;
 }
