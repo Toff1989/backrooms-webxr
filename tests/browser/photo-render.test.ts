@@ -81,7 +81,11 @@ async function run(): Promise<void> {
 
   const template = await loadTemplateModel(photoUrl);
   scene.add(template);
-  frameCamera(camera, template);
+  // Direction physique connue de l'avant du modèle (indépendante de `findModelFace(template)` sans
+  // axe imposé, qui compare l'aire des 6 faces candidates : avec le dos maintenant séparé en une
+  // vraie plaque, son aire peut dépasser celle de la façade et faire "gagner" le mauvais côté).
+  const FRONT_DIR = new THREE.Vector3(1, 0, 0);
+  frameCamera(camera, template, FRONT_DIR);
 
   renderer.render(scene, camera);
   log("Rendu 'vierge' (matériaux d'origine, cadre + vitre + artwork) affiché.");
@@ -127,7 +131,7 @@ async function run(): Promise<void> {
     return;
   }
   log(backMesh ? `Sous-maille dos détectée : "${backMesh.name || "(sans nom)"}" → remplacement en place.` : "Pas de sous-maille dos dédiée → pose d'un plan sur la face arrière détectée (fallback).");
-  frameCamera(camera, template, backMesh ? front.normal.clone().negate() : back!.normal);
+  frameCamera(camera, template, FRONT_DIR.clone().negate());
 
   const backAspect = backMesh ? meshPlateAspect(backMesh) : back!.width / back!.height;
   const [bw, bh] = canvasSizeForAspect(backAspect);
@@ -159,7 +163,7 @@ async function run(): Promise<void> {
   // Vue de 3/4 (pas de face) : un plan simplement collé devant la surface se détache visiblement
   // par parallaxe (bord flottant, décalage de profondeur) alors qu'une vraie sous-maille suit le
   // modèle sous tous les angles.
-  const backNormal = backMesh ? front.normal.clone().negate() : back!.normal;
+  const backNormal = FRONT_DIR.clone().negate();
   const angled = backNormal.clone().addScaledVector(new THREE.Vector3(0, 0.25, 1), 0.35).normalize();
   frameCamera(camera, template, angled);
   renderer.render(scene, camera);
