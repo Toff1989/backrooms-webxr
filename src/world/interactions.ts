@@ -668,7 +668,7 @@ export function remapPlateUV(mesh: THREE.Mesh): void {
  * les sommets de la face voulue dans l'unwrap d'origine, sans toucher à sa forme (cartes normale/
  * rugosité restent donc valables, juste zoomées).
  */
-export function remapPlateUVToFace(mesh: THREE.Mesh, direction: THREE.Vector3, threshold = 0.9): void {
+export function remapPlateUVToFace(mesh: THREE.Mesh, direction: THREE.Vector3, threshold = 0.9, flip: { u?: boolean; v?: boolean } = {}): void {
   const normalAttr = mesh.geometry.attributes["normal"] as THREE.BufferAttribute | undefined;
   const uvAttr = mesh.geometry.attributes["uv"] as THREE.BufferAttribute | undefined;
   if (!normalAttr || !uvAttr) return;
@@ -690,7 +690,13 @@ export function remapPlateUVToFace(mesh: THREE.Mesh, direction: THREE.Vector3, t
   if (!Number.isFinite(minU) || !Number.isFinite(minV)) return; // aucun sommet orienté vers `direction`
   const uSpan = maxU - minU || 1;
   const vSpan = maxV - minV || 1;
-  for (let i = 0; i < uvAttr.count; i++) uvAttr.setXY(i, (uvAttr.getX(i) - minU) / uSpan, (uvAttr.getY(i) - minV) / vSpan);
+  for (let i = 0; i < uvAttr.count; i++) {
+    let u = (uvAttr.getX(i) - minU) / uSpan;
+    let v = (uvAttr.getY(i) - minV) / vSpan;
+    if (flip.u) u = 1 - u;
+    if (flip.v) v = 1 - v;
+    uvAttr.setXY(i, u, v);
+  }
   uvAttr.needsUpdate = true;
 }
 
@@ -842,8 +848,10 @@ function dial(size: number, rate: number, raise: number, draw: (ctx: CanvasRende
     if (screenMesh) {
       // Cette sous-maille n'est pas qu'une simple plaque (chants biseautés compris dans le même
       // unwrap) : on ne recadre que sur le sous-rectangle déjà utilisé par sa face plate, sans
-      // quoi le dessin se retrouve tassé dans un coin — voir `remapPlateUVToFace`.
-      remapPlateUVToFace(screenMesh, UP_AXES[0]!);
+      // quoi le dessin se retrouve tassé dans un coin — voir `remapPlateUVToFace`. L'unwrap
+      // d'origine de ce panneau est monté en miroir vertical par rapport au canevas (texte
+      // inversé constaté sur la montre digitale) : on retourne l'axe V.
+      remapPlateUVToFace(screenMesh, UP_AXES[0]!, 0.9, { v: true });
     }
     const canvas = screenMesh
       ? new FaceCanvas(g.object, null, size, size, { existingMesh: screenMesh, glow: true, transparent: false })

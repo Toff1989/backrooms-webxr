@@ -57,8 +57,9 @@ async function run(): Promise<void> {
 
   if (glass) {
     // La vitre partage son unwrap entre sa face plate et ses chants biseautés (même modèle
-    // partagé, cf. dial()) : on ne recadre le dessin que sur le sous-rectangle de la face plate.
-    remapPlateUVToFace(glass, UP_AXES[0]!);
+    // partagé, cf. dial()) : on ne recadre le dessin que sur le sous-rectangle de la face plate,
+    // en miroir vertical (comme dans dial()) pour corriger le montage inversé de cette vitre.
+    remapPlateUVToFace(glass, UP_AXES[0]!, 0.9, { v: true });
     glass.geometry.computeBoundingBox();
   }
   const box = new THREE.Box3().setFromObject(template);
