@@ -153,7 +153,22 @@ export function findModelFace(template: THREE.Object3D, axis?: THREE.Vector3, ca
       }
       windowArea -= areaOf(sorted[start]!);
     }
-    const kept = sorted.slice(bestStart, bestEnd);
+    // Entre deux tranches de surface comparable (un couvercle ouvert à plat au-dessus de sa base,
+    // par ex.), on préfère la plus basse dans l'axe cherché plutôt que la simple plus grande aire :
+    // c'est presque toujours la vraie surface utile (cadran), pas le dessous du couvercle.
+    const LOW_PREFERENCE_RATIO = 0.4;
+    let lowStart = bestStart;
+    let lowEnd = bestEnd;
+    windowArea = 0;
+    for (let start = 0, end = 0; start < sorted.length; start++) {
+      while (end < sorted.length && depthOf(sorted[end]!) - depthOf(sorted[start]!) <= 0.04) windowArea += areaOf(sorted[end++]!);
+      if (windowArea >= bestArea * LOW_PREFERENCE_RATIO && depthOf(sorted[start]!) < depthOf(sorted[lowStart]!)) {
+        lowStart = start;
+        lowEnd = end;
+      }
+      windowArea -= areaOf(sorted[start]!);
+    }
+    const kept = sorted.slice(lowStart, lowEnd);
     const normal = new THREE.Vector3();
     const center = new THREE.Vector3();
     let area = 0;

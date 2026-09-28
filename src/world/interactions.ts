@@ -58,6 +58,9 @@ const IMPACT_MIN_SPEED = 1.2;
 const tmp = new THREE.Vector3();
 const tmp2 = new THREE.Vector3();
 const tmp3 = new THREE.Vector3();
+const tmpBox = new THREE.Box3();
+/** Marge (m) au-delà du boîtier de la caméra de surveillance, pour ne jamais l'avoir dans le champ. */
+const SECURITY_LENS_CLEARANCE = 0.04;
 
 /** Tirage déterministe [0..1) propre à un objet (identifiant de collection, sinon position de départ). */
 function objectRoll(g: Grabbable, salt: number): number {
@@ -140,6 +143,10 @@ const TV_FRONT = new THREE.Vector3(0, 0, 1);
 const UP_AXES = [new THREE.Vector3(0, 1, 0)];
 
 function findTelevisionScreen(root: THREE.Object3D): THREE.Mesh | null {
+  // Le modèle nomme l'écran explicitement ("tv_screen", noeud distinct du boîtier) : on le
+  // cherche d'abord par son nom exact, avant le repli heuristique (variantes du modèle CC0).
+  const named = root.getObjectByName("tv_screen");
+  if (named instanceof THREE.Mesh) return named;
   let result: THREE.Mesh | null = null;
   root.traverse((child) => {
     if (result || !(child instanceof THREE.Mesh)) return;
@@ -148,6 +155,18 @@ function findTelevisionScreen(root: THREE.Object3D): THREE.Mesh | null {
     if (/television[_ -]?02|screen|display/i.test(names)) result = child;
   });
   return result;
+}
+
+/**
+ * Ratio largeur/hauteur d'un mesh plat (photo, cadran...) d'après sa boîte englobante locale :
+ * l'axe le plus fin est la profondeur, l'axe Y la hauteur, l'autre la largeur. Sert à générer une
+ * texture aux bonnes proportions plutôt qu'une image carrée qui déborde ou laisse un vide.
+ */
+function planeAspect(mesh: THREE.Mesh): number {
+  mesh.geometry.computeBoundingBox();
+  const size = mesh.geometry.boundingBox!.getSize(new THREE.Vector3());
+  const width = size.x > size.z ? size.x : size.z;
+  return width / Math.max(size.y, 1e-6);
 }
 
 /** L'objet est-il dans le champ de vision du joueur ? */
@@ -177,6 +196,13 @@ function placeBehindPlayer(w: InteractionWorld, camera: THREE.PerspectiveCamera)
 /** Télévision : neige qui grésille, puis passe en direct après quelques secondes. */
 const television: Factory = (g, w, system) => {
   const existingScreen = findTelevisionScreen(g.object);
+  if (!existingScreen) {
+    const meshNames: string[] = [];
+    g.object.traverse((child) => {
+      if (child instanceof THREE.Mesh) meshNames.push(child.name || "(sans nom)");
+    });
+    log("interact", { action: "tv-screen-not-found", meshNames });
+  }
   const face = existingScreen ? null : findModelFace(g.object, TV_FRONT);
   // Pas de décalage artificiel ("raise") : l'écran se pose exactement sur la face détectée du
   // boîtier, pour ne pas paraître flotter au-dessus du modèle 3D.
@@ -206,7 +232,7 @@ const television: Factory = (g, w, system) => {
     onSince = time;
     wentLive = false;
     if (screen) screen.visible = on;
-    w.audio.playAt(on ? "tvOn" : "tvOff", g.object.position, 0.7);
+    w.audio.playAt(on ? "tvOn" : "tvOff", g.object.position, 0.7, `${g.kind}:${on ? "on" : "off"}`);
     if (on) hum = w.audio.loop("tvStatic", g.object, 0.28);
     else {
       hum?.stop();
@@ -237,7 +263,7 @@ const television: Factory = (g, w, system) => {
     const security = system.securityCamera;
     const eye = w.cadreurEye();
     const id = security ? "security" : eye ? "cadreur" : "behind";
-    const view = w.views.use(id, 192, 144, 10, security ? 70 : 55, [...system.displays]);
+    const view = w.views.use(id, 192, 144, 10, security ? 70 : 55, security ? [...system.displays, security.object] : [...system.displays]);
     if (security) system.aimSecurityView(view.camera);
     else if (eye) {
       view.camera.position.copy(eye.position);
@@ -323,6 +349,7 @@ const chalkboard: Factory = (g, w) => {
       looked = looking ? looked + dt : 0;
       if (looked < delay) return;
       written = true;
+      w.audio.playAt("creak", g.object.position, 0.4, `${g.kind}:write`);
       const messages = tList("interact.chalk");
       const message = messages[Math.floor(objectRoll(g, 2) * messages.length)]!.replace("{take}", String(w.take()));
       const ctx = board.ctx;
@@ -366,7 +393,7 @@ const storageCart: Factory = (g, w) => {
       noiseTimer -= dt;
       if (speed < 0.25 || squeak > 0) return;
       squeak = 0.35;
-      w.audio.playAt("wheel", g.object.position, Math.min(0.9, speed));
+      w.audio.playAt("wheel", g.object.position, Math.min(0.9, speed), `${g.kind}:roll`);
       if (noiseTimer <= 0) {
         noiseTimer = 1.5;
         noiseAt(g, 0.3 * Math.min(1, speed));
@@ -386,7 +413,7 @@ const metalShelves: Factory = (g, w, system) => {
       const a = g.body.angvel();
       if (Math.hypot(v.x, v.y, v.z) < 0.3 && Math.hypot(a.x, a.y, a.z) < 0.5) return;
       cooldown = 1.2;
-      w.audio.playAt("rattle", g.object.position, 0.8);
+      w.audio.playAt("rattle", g.object.position, 0.8, `${g.kind}:shake`);
       noiseAt(g, 0.4);
     },
   };
@@ -400,7 +427,7 @@ const wetFloorSign: Factory = (g, w, system) => {
     use: () => {
       folded = !folded;
       for (const child of g.object.children) child.scale.z = folded ? 0.2 : 1;
-      w.audio.playAt("plasticClack", g.object.position, 0.5);
+      w.audio.playAt("plasticClack", g.object.position, 0.5, `${g.kind}:fold`);
     },
   };
   toggle.poke = toggle.use;
@@ -434,7 +461,7 @@ const metalStool: Factory = (g, w, system) => {
       g.body.applyTorqueImpulse({ x: 0, y: 1.2, z: 0 }, true);
       // "creak" (grincement métallique) plutôt que "squeak" (couic de jouet) : un tabouret qui
       // tourne ne devrait pas sonner comme un canard en caoutchouc.
-      w.audio.playAt("creak", g.object.position, 0.5);
+      w.audio.playAt("creak", g.object.position, 0.5, `${g.kind}:spin`);
       noiseAt(g, 0.2);
     },
   };
@@ -459,12 +486,12 @@ const alarmClock: Factory = (g, w) => {
     use: () => {
       if (state !== "idle") {
         stop();
-        w.audio.playAt("metalClick", g.object.position, 0.6);
+        w.audio.playAt("metalClick", g.object.position, 0.6, `${g.kind}:arm`);
         return;
       }
       state = "armed";
       timer = 5;
-      w.audio.playAt("metalClick", g.object.position, 0.6);
+      w.audio.playAt("metalClick", g.object.position, 0.6, `${g.kind}:arm`);
       loop = w.audio.loop("tick", g.object, 0.5);
     },
     update: (dt) => {
@@ -495,7 +522,7 @@ function impactNoise(sound: "gong" | "clank" | "thump" | "bang", minSpeed: numbe
     ...extra,
     impact: (speed) => {
       if (speed < minSpeed) return;
-      w.audio.playAt(sound, g.object.position, Math.min(1, 0.4 + speed * 0.12));
+      w.audio.playAt(sound, g.object.position, Math.min(1, 0.4 + speed * 0.12), `${g.kind}:impact`);
       noiseAt(g, loudness);
     },
   });
@@ -506,9 +533,12 @@ function breakable(minSpeed: number, loudness: number, sound: "shatter" | "potBr
   return (g, w) => ({
     impact: (speed) => {
       if (speed < minSpeed) return;
-      w.audio.playAt(sound, g.object.position, 0.9);
+      w.audio.playAt(sound, g.object.position, 0.9, `${g.kind}:impact`);
       noiseAt(g, loudness);
-      w.registry.remove(g);
+      // Jamais retiré du monde tant qu'il est en main : le choc "en main" (mur heurté en le
+      // tenant) ne doit faire que du bruit, sinon GrabSystem continue de piloter un corps
+      // physique déjà détruit la même frame — c'est ce qui gelait le jeu à la prise du vase.
+      if (!g.heldBy) w.registry.remove(g);
     },
   });
 }
@@ -531,7 +561,7 @@ function merge(...parts: Behaviour[]): Behaviour {
 }
 
 /** Petit geste sonore à la gâchette (ouvrir un étui, presser un jouet...). */
-function useSound(sound: "metalClick" | "rustle" | "squeak" | "whistle", loudness: number, volume = 0.7, cooldown = 0.3): Factory {
+function useSound(sound: "metalClick" | "rustle" | "squeak" | "whistle", loudness: number, volume = 0.7, cooldown = 0.3, actionId = "use"): Factory {
   return (g, w) => {
     let last = -Infinity;
     return {
@@ -539,7 +569,7 @@ function useSound(sound: "metalClick" | "rustle" | "squeak" | "whistle", loudnes
         const now = performance.now() / 1000;
         if (now - last < cooldown) return;
         last = now;
-        w.audio.playAt(sound, g.object.position, volume);
+        w.audio.playAt(sound, g.object.position, volume, `${g.kind}:${actionId}`);
         if (loudness > 0) noiseAt(g, loudness);
       },
     };
@@ -556,7 +586,7 @@ const can: Factory = (g, w, system) => {
       if (crushed) return;
       crushed = true;
       for (const child of g.object.children) child.scale.y = 0.55;
-      w.audio.playAt("crumple", g.object.position, 0.8);
+      w.audio.playAt("crumple", g.object.position, 0.8, `${g.kind}:crush`);
       noiseAt(g, 0.2);
     },
   };
@@ -573,7 +603,7 @@ function sprayCan(lubricant: boolean): Factory {
     let timer = 0;
     const spray = (hand: Hand): void => {
       const nozzleWorld = g.object.localToWorld(nozzleLocal.clone());
-      w.audio.playAt("spray", nozzleWorld, 0.6);
+      w.audio.playAt("spray", nozzleWorld, 0.6, `${g.kind}:spray`);
       noiseAt(g, 0.15);
       system.puff(nozzleWorld, hand.aimDirection);
       if (!lubricant) return;
@@ -599,52 +629,70 @@ function sprayCan(lubricant: boolean): Factory {
 }
 
 /** Photo : annotation au dos ; quand on ne la regarde pas, l'image change (l'endroit où l'on est). */
+/** Hauteur de référence (px) pour les textures générées sur les meshes nommés du cadre-photo. */
+const PHOTO_TEXTURE_HEIGHT = 192;
+
+/** Cadre-photo : le modèle nomme ses deux faces dynamiques ("picture_photo", "picture_note"). */
 const photo: Factory = (g, w) => {
-  const front = faceOf(g);
-  if (!front) return {};
-  const back = findModelFace(g.object, front.normal.clone().negate());
-  const frontCanvas = new FaceCanvas(g.object, front, 192, 192, { shrink: 0.82 });
-  drawFoundPhoto(frontCanvas.ctx, objectRoll(g, 7));
+  const photoMesh = g.object.getObjectByName("picture_photo");
+  if (!(photoMesh instanceof THREE.Mesh)) {
+    const meshNames: string[] = [];
+    g.object.traverse((child) => {
+      if (child instanceof THREE.Mesh) meshNames.push(child.name || "(sans nom)");
+    });
+    log("interact", { action: "photo-mesh-not-found", meshNames });
+    return {};
+  }
+  const photoHeight = PHOTO_TEXTURE_HEIGHT;
+  const photoWidth = Math.round(photoHeight * planeAspect(photoMesh));
+  const frontCanvas = new FaceCanvas(g.object, null, photoWidth, photoHeight, { existingMesh: photoMesh });
+  drawFoundPhoto(frontCanvas.ctx, photoWidth, photoHeight, objectRoll(g, 7));
   frontCanvas.commit();
   frontCanvas.visible = true;
-  const backCanvas = back ? new FaceCanvas(g.object, back, 192, 192, { shrink: 0.9 }) : null;
+
+  const noteMesh = g.object.getObjectByName("picture_note");
+  if (!(noteMesh instanceof THREE.Mesh)) log("interact", { action: "photo-note-not-found" });
+  const backCanvas =
+    noteMesh instanceof THREE.Mesh
+      ? new FaceCanvas(g.object, null, Math.round(PHOTO_TEXTURE_HEIGHT * planeAspect(noteMesh)), PHOTO_TEXTURE_HEIGHT, { existingMesh: noteMesh, transparent: true })
+      : null;
   if (backCanvas) {
     const texts = tList("interact.photoBacks");
     const ctx = backCanvas.ctx;
-    ctx.fillStyle = "#d8cfbd";
-    ctx.fillRect(0, 0, 192, 192);
-    ctx.strokeStyle = "rgba(120, 92, 55, 0.28)";
-    ctx.lineWidth = 2;
-    for (let y = 18; y < 192; y += 18) {
-      ctx.beginPath();
-      ctx.moveTo(10, y);
-      ctx.lineTo(182, y);
-      ctx.stroke();
-    }
-    ctx.strokeStyle = "rgba(160, 48, 42, 0.45)";
-    ctx.beginPath();
-    ctx.moveTo(30, 8);
-    ctx.lineTo(30, 184);
-    ctx.stroke();
-    ctx.fillStyle = "#1c2753";
+    const width = backCanvas.canvas.width;
+    const height = backCanvas.canvas.height;
+    // Texture uniquement le texte, en alpha : rien d'autre ne doit être dessiné ici (le fond,
+    // la reliure du modèle, doit rester visible autour de l'écriture).
+    ctx.clearRect(0, 0, width, height);
     ctx.font = `20px ${HANDWRITING_FONT}`;
+    ctx.textBaseline = "alphabetic";
     const words = (texts[Math.floor(objectRoll(g, 6) * texts.length)] ?? "").split(" ");
+    const maxWidth = width - 24;
+    const lines: string[] = [];
     let line = "";
-    let y = 40;
     for (const word of words) {
       const candidate = line ? `${line} ${word}` : word;
-      if (ctx.measureText(candidate).width > 165 && line) {
-        ctx.fillText(line, 14, y);
+      if (ctx.measureText(candidate).width > maxWidth && line) {
+        lines.push(line);
         line = word;
-        y += 28;
       } else line = candidate;
     }
-    ctx.fillText(line, 14, y);
-    ctx.fillStyle = "rgba(110, 64, 36, 0.7)";
-    ctx.font = "bold 9px monospace";
-    ctx.fillText("ARCHIVE / 04", 112, 178);
+    lines.push(line);
+    const lineHeight = 26;
+    const startY = (height - lines.length * lineHeight) / 2 + lineHeight * 0.7;
+    // Léger halo clair derrière l'encre sombre : le texte reste lisible quel que soit ce qu'il y a
+    // derrière, une fois la texture posée en alpha sur le mesh.
+    ctx.strokeStyle = "rgba(245, 240, 225, 0.85)";
+    ctx.lineWidth = 3;
+    ctx.fillStyle = "#1c2110";
+    lines.forEach((text, index) => {
+      const y = startY + index * lineHeight;
+      ctx.strokeText(text, 12, y);
+      ctx.fillText(text, 12, y);
+    });
     backCanvas.commit();
   }
+
   let unseen = 0;
   let cooldown = 0;
   return {
@@ -658,7 +706,8 @@ const photo: Factory = (g, w) => {
       cooldown = 25;
       unseen = 0;
       if (!shot) return;
-      frontCanvas.ctx.drawImage(shot, 0, 0, 192, 192);
+      w.audio.playAt("flick", g.object.position, 0.3, `${g.kind}:change`);
+      frontCanvas.ctx.drawImage(shot, 0, 0, photoWidth, photoHeight);
       frontCanvas.commit();
       frontCanvas.visible = true;
     },
@@ -669,35 +718,39 @@ const photo: Factory = (g, w) => {
   };
 };
 
-function drawFoundPhoto(ctx: CanvasRenderingContext2D, seed: number): void {
-  const sky = ctx.createLinearGradient(0, 0, 0, 192);
+function drawFoundPhoto(ctx: CanvasRenderingContext2D, width: number, height: number, seed: number): void {
+  const sky = ctx.createLinearGradient(0, 0, 0, height);
   sky.addColorStop(0, "#1b2630");
   sky.addColorStop(1, "#746d55");
   ctx.fillStyle = sky;
-  ctx.fillRect(0, 0, 192, 192);
+  ctx.fillRect(0, 0, width, height);
+  const horizon = height * 0.58;
   ctx.fillStyle = "#c5b65d";
-  ctx.fillRect(0, 112, 192, 80);
+  ctx.fillRect(0, horizon, width, height - horizon);
   ctx.strokeStyle = "rgba(40, 36, 24, 0.35)";
   ctx.lineWidth = 2;
-  for (let x = -32; x < 224; x += 32) {
+  const vanishX = width / 2;
+  for (let x = -width * 0.2; x < width * 1.2; x += width * 0.2) {
     ctx.beginPath();
-    ctx.moveTo(96, 110);
-    ctx.lineTo(x, 192);
+    ctx.moveTo(vanishX, horizon - 2);
+    ctx.lineTo(x, height);
     ctx.stroke();
   }
   ctx.fillStyle = "rgba(8, 10, 12, 0.78)";
-  const figureX = 72 + seed * 48;
+  const figureX = width * 0.32 + seed * width * 0.32;
+  const figureY = horizon * 0.62;
+  const headRadius = height * 0.068;
   ctx.beginPath();
-  ctx.arc(figureX, 78, 13, 0, Math.PI * 2);
+  ctx.arc(figureX, figureY, headRadius, 0, Math.PI * 2);
   ctx.fill();
-  ctx.fillRect(figureX - 12, 91, 24, 62);
+  ctx.fillRect(figureX - headRadius, figureY + headRadius, headRadius * 2, height * 0.32);
   ctx.fillStyle = "rgba(255, 242, 183, 0.65)";
-  ctx.fillRect(137, 42, 3, 54);
-  const vignette = ctx.createRadialGradient(96, 96, 42, 96, 96, 132);
+  ctx.fillRect(width * 0.71, height * 0.22, Math.max(2, width * 0.016), height * 0.28);
+  const vignette = ctx.createRadialGradient(width / 2, height / 2, height * 0.22, width / 2, height / 2, height * 0.69);
   vignette.addColorStop(0, "rgba(0, 0, 0, 0)");
   vignette.addColorStop(1, "rgba(0, 0, 0, 0.52)");
   ctx.fillStyle = vignette;
-  ctx.fillRect(0, 0, 192, 192);
+  ctx.fillRect(0, 0, width, height);
 }
 
 /**
@@ -725,7 +778,7 @@ function dial(size: number, rate: number, raise: number, draw: (ctx: CanvasRende
   };
 }
 
-const compass = dial(128, 0.1, -0.08, (ctx, g, w, face) => {
+const compass = dial(128, 0.1, 0, (ctx, g, w, face) => {
   const exit = w.exitPosition();
   // Direction de la sortie dans le repère de l'objet, projetée sur le plan du cadran.
   const worldDirection = tmp.set(exit.x - g.object.position.x, 0, exit.z - g.object.position.z).normalize();
@@ -751,7 +804,7 @@ const compass = dial(128, 0.1, -0.08, (ctx, g, w, face) => {
   ctx.restore();
 });
 
-const digitalWatch = dial(128, 1, 0.08, (ctx, _g, w) => {
+const digitalWatch = dial(128, 1, 0.08, (ctx, g, w) => {
   const total = Math.floor(w.runSeconds());
   ctx.fillStyle = "#9fb08a";
   ctx.fillRect(0, 28, 128, 72);
@@ -760,11 +813,15 @@ const digitalWatch = dial(128, 1, 0.08, (ctx, _g, w) => {
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
   ctx.fillText(`${String(Math.floor(total / 60)).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`, 64, 64);
+  w.audio.playAt("metalClick", g.object.position, 0.12, `${g.kind}:tick`);
 });
 
 /** Manette : vibre dans la vraie manette du joueur. */
-const gamepad: Factory = () => ({
-  use: (hand) => hand.pulse(1, 450),
+const gamepad: Factory = (g, w) => ({
+  use: (hand) => {
+    hand.pulse(1, 450);
+    w.audio.playAt("metalClick", g.object.position, 0.25, `${g.kind}:vibrate`);
+  },
 });
 
 /** Ampoule : s'allume près des néons du plafond (et bourdonne) ; se brise si on la lance. */
@@ -842,13 +899,13 @@ function wallMountable(sound: "suction" | "metalClick", volume = 0.7): Factory {
         w.drop(g);
         stuck = true;
         g.body.setBodyType(RAPIER.RigidBodyType.Fixed, true);
-        w.audio.playAt(sound, origin, volume);
+        w.audio.playAt(sound, origin, volume, `${g.kind}:mount`);
       },
       grab: () => {
         if (!stuck) return;
         stuck = false;
         g.body.setBodyType(RAPIER.RigidBodyType.Dynamic, true);
-        w.audio.playAt(sound, g.object.position, volume * 0.75);
+        w.audio.playAt(sound, g.object.position, volume * 0.75, `${g.kind}:unmount`);
       },
     };
   };
@@ -867,13 +924,13 @@ const plunger: Factory = (g, w) => {
       w.drop(g);
       stuck = true;
       g.body.setBodyType(RAPIER.RigidBodyType.Fixed, true);
-      w.audio.playAt("suction", origin, 0.8);
+      w.audio.playAt("suction", origin, 0.8, `${g.kind}:stick`);
     },
     grab: () => {
       if (!stuck) return;
       stuck = false;
       g.body.setBodyType(RAPIER.RigidBodyType.Dynamic, true);
-      w.audio.playAt("suction", g.object.position, 0.6);
+      w.audio.playAt("suction", g.object.position, 0.6, `${g.kind}:unstick`);
     },
   };
 };
@@ -886,7 +943,7 @@ const pocketWatch: Factory = (g, w) => {
   return {
     use: () => {
       open = !open;
-      w.audio.playAt("metalClick", g.object.position, 0.5);
+      w.audio.playAt("metalClick", g.object.position, 0.5, `${g.kind}:open`);
       if (open) loop = w.audio.loop("tick", g.object, 0.35);
       else {
         loop?.stop();
@@ -1033,20 +1090,22 @@ const BEHAVIOURS: Record<string, Factory> = {
   brassPot: (g, w, s) => ({
     ...impactNoise("gong", 2, 0.8)(g, w, s),
     use: () => {
-      w.audio.playAt("gong", g.object.position, 0.9);
+      w.audio.playAt("gong", g.object.position, 0.9, `${g.kind}:use`);
       noiseAt(g, 0.8);
     },
   }),
   can,
-  football: impactNoise("thump", 1.5, 0.4),
+  // Seuil abaissé (1.5 -> 0.9) : un rebond de ballon typique n'atteignait pas la vitesse minimale, restait muet.
+  football: impactNoise("thump", 0.9, 0.4),
   hammer: impactNoise("bang", 3, 0.9),
   vase: breakable(2.5, 0.8, "potBreak"),
   lightbulb,
-  toy: useSound("squeak", 0.5),
-  kettle: useSound("whistle", 0.8, 0.8, 3.2),
-  cigaretteCase: useSound("metalClick", 0.1),
-  cigarettePack: useSound("rustle", 0),
-  cleanerTin: useSound("metalClick", 0),
+  toy: useSound("squeak", 0.5, 0.7, 0.3, "squeeze"),
+  // Choc : mêmes sons que le pot en laiton (gong), la bouilloire est aussi un objet métallique creux.
+  kettle: (g, w, s) => merge(useSound("whistle", 0.8, 0.8, 3.2)(g, w, s), impactNoise("gong", 2, 0.7)(g, w, s)),
+  cigaretteCase: useSound("metalClick", 0.1, 0.7, 0.3, "open"),
+  cigarettePack: useSound("rustle", 0, 0.7, 0.3, "open"),
+  cleanerTin: useSound("metalClick", 0, 0.7, 0.3, "open"),
   pliers: useSound("metalClick", 0),
   cleaner: sprayCan(false),
   lubricant: sprayCan(true),
@@ -1068,6 +1127,8 @@ const BEHAVIOURS: Record<string, Factory> = {
   drainCleaner: impactNoise("thump", 1.4, 0.35),
   bleach: impactNoise("thump", 1.4, 0.35),
   woodenSpoon: impactNoise("thump", 1.2, 0.25),
+  // Choc dédié (metal_07, distinct des autres outils métalliques) : voir l'artefact "Atelier des objets".
+  toolbox: impactNoise("clank", 1.3, 0.3),
 };
 
 /**
@@ -1081,10 +1142,6 @@ export function prepareInteractionFaces(kind: string, template: THREE.Object3D):
   if (behaviour === television) findModelFace(template, TV_FRONT);
   else if (behaviour === chalkboard) findModelFace(template, undefined, FRONT_AXES);
   else if (behaviour === compass || behaviour === digitalWatch) findModelFace(template, undefined, UP_AXES);
-  else if (behaviour === photo) {
-    const front = findModelFace(template);
-    if (front) findModelFace(template, front.normal.clone().negate());
-  }
 }
 
 /**
@@ -1120,12 +1177,20 @@ export class InteractionSystem {
     this.world.views.release("security");
   }
 
-  /** Oriente la caméra d'une vue comme la caméra de surveillance posée. */
+  /**
+   * Oriente la caméra d'une vue comme la caméra de surveillance posée : positionnée devant son
+   * boîtier (pas en son centre), sans quoi son propre modèle apparaît dans l'image qu'elle filme.
+   */
   aimSecurityView(camera: THREE.PerspectiveCamera): void {
     const g = this.securityCamera;
     if (!g) return;
-    camera.position.copy(g.object.position);
-    camera.position.y += 0.05;
+    const box = tmpBox.setFromObject(g.object);
+    camera.position.set(
+      this.securityDirection.x >= 0 ? box.max.x : box.min.x,
+      this.securityDirection.y >= 0 ? box.max.y : box.min.y,
+      this.securityDirection.z >= 0 ? box.max.z : box.min.z,
+    );
+    camera.position.addScaledVector(this.securityDirection, SECURITY_LENS_CLEARANCE);
     camera.lookAt(tmp.copy(camera.position).add(this.securityDirection));
   }
 

@@ -47,12 +47,17 @@ const PROP_URLS: Record<PropKind, string> = {
   pottedPlant: pottedPlantUrl,
 };
 
+/** Nœuds qu'un comportement retrouve par leur nom après coup (voir `interactions.ts`). */
+const PRESERVE_NAMES: Partial<Record<PropKind, string[]>> = {
+  television: ["tv_screen"],
+};
+
 const templateCache = new Map<PropKind, Promise<THREE.Object3D>>();
 
 function loadTemplate(kind: PropKind): Promise<THREE.Object3D> {
   let cached = templateCache.get(kind);
   if (cached) return cached;
-  cached = loadTemplateModel(PROP_URLS[kind]);
+  cached = loadTemplateModel(PROP_URLS[kind], PRESERVE_NAMES[kind]);
   templateCache.set(kind, cached);
   return cached;
 }

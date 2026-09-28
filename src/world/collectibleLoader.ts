@@ -98,12 +98,20 @@ const SPECIAL_MODEL_URLS: Record<SpecialModelKind, string> = {
   cadreurHead: videoCameraUrl,
 };
 
+/** Nœuds qu'un comportement retrouve par leur nom après coup (voir `interactions.ts`). */
+const PRESERVE_NAMES: Partial<Record<CollectibleKind, string[]>> = {
+  photo: ["picture_photo", "picture_note"],
+};
+
 const templateCache = new Map<CollectibleKind | SpecialModelKind, Promise<THREE.Object3D>>();
 
 function loadTemplate(kind: CollectibleKind | SpecialModelKind): Promise<THREE.Object3D> {
   let cached = templateCache.get(kind);
   if (cached) return cached;
-  cached = loadTemplateModel(kind in SPECIAL_MODEL_URLS ? SPECIAL_MODEL_URLS[kind as SpecialModelKind] : COLLECTIBLE_URLS[kind as CollectibleKind]);
+  cached = loadTemplateModel(
+    kind in SPECIAL_MODEL_URLS ? SPECIAL_MODEL_URLS[kind as SpecialModelKind] : COLLECTIBLE_URLS[kind as CollectibleKind],
+    PRESERVE_NAMES[kind as CollectibleKind],
+  );
   templateCache.set(kind, cached);
   return cached;
 }

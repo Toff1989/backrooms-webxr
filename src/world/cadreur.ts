@@ -170,6 +170,12 @@ export class Cadreur {
     return this.stalking ? this.position : null;
   }
 
+  /** Position réelle de l'objectif (LED "REC", son œil), quand il est là — pas une approximation. */
+  get eyeWorld(): THREE.Vector3 | null {
+    if (!this.stalking || !this.rig) return null;
+    return this.rig.led.getWorldPosition(new THREE.Vector3());
+  }
+
   /**
    * Un bruit : absent, un bruit fort (ou proche de là où il rôde) le fait venir plus tôt ;
    * présent, il va voir d'où ça vient — sauf s'il tient déjà le joueur de près.

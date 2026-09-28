@@ -346,8 +346,8 @@ const interactions = new InteractionSystem({
   drop: (grabbable) => grabSystem.drop(grabbable),
   views: liveViews,
   cadreurEye: () => {
-    const position = cadreur.worldPosition;
-    return position ? { position: new THREE.Vector3(position.x, 1.8, position.z), target: player.headWorld } : null;
+    const position = cadreur.eyeWorld;
+    return position ? { position, target: player.headWorld } : null;
   },
 });
 

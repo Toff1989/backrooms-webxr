@@ -1,18 +1,36 @@
 import * as THREE from "three";
 import dishes02Url from "../assets/audio/cc0/dishes_02.ogg?url";
+import doorClose03Url from "../assets/audio/cc0/door_close_03.ogg?url";
+import doorClose04Url from "../assets/audio/cc0/door_close_04.ogg?url";
 import door02Url from "../assets/audio/cc0/door_02.ogg?url";
+import glass02Url from "../assets/audio/cc0/glass_02.ogg?url";
 import glass03Url from "../assets/audio/cc0/glass_03.ogg?url";
+import gong01Url from "../assets/audio/cc0/gong_01.ogg?url";
 import gong02Url from "../assets/audio/cc0/gong_02.ogg?url";
+import hit01Url from "../assets/audio/cc0/hit_01.ogg?url";
+import hit02Url from "../assets/audio/cc0/hit_02.ogg?url";
 import hit03Url from "../assets/audio/cc0/hit_03.ogg?url";
+import metal01Url from "../assets/audio/cc0/metal_01.ogg?url";
 import metal02Url from "../assets/audio/cc0/metal_02.ogg?url";
+import metal03Url from "../assets/audio/cc0/metal_03.ogg?url";
+import metal07Url from "../assets/audio/cc0/metal_07.ogg?url";
 import metal09Url from "../assets/audio/cc0/metal_09.ogg?url";
 import microwaveCloseUrl from "../assets/audio/cc0/microwave_door_close.ogg?url";
 import microwaveOpenUrl from "../assets/audio/cc0/microwave_door_open.ogg?url";
 import noise01Url from "../assets/audio/cc0/noise_01.ogg?url";
+import paper02Url from "../assets/audio/cc0/paper_02.ogg?url";
+import plop01Url from "../assets/audio/cc0/plop_01.ogg?url";
+import plop02Url from "../assets/audio/cc0/plop_02.ogg?url";
+import shot02Url from "../assets/audio/cc0/shot_02.ogg?url";
 import slam05Url from "../assets/audio/cc0/slam_05.ogg?url";
+import splash02Url from "../assets/audio/cc0/splash_02.ogg?url";
 import spring03Url from "../assets/audio/cc0/spring_03.ogg?url";
 import switch01Url from "../assets/audio/cc0/switch_01.ogg?url";
+import switch02Url from "../assets/audio/cc0/switch_02.ogg?url";
 import tools04Url from "../assets/audio/cc0/tools_04.ogg?url";
+import weird04Url from "../assets/audio/cc0/weird_04.ogg?url";
+import weird05Url from "../assets/audio/cc0/weird_05.ogg?url";
+import woodedBoxOpenUrl from "../assets/audio/cc0/wooded_box_open.ogg?url";
 import wooden01Url from "../assets/audio/cc0/wooden_01.ogg?url";
 import { createObjectSound, LOOPING_SOUNDS, type ObjectSoundName } from "../assets/audio/objectSounds";
 import { queueWarmup } from "../assets/audio/synth";
@@ -41,6 +59,67 @@ const EXTERNAL_SOUNDS: Partial<Record<ObjectSoundName, string>> = {
   wheel: wooden01Url,
 };
 
+/**
+ * Sons propres à un objet précis (`"kind:action"`, voir l'artefact "Atelier des objets") : pris
+ * en priorité sur `EXTERNAL_SOUNDS`, qui reste le son partagé par défaut pour tout le reste.
+ */
+const OVERRIDE_SOUNDS: Record<string, string> = {
+  "alarmClock:arm": switch02Url,
+  "armChair:impact": wooden01Url,
+  "bleach:impact": splash02Url,
+  "bookshelf:impact": hit03Url,
+  "brassPot:impact": gong02Url,
+  "brassPot:use": gong01Url,
+  "cabinet:impact": metal01Url,
+  "can:crush": slam05Url,
+  "can:impact": metal02Url,
+  "cardboardBox:impact": paper02Url,
+  "chair:impact": wooden01Url,
+  "chalkboard:write": weird04Url,
+  "cigaretteCase:open": switch02Url,
+  "cigarettePack:open": noise01Url,
+  "cleanerTin:open": noise01Url,
+  "coffeeTable:impact": doorClose04Url,
+  "combWrench:impact": metal02Url,
+  "digitalWatch:tick": switch01Url,
+  "drainCleaner:impact": hit02Url,
+  "dustpan:impact": metal02Url,
+  "gamepad:vibrate": weird05Url,
+  "hammer:impact": hit03Url,
+  "lightbulb:impact": glass03Url,
+  "lighter:flick": switch01Url,
+  "metalShelves:impact": metal09Url,
+  "metalShelves:shake": metal01Url,
+  "metalStool:impact": metal03Url,
+  "metalStool:spin": metal02Url,
+  "monoblocChair:impact": woodedBoxOpenUrl,
+  "officeDesk:impact": metal01Url,
+  "photo:change": weird04Url,
+  "plasticCrate:impact": hit01Url,
+  "pliers:use": hit02Url,
+  "plunger:stick": plop01Url,
+  "plunger:unstick": plop02Url,
+  "pottedPlant:impact": glass02Url,
+  "schoolDesk:impact": wooden01Url,
+  "screwdriver:impact": hit02Url,
+  "screwdriverFlat:impact": hit02Url,
+  "sofa:impact": doorClose03Url,
+  "storageCart:roll": woodedBoxOpenUrl,
+  "television:off": microwaveCloseUrl,
+  "television:on": microwaveOpenUrl,
+  "toolbox:impact": metal07Url,
+  "toy:impact": spring03Url,
+  "toy:squeeze": spring03Url,
+  "vase:impact": dishes02Url,
+  "wallClock:mount": slam05Url,
+  "wallClock:unmount": shot02Url,
+  "watch:open": switch01Url,
+  "wetFloorSign:fold": tools04Url,
+  "wetFloorSign:impact": hit01Url,
+  "woodenSpoon:impact": hit02Url,
+  "wrench:impact": metal02Url,
+};
+
 export interface LoopHandle {
   setVolume(volume: number): void;
   stop(): void;
@@ -59,6 +138,7 @@ interface LoopVoice {
 export class ObjectAudio {
   private readonly buffers = new Map<ObjectSoundName, AudioBuffer>();
   private readonly externalBuffers = new Map<ObjectSoundName, AudioBuffer>();
+  private readonly overrideBuffers = new Map<string, AudioBuffer>();
   private readonly oneShots: THREE.PositionalAudio[] = [];
   private readonly loops: LoopVoice[] = [];
   private next = 0;
@@ -89,16 +169,19 @@ export class ObjectAudio {
     for (const name of names) queueWarmup(() => this.buffer(name));
     for (const name of names) {
       const url = EXTERNAL_SOUNDS[name];
-      if (url) void this.loadExternal(name, url);
+      if (url) void this.loadExternal(url, (buffer) => this.externalBuffers.set(name, buffer));
+    }
+    for (const [key, url] of Object.entries(OVERRIDE_SOUNDS)) {
+      void this.loadExternal(url, (buffer) => this.overrideBuffers.set(key, buffer));
     }
   }
 
-  private async loadExternal(name: ObjectSoundName, url: string): Promise<void> {
+  private async loadExternal(url: string, store: (buffer: AudioBuffer) => void): Promise<void> {
     try {
       const response = await fetch(url);
       if (!response.ok) return;
       const data = await response.arrayBuffer();
-      this.externalBuffers.set(name, await this.listener.context.decodeAudioData(data));
+      store(await this.listener.context.decodeAudioData(data));
     } catch {
       // Keep the procedural buffer as a reliable fallback.
     }
@@ -117,14 +200,17 @@ export class ObjectAudio {
     return this.listener.context.state === "running";
   }
 
-  /** Son ponctuel à une position du monde. */
-  playAt(name: ObjectSoundName, position: THREE.Vector3, volume = 0.8): void {
+  /**
+   * Son ponctuel à une position du monde. `overrideKey` (`"kind:action"`) prend le pas sur `name`
+   * quand un son propre à cet objet précis a été choisi (voir `OVERRIDE_SOUNDS`).
+   */
+  playAt(name: ObjectSoundName, position: THREE.Vector3, volume = 0.8, overrideKey?: string): void {
     if (!this.running) return;
     const voice = this.oneShots[this.next]!;
     this.next = (this.next + 1) % this.oneShots.length;
     if (voice.isPlaying) voice.stop();
     voice.position.copy(position);
-    voice.setBuffer(this.externalBuffers.get(name) ?? this.buffer(name));
+    voice.setBuffer((overrideKey ? this.overrideBuffers.get(overrideKey) : undefined) ?? this.externalBuffers.get(name) ?? this.buffer(name));
     voice.setLoop(false);
     voice.setVolume(volume);
     voice.play();
@@ -134,14 +220,14 @@ export class ObjectAudio {
    * Son en boucle accroché à `owner` (il le suit). Null si toutes les voix de boucle sont
    * prises : le son est alors simplement muet, jamais une erreur.
    */
-  loop(name: ObjectSoundName, owner: THREE.Object3D, volume = 0.6): LoopHandle | null {
+  loop(name: ObjectSoundName, owner: THREE.Object3D, volume = 0.6, overrideKey?: string): LoopHandle | null {
     if (!this.running || !LOOPING_SOUNDS.has(name) && name !== "alarm") return null;
     const voice = this.loops.find((candidate) => candidate.owner === null);
     if (!voice) return null;
     voice.owner = owner;
     owner.add(voice.audio);
     voice.audio.position.set(0, 0, 0);
-    voice.audio.setBuffer(this.buffer(name));
+    voice.audio.setBuffer((overrideKey ? this.overrideBuffers.get(overrideKey) : undefined) ?? this.buffer(name));
     voice.audio.setVolume(volume);
     voice.audio.play();
     return {
