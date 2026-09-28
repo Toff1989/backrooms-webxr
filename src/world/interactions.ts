@@ -621,6 +621,32 @@ function sprayCan(lubricant: boolean): Factory {
   };
 }
 
+/**
+ * Ratio largeur/hauteur d'une sous-maille plate (écran, artwork, dos de cadre...) : évite de
+ * plaquer un canvas carré sur une ouverture rectangulaire (l'image ressort étirée, cases pas
+ * carrées). Le plus fin des trois axes locaux est l'épaisseur de la plaque ; parmi les deux
+ * autres, Y est la hauteur (convention "haut" du modèle), l'axe restant est la largeur.
+ */
+export function meshPlateAspect(mesh: THREE.Mesh): number {
+  mesh.geometry.computeBoundingBox();
+  const size = mesh.geometry.boundingBox!.getSize(new THREE.Vector3());
+  const dims: Array<[string, number]> = [
+    ["x", size.x],
+    ["y", size.y],
+    ["z", size.z],
+  ];
+  dims.sort((a, b) => a[1] - b[1]);
+  const [, second, third] = dims as [[string, number], [string, number], [string, number]];
+  const height = second[0] === "y" ? second[1] : third[1];
+  const width = second[0] === "y" ? third[1] : second[1];
+  return width / height;
+}
+
+/** Dimensions d'un canvas ajustées à un ratio réel plutôt que de rester carrées par défaut. */
+export function canvasSizeForAspect(aspect: number, maxDim = 192): [number, number] {
+  return aspect >= 1 ? [maxDim, Math.round(maxDim / aspect)] : [Math.round(maxDim * aspect), maxDim];
+}
+
 /** Photo : annotation au dos ; quand on ne la regarde pas, l'image change (l'endroit où l'on est). */
 const photo: Factory = (g, w) => {
   const front = faceOf(g);
@@ -630,8 +656,9 @@ const photo: Factory = (g, w) => {
   // lieu de coller un plan neuf à la taille de la plus grande face détectée (la façade du cadre,
   // plus grande que l'ouverture — ça débordait par-dessus le cadre et masquait le verre).
   const artwork = findMeshByName(g.object, /artwork/i);
-  const frontCanvas = artwork ? new FaceCanvas(g.object, null, 192, 192, { existingMesh: artwork }) : new FaceCanvas(g.object, front, 192, 192, { shrink: 0.82 });
-  drawFoundPhoto(frontCanvas.ctx, objectRoll(g, 7));
+  const [fw, fh] = canvasSizeForAspect(artwork ? meshPlateAspect(artwork) : front.width / front.height);
+  const frontCanvas = artwork ? new FaceCanvas(g.object, null, fw, fh, { existingMesh: artwork }) : new FaceCanvas(g.object, front, fw, fh, { shrink: 0.82 });
+  drawFoundPhoto(frontCanvas.ctx, objectRoll(g, 7), fw, fh);
   frontCanvas.commit();
   frontCanvas.visible = true;
   // Idem pour le dos : sur les modèles avec une sous-maille "back" dédiée, l'écriture remplace
@@ -639,10 +666,17 @@ const photo: Factory = (g, w) => {
   // aucun angle) au lieu d'un plan neuf collé devant (fallback, modèles sans sous-maille dédiée).
   // Transparent dans les deux cas : pas de fond peint, seule l'encre est dessinée.
   const backMesh = findMeshByName(g.object, /back/i);
-  const backCanvas = backMesh ? new FaceCanvas(g.object, null, 192, 192, { existingMesh: backMesh, transparent: true }) : back ? new FaceCanvas(g.object, back, 192, 192, { shrink: 0.9, transparent: true }) : null;
+  const backAspect = backMesh ? meshPlateAspect(backMesh) : back ? back.width / back.height : 1;
+  const [bw, bh] = canvasSizeForAspect(backAspect);
+  const backCanvas = backMesh ? new FaceCanvas(g.object, null, bw, bh, { existingMesh: backMesh, transparent: true }) : back ? new FaceCanvas(g.object, back, bw, bh, { shrink: 0.9, transparent: true }) : null;
   if (backCanvas) {
     const texts = tList("interact.photoBacks");
     const ctx = backCanvas.ctx;
+    // Le tracé ci-dessous est composé sur un cadre virtuel 192×192 (mise en page d'origine),
+    // puis mis à l'échelle non uniforme vers les dimensions réelles du dos — plus simple et
+    // plus sûr que de recalculer chaque coordonnée pour un ratio arbitraire.
+    ctx.save();
+    ctx.scale(bw / 192, bh / 192);
     ctx.strokeStyle = "rgba(120, 92, 55, 0.28)";
     ctx.lineWidth = 2;
     for (let y = 18; y < 192; y += 18) {
@@ -673,6 +707,7 @@ const photo: Factory = (g, w) => {
     ctx.fillStyle = "rgba(110, 64, 36, 0.7)";
     ctx.font = "bold 9px monospace";
     ctx.fillText("ARCHIVE / 04", 112, 178);
+    ctx.restore();
     backCanvas.commit();
   }
   let unseen = 0;
@@ -688,7 +723,7 @@ const photo: Factory = (g, w) => {
       cooldown = 25;
       unseen = 0;
       if (!shot) return;
-      frontCanvas.ctx.drawImage(shot, 0, 0, 192, 192);
+      frontCanvas.ctx.drawImage(shot, 0, 0, fw, fh);
       frontCanvas.commit();
       frontCanvas.visible = true;
     },
@@ -699,7 +734,11 @@ const photo: Factory = (g, w) => {
   };
 };
 
-function drawFoundPhoto(ctx: CanvasRenderingContext2D, seed: number): void {
+/** Composé sur un cadre virtuel 192×192, puis mis à l'échelle non uniforme vers `width`×`height`
+ * (le ratio réel de la surface visée) — voir le commentaire équivalent dans `photo`. */
+function drawFoundPhoto(ctx: CanvasRenderingContext2D, seed: number, width: number, height: number): void {
+  ctx.save();
+  ctx.scale(width / 192, height / 192);
   const sky = ctx.createLinearGradient(0, 0, 0, 192);
   sky.addColorStop(0, "#1b2630");
   sky.addColorStop(1, "#746d55");
@@ -728,6 +767,7 @@ function drawFoundPhoto(ctx: CanvasRenderingContext2D, seed: number): void {
   vignette.addColorStop(1, "rgba(0, 0, 0, 0.52)");
   ctx.fillStyle = vignette;
   ctx.fillRect(0, 0, 192, 192);
+  ctx.restore();
 }
 
 /**

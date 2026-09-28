@@ -1,6 +1,7 @@
 #!/usr/bin/env node
-// Rendu visuel (WebGL logiciel / SwiftShader) de tests/browser/photo-render.html :
-// capture le canvas avant/après avoir posé la photo, sauvegarde deux PNG.
+// Rendu visuel (WebGL logiciel / SwiftShader) de tests/browser/photo-render.html : capture le
+// canvas à chaque étape. Chaque étape bloque côté page (window.__next__()) jusqu'à ce qu'on l'ait
+// explicitement fait avancer, pour ne jamais capturer une étape en retard ou en avance.
 import { spawn } from "node:child_process";
 import { createRequire } from "node:module";
 import fs from "node:fs";
@@ -27,6 +28,16 @@ async function screenshotCanvas(page, filePath) {
   fs.writeFileSync(filePath, Buffer.from(dataUrl.split(",")[1], "base64"));
 }
 
+async function captureStage(page, stage, filePath, label) {
+  await page.waitForFunction((s) => (window).__STAGE__ === s, stage, { timeout: 30000 });
+  await screenshotCanvas(page, filePath);
+  console.log(`Capture "${label}" -> ${filePath}`);
+}
+
+async function advance(page) {
+  await page.evaluate(() => (window).__next__());
+}
+
 let exitCode = 1;
 try {
   const browser = await chromium.launch();
@@ -47,21 +58,13 @@ try {
     }
   }
 
-  await page.waitForFunction(() => (window).__OFF_READY__ === true, { timeout: 30000 });
-  await screenshotCanvas(page, path.join(outDir, "photo-off.png"));
-  console.log(`Capture "vierge" -> ${path.join(outDir, "photo-off.png")}`);
-
-  await page.waitForFunction(() => (window).__ON_READY__ === true, { timeout: 30000 });
-  await screenshotCanvas(page, path.join(outDir, "photo-on.png"));
-  console.log(`Capture "photo posée" -> ${path.join(outDir, "photo-on.png")}`);
-
-  await page.waitForFunction(() => (window).__BACK_READY__ === true, { timeout: 30000 });
-  await screenshotCanvas(page, path.join(outDir, "photo-back.png"));
-  console.log(`Capture "dos annoté" -> ${path.join(outDir, "photo-back.png")}`);
-
-  await page.waitForFunction(() => (window).__BACK_ANGLE_READY__ === true, { timeout: 30000 });
-  await screenshotCanvas(page, path.join(outDir, "photo-back-angle.png"));
-  console.log(`Capture "dos, vue de 3/4" -> ${path.join(outDir, "photo-back-angle.png")}`);
+  await captureStage(page, "OFF", path.join(outDir, "photo-off.png"), "vierge");
+  await advance(page);
+  await captureStage(page, "ON", path.join(outDir, "photo-on.png"), "photo posée");
+  await advance(page);
+  await captureStage(page, "BACK", path.join(outDir, "photo-back.png"), "dos annoté");
+  await advance(page);
+  await captureStage(page, "BACK_ANGLE", path.join(outDir, "photo-back-angle.png"), "dos, vue de 3/4");
 
   const text = await page.locator("#results").textContent();
   console.log("\n--- journal ---\n" + text);
