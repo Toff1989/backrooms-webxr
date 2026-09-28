@@ -13,3 +13,6 @@ server/logs
 
 # Hébergement Node.js natif Plesk (Phusion Passenger, voir docs/DEPLOIEMENT-PLESK.md).
 tmp
+
+# Captures des tests navigateur (scripts/test-television-render.mjs et consorts).
+tests/browser/out

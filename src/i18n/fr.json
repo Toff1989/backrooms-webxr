@@ -145,15 +145,6 @@
   "blue.cut": "COUPEZ !",
   "blue.take": "PRISE {n}",
   "fiche.full": "INTÉGRAL",
-  "interact.chalk": [
-    "On te voit",
-    "Prise {take}",
-    "Ne te retourne pas",
-    "Toujours là",
-    "Regarde devant toi",
-    "Ça continue",
-    "Il filme encore"
-  ],
   "interact.photoBacks": [
     "Personne ne se souvient avoir pris cette photo.",
     "Le couloir semblait différent, avant.",

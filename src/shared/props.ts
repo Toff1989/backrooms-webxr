@@ -16,7 +16,6 @@ export type PropKind =
   | "metalShelves"
   | "bookshelf"
   | "storageCart"
-  | "chalkboard"
   | "cardboardBox"
   | "plasticCrate"
   | "wetFloorSign"
@@ -42,7 +41,6 @@ export const PROP_HALF_EXTENTS: Record<PropKind, { x: number; z: number }> = {
   metalShelves: { x: 0.475, z: 0.22 },
   bookshelf: { x: 0.69, z: 0.29 },
   storageCart: { x: 0.8, z: 0.55 },
-  chalkboard: { x: 0.46, z: 0.38 },
   cardboardBox: { x: 0.19, z: 0.26 },
   plasticCrate: { x: 0.24, z: 0.13 },
   wetFloorSign: { x: 0.15, z: 0.18 },
@@ -122,9 +120,9 @@ function storage(r: Roll): PropSlot[] {
   return slots;
 }
 
-/** Salle de classe : pupitres en rangées face au tableau, chaises derrière, une ou deux de travers. */
+/** Salle de classe : pupitres en rangées, chaises derrière, une ou deux de travers. */
 function classroom(r: Roll): PropSlot[] {
-  const slots: PropSlot[] = [{ kind: "chalkboard", dx: (r(2) - 0.5) * 0.4, dz: -0.85, rotationY: (r(3) - 0.5) * 0.3 }];
+  const slots: PropSlot[] = [];
   for (let column = 0; column < 2; column++) {
     if (r(10 + column) < 0.12) continue;
     const dx = (column - 0.5) * 1.0;

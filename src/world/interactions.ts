@@ -6,7 +6,7 @@ import type { LiveViews } from "../player/liveViews";
 import type { Hand } from "../player/hand";
 import { stringSeedToInt } from "../shared/rng";
 import type { Grabbable, GrabbableRegistry } from "./grabbable";
-import { HANDWRITING_FONT, wrapLines } from "./loreArt";
+import { HANDWRITING_FONT } from "./loreArt";
 import { createFacePlane, findModelFace, type ModelFace } from "./modelFace";
 import { emitNoise } from "./noise";
 import type { LoopHandle, ObjectAudio } from "./objectAudio";
@@ -57,10 +57,6 @@ const IMPACT_MIN_SPEED = 1.2;
 
 const tmp = new THREE.Vector3();
 const tmp2 = new THREE.Vector3();
-const tmp3 = new THREE.Vector3();
-const tmpBox = new THREE.Box3();
-/** Marge (m) au-delà du boîtier de la caméra de surveillance, pour ne jamais l'avoir dans le champ. */
-const SECURITY_LENS_CLEARANCE = 0.04;
 
 /** Tirage déterministe [0..1) propre à un objet (identifiant de collection, sinon position de départ). */
 function objectRoll(g: Grabbable, salt: number): number {
@@ -84,7 +80,7 @@ function topLocalPoint(object: THREE.Object3D): THREE.Vector3 {
 }
 
 /** Écran / surface dessinée sur un canvas, posé sur une face du modèle (lumineux ou non). */
-class FaceCanvas {
+export class FaceCanvas {
   readonly canvas = document.createElement("canvas");
   readonly ctx: CanvasRenderingContext2D;
   readonly texture: THREE.CanvasTexture;
@@ -99,9 +95,36 @@ class FaceCanvas {
     this.ctx = this.canvas.getContext("2d")!;
     this.texture = new THREE.CanvasTexture(this.canvas);
     this.texture.colorSpace = THREE.SRGBColorSpace;
-    const material = options.glow
-      ? new THREE.MeshBasicMaterial({ map: this.texture, toneMapped: false, transparent: options.transparent ?? false })
-      : new THREE.MeshStandardMaterial({ map: this.texture, roughness: 0.9, transparent: options.transparent ?? false, emissiveMap: this.texture, emissive: 0xffffff, emissiveIntensity: 0.12 });
+    // Sur une vraie sous-maille écran, on garde son matériau (normal map, rugosité, reflets) et on
+    // ne remplace que la texture diffuse : un écran de télé reste vitreux/réfléchissant même en
+    // affichant l'image, contrairement à un plan neuf entièrement réémissif (cas du fallback).
+    const existingBase = options.existingMesh && !Array.isArray(options.existingMesh.material) && options.existingMesh.material instanceof THREE.MeshStandardMaterial ? options.existingMesh.material : null;
+    let material: THREE.Material;
+    if (existingBase) {
+      const clone = existingBase.clone();
+      clone.map = this.texture;
+      clone.color.set(0xffffff);
+      if (options.transparent !== undefined) {
+        clone.transparent = options.transparent;
+        // Une sous-maille "glass" (vitre en alpha blend) arrive avec son opacité et son depthWrite
+        // déjà capés par `capBlendGlassOpacity` (gltfLoader.ts) pour paraître translucide — sans
+        // ça, un écran posé dessus en mode opaque resterait délavé/mal trié.
+        if (!options.transparent) {
+          clone.depthWrite = true;
+          clone.opacity = 1;
+        }
+      }
+      if (options.glow) {
+        clone.emissiveMap = this.texture;
+        clone.emissive = new THREE.Color(0xffffff);
+        clone.emissiveIntensity = 1;
+      }
+      material = clone;
+    } else {
+      material = options.glow
+        ? new THREE.MeshBasicMaterial({ map: this.texture, toneMapped: false, transparent: options.transparent ?? false })
+        : new THREE.MeshStandardMaterial({ map: this.texture, roughness: 0.9, transparent: options.transparent ?? false, emissiveMap: this.texture, emissive: 0xffffff, emissiveIntensity: 0.12 });
+    }
     material.polygonOffset = true;
     material.polygonOffsetFactor = -2;
     this.material = material;
@@ -138,35 +161,23 @@ class FaceCanvas {
 function faceOf(g: Grabbable, axes?: THREE.Vector3[]): ModelFace | null {
   return axes ? findModelFace(g.object, undefined, axes) : findModelFace(g.object);
 }
-const FRONT_AXES = [new THREE.Vector3(0, 0, 1), new THREE.Vector3(0, 0, -1)];
 const TV_FRONT = new THREE.Vector3(0, 0, 1);
 const UP_AXES = [new THREE.Vector3(0, 1, 0)];
 
-function findTelevisionScreen(root: THREE.Object3D): THREE.Mesh | null {
-  // Le modèle nomme l'écran explicitement ("tv_screen", noeud distinct du boîtier) : on le
-  // cherche d'abord par son nom exact, avant le repli heuristique (variantes du modèle CC0).
-  const named = root.getObjectByName("tv_screen");
-  if (named instanceof THREE.Mesh) return named;
+/** Sous-maille d'un modèle CC0 dont le nom (ou celui de son matériau) matche `pattern`. */
+export function findMeshByName(root: THREE.Object3D, pattern: RegExp): THREE.Mesh | null {
   let result: THREE.Mesh | null = null;
   root.traverse((child) => {
     if (result || !(child instanceof THREE.Mesh)) return;
     const materials = Array.isArray(child.material) ? child.material : [child.material];
     const names = [child.name, ...materials.map((material) => material.name)].join(" ");
-    if (/television[_ -]?02|screen|display/i.test(names)) result = child;
+    if (pattern.test(names)) result = child;
   });
   return result;
 }
 
-/**
- * Ratio largeur/hauteur d'un mesh plat (photo, cadran...) d'après sa boîte englobante locale :
- * l'axe le plus fin est la profondeur, l'axe Y la hauteur, l'autre la largeur. Sert à générer une
- * texture aux bonnes proportions plutôt qu'une image carrée qui déborde ou laisse un vide.
- */
-function planeAspect(mesh: THREE.Mesh): number {
-  mesh.geometry.computeBoundingBox();
-  const size = mesh.geometry.boundingBox!.getSize(new THREE.Vector3());
-  const width = size.x > size.z ? size.x : size.z;
-  return width / Math.max(size.y, 1e-6);
+export function findTelevisionScreen(root: THREE.Object3D): THREE.Mesh | null {
+  return findMeshByName(root, /screen|display/i);
 }
 
 /** L'objet est-il dans le champ de vision du joueur ? */
@@ -328,53 +339,6 @@ const television: Factory = (g, w, system) => {
 };
 
 /** Écran de projection : quand on s'approche, le projecteur (invisible) démarre — amorce, compte à rebours. */
-/** Tableau noir : un message apparaît après un court regard posé sur sa surface. */
-const chalkboard: Factory = (g, w) => {
-  const face = faceOf(g, FRONT_AXES);
-  // shrink réduit (marge sur le cadre du tableau) ; raise recentre le message sur la surface
-  // écrite (le bas du tableau, souvent occupé par un porte-craie, tirait le texte vers le bas).
-  const board = face ? new FaceCanvas(g.object, face, 256, 192, { shrink: 0.68, transparent: true, glow: true, raise: 0.1 }) : null;
-  let written = false;
-  let looked = 0;
-  const delay = 0.25 + objectRoll(g, 1) * 0.25;
-  return {
-    update: (dt, near) => {
-      if (written || !board || !near) return;
-      const center = g.object.localToWorld(face!.center.clone());
-      const normal = face!.normal.clone().transformDirection(g.object.matrixWorld).normalize();
-      const toPlayer = tmp.subVectors(w.head(), center).normalize();
-      w.camera.getWorldDirection(tmp2);
-      const toBoard = tmp3.subVectors(center, w.head()).normalize();
-      const looking = center.distanceTo(w.head()) < 9 && normal.dot(toPlayer) > 0.25 && tmp2.dot(toBoard) > 0.78;
-      looked = looking ? looked + dt : 0;
-      if (looked < delay) return;
-      written = true;
-      w.audio.playAt("creak", g.object.position, 0.4, `${g.kind}:write`);
-      const messages = tList("interact.chalk");
-      const message = messages[Math.floor(objectRoll(g, 2) * messages.length)]!.replace("{take}", String(w.take()));
-      const ctx = board.ctx;
-      ctx.clearRect(0, 0, 256, 192);
-      // Craie bien contrastée (blanc quasi pur + léger halo) : lisible même de loin, à travers la corruption.
-      ctx.font = "bold 46px " + HANDWRITING_FONT;
-      ctx.textAlign = "center";
-      ctx.textBaseline = "middle";
-      ctx.shadowColor = "rgba(0, 0, 0, 0.55)";
-      ctx.shadowBlur = 6;
-      const lines = wrapLines(ctx, message, 232);
-      const lineHeight = 50;
-      ctx.fillStyle = "rgba(250, 250, 245, 0.97)";
-      lines.forEach((line, index) => {
-        ctx.save();
-        ctx.translate(128, 96 + (index - (lines.length - 1) / 2) * lineHeight);
-        ctx.rotate(-0.05);
-        ctx.fillText(line, 0, 0);
-        ctx.restore();
-      });
-      board.commit();
-    },
-    dispose: () => board?.dispose(),
-  };
-};
 
 /** Chariot : ses roulettes grincent quand on le pousse (plus maintenant, s'il a été graissé). */
 const storageCart: Factory = (g, w) => {
@@ -628,42 +592,180 @@ function sprayCan(lubricant: boolean): Factory {
   };
 }
 
+/**
+ * Repère 2D du plan d'une sous-maille plate, à partir de sa normale moyenne (pas de ses axes
+ * X/Y/Z locaux bruts) : reste correct même si la plaque est légèrement inclinée (un tableau
+ * d'écolier posé sur un chevalet, par exemple), là où choisir "l'axe le plus fin de la bounding
+ * box" comme épaisseur se trompe complètement dès que le panneau n'est pas aligné aux axes du
+ * monde. Même convention up/right que `modelFace.ts` (`faceFor`).
+ */
+function platePlaneBasis(mesh: THREE.Mesh): { center: THREE.Vector3; right: THREE.Vector3; up: THREE.Vector3 } {
+  const geometry = mesh.geometry;
+  const normalAttr = geometry.attributes["normal"] as THREE.BufferAttribute | undefined;
+  const normal = new THREE.Vector3();
+  const n = new THREE.Vector3();
+  if (normalAttr) {
+    for (let i = 0; i < normalAttr.count; i++) normal.add(n.fromBufferAttribute(normalAttr, i));
+  }
+  if (normal.lengthSq() < 1e-8) normal.set(0, 0, 1); // repli si pas de normales exploitables
+  normal.normalize();
+  const reference = Math.abs(normal.y) > 0.8 ? new THREE.Vector3(0, 0, -1) : new THREE.Vector3(0, 1, 0);
+  const up = reference.clone().sub(normal.clone().multiplyScalar(reference.dot(normal))).normalize();
+  const right = new THREE.Vector3().crossVectors(up, normal).normalize();
+  geometry.computeBoundingBox();
+  const center = geometry.boundingBox!.getCenter(new THREE.Vector3());
+  return { center, right, up };
+}
+
+/** Étendue (u, v) de chaque sommet dans le repère du plan, plus min/max pour normaliser ensuite. */
+function platePlaneExtent(mesh: THREE.Mesh, basis: { center: THREE.Vector3; right: THREE.Vector3; up: THREE.Vector3 }) {
+  const position = mesh.geometry.attributes["position"] as THREE.BufferAttribute;
+  const us = new Float32Array(position.count);
+  const vs = new Float32Array(position.count);
+  const p = new THREE.Vector3();
+  const offset = new THREE.Vector3();
+  let minU = Infinity,
+    maxU = -Infinity,
+    minV = Infinity,
+    maxV = -Infinity;
+  for (let i = 0; i < position.count; i++) {
+    p.fromBufferAttribute(position, i);
+    offset.subVectors(p, basis.center);
+    const u = offset.dot(basis.right);
+    const v = offset.dot(basis.up);
+    us[i] = u;
+    vs[i] = v;
+    if (u < minU) minU = u;
+    if (u > maxU) maxU = u;
+    if (v < minV) minV = v;
+    if (v > maxV) maxV = v;
+  }
+  return { us, vs, minU, maxU, minV, maxV };
+}
+
+/** Ratio largeur/hauteur d'une sous-maille plate : évite de plaquer un canvas carré sur une
+ * ouverture rectangulaire (l'image ressort étirée, cases pas carrées). */
+export function meshPlateAspect(mesh: THREE.Mesh): number {
+  const basis = platePlaneBasis(mesh);
+  const { minU, maxU, minV, maxV } = platePlaneExtent(mesh, basis);
+  return (maxU - minU) / (maxV - minV);
+}
+
+/**
+ * Réécrit les UV d'une sous-maille plate pour qu'elles suivent exactement le canvas posé dessus
+ * (u = largeur, v = hauteur), plutôt que de dépendre de l'unwrap d'origine du modèle — sur un
+ * asset CC0, ce panneau peut être tassé dans un coin de l'atlas, tourné ou en miroir par rapport
+ * aux autres pièces (vu sur le dos d'un cadre photo : texte tourné à 90° et inversé).
+ */
+export function remapPlateUV(mesh: THREE.Mesh): void {
+  const basis = platePlaneBasis(mesh);
+  const { us, vs, minU, maxU, minV, maxV } = platePlaneExtent(mesh, basis);
+  const uSpan = maxU - minU || 1;
+  const vSpan = maxV - minV || 1;
+  const uv = new Float32Array(us.length * 2);
+  for (let i = 0; i < us.length; i++) {
+    uv[i * 2] = (us[i]! - minU) / uSpan;
+    uv[i * 2 + 1] = (vs[i]! - minV) / vSpan;
+  }
+  mesh.geometry.setAttribute("uv", new THREE.BufferAttribute(uv, 2));
+}
+
+/**
+ * Comme `remapPlateUV`, mais pour une sous-maille qui n'est pas qu'une simple plaque : un verre
+ * de montre biseauté partage un seul unwrap entre sa face plate (dessus, normale vers
+ * `direction`) et ses chants — la projeter en un seul plan (comme `remapPlateUV`) écrase la face
+ * plate dans une bande dégénérée. On ne recadre donc que sur le sous-rectangle déjà occupé par
+ * les sommets de la face voulue dans l'unwrap d'origine, sans toucher à sa forme (cartes normale/
+ * rugosité restent donc valables, juste zoomées).
+ */
+export function remapPlateUVToFace(mesh: THREE.Mesh, direction: THREE.Vector3, threshold = 0.9, flip: { u?: boolean; v?: boolean } = {}): void {
+  const normalAttr = mesh.geometry.attributes["normal"] as THREE.BufferAttribute | undefined;
+  const uvAttr = mesh.geometry.attributes["uv"] as THREE.BufferAttribute | undefined;
+  if (!normalAttr || !uvAttr) return;
+  const n = new THREE.Vector3();
+  let minU = Infinity,
+    maxU = -Infinity,
+    minV = Infinity,
+    maxV = -Infinity;
+  for (let i = 0; i < normalAttr.count; i++) {
+    n.fromBufferAttribute(normalAttr, i);
+    if (n.dot(direction) < threshold) continue;
+    const u = uvAttr.getX(i);
+    const v = uvAttr.getY(i);
+    if (u < minU) minU = u;
+    if (u > maxU) maxU = u;
+    if (v < minV) minV = v;
+    if (v > maxV) maxV = v;
+  }
+  if (!Number.isFinite(minU) || !Number.isFinite(minV)) return; // aucun sommet orienté vers `direction`
+  const uSpan = maxU - minU || 1;
+  const vSpan = maxV - minV || 1;
+  for (let i = 0; i < uvAttr.count; i++) {
+    let u = (uvAttr.getX(i) - minU) / uSpan;
+    let v = (uvAttr.getY(i) - minV) / vSpan;
+    if (flip.u) u = 1 - u;
+    if (flip.v) v = 1 - v;
+    uvAttr.setXY(i, u, v);
+  }
+  uvAttr.needsUpdate = true;
+}
+
+/** Dimensions d'un canvas ajustées à un ratio réel plutôt que de rester carrées par défaut. */
+export function canvasSizeForAspect(aspect: number, maxDim = 192): [number, number] {
+  return aspect >= 1 ? [maxDim, Math.round(maxDim / aspect)] : [Math.round(maxDim * aspect), maxDim];
+}
+
 /** Photo : annotation au dos ; quand on ne la regarde pas, l'image change (l'endroit où l'on est). */
 /** Hauteur de référence (px) pour les textures générées sur les meshes nommés du cadre-photo. */
 const PHOTO_TEXTURE_HEIGHT = 192;
 
 /** Cadre-photo : le modèle nomme ses deux faces dynamiques ("picture_photo", "picture_note"). */
 const photo: Factory = (g, w) => {
-  const photoMesh = g.object.getObjectByName("picture_photo");
-  if (!(photoMesh instanceof THREE.Mesh)) {
-    const meshNames: string[] = [];
-    g.object.traverse((child) => {
-      if (child instanceof THREE.Mesh) meshNames.push(child.name || "(sans nom)");
-    });
-    log("interact", { action: "photo-mesh-not-found", meshNames });
-    return {};
-  }
-  const photoHeight = PHOTO_TEXTURE_HEIGHT;
-  const photoWidth = Math.round(photoHeight * planeAspect(photoMesh));
-  const frontCanvas = new FaceCanvas(g.object, null, photoWidth, photoHeight, { existingMesh: photoMesh });
-  drawFoundPhoto(frontCanvas.ctx, photoWidth, photoHeight, objectRoll(g, 7));
+  const front = faceOf(g);
+  if (!front) return {};
+  const back = findModelFace(g.object, front.normal.clone().negate());
+  // Sur les modèles avec une fenêtre "artwork" dédiée (sous vitre), on s'y cale exactement au
+  // lieu de coller un plan neuf à la taille de la plus grande face détectée (la façade du cadre,
+  // plus grande que l'ouverture — ça débordait par-dessus le cadre et masquait le verre).
+  const artwork = findMeshByName(g.object, /artwork/i);
+  const [fw, fh] = canvasSizeForAspect(artwork ? meshPlateAspect(artwork) : front.width / front.height);
+  const frontCanvas = artwork ? new FaceCanvas(g.object, null, fw, fh, { existingMesh: artwork }) : new FaceCanvas(g.object, front, fw, fh, { shrink: 0.82 });
+  drawFoundPhoto(frontCanvas.ctx, objectRoll(g, 7), fw, fh);
   frontCanvas.commit();
   frontCanvas.visible = true;
-
-  const noteMesh = g.object.getObjectByName("picture_note");
-  if (!(noteMesh instanceof THREE.Mesh)) log("interact", { action: "photo-note-not-found" });
-  const backCanvas =
-    noteMesh instanceof THREE.Mesh
-      ? new FaceCanvas(g.object, null, Math.round(PHOTO_TEXTURE_HEIGHT * planeAspect(noteMesh)), PHOTO_TEXTURE_HEIGHT, { existingMesh: noteMesh, transparent: true })
-      : null;
+  // Idem pour le dos : sur les modèles avec une sous-maille "back" dédiée, l'écriture remplace
+  // directement son matériau (suit exactement le relief du bois, aucun décalage possible sous
+  // aucun angle) au lieu d'un plan neuf collé devant (fallback, modèles sans sous-maille dédiée).
+  // Transparent dans les deux cas : pas de fond peint, seule l'encre est dessinée.
+  const backMesh = findMeshByName(g.object, /back/i);
+  // L'unwrap d'origine de cette sous-maille peut être tourné/en miroir par rapport aux autres
+  // pièces du modèle (texte illisible sinon) : on retrace ses UV nous-mêmes.
+  if (backMesh) remapPlateUV(backMesh);
+  const backAspect = backMesh ? meshPlateAspect(backMesh) : back ? back.width / back.height : 1;
+  const [bw, bh] = canvasSizeForAspect(backAspect);
+  const backCanvas = backMesh ? new FaceCanvas(g.object, null, bw, bh, { existingMesh: backMesh, transparent: true }) : back ? new FaceCanvas(g.object, back, bw, bh, { shrink: 0.9, transparent: true }) : null;
   if (backCanvas) {
     const texts = tList("interact.photoBacks");
     const ctx = backCanvas.ctx;
-    const width = backCanvas.canvas.width;
-    const height = backCanvas.canvas.height;
-    // Texture uniquement le texte, en alpha : rien d'autre ne doit être dessiné ici (le fond,
-    // la reliure du modèle, doit rester visible autour de l'écriture).
-    ctx.clearRect(0, 0, width, height);
+    // Le tracé ci-dessous est composé sur un cadre virtuel 192×192 (mise en page d'origine),
+    // puis mis à l'échelle non uniforme vers les dimensions réelles du dos — plus simple et
+    // plus sûr que de recalculer chaque coordonnée pour un ratio arbitraire.
+    ctx.save();
+    ctx.scale(bw / 192, bh / 192);
+    ctx.strokeStyle = "rgba(120, 92, 55, 0.28)";
+    ctx.lineWidth = 2;
+    for (let y = 18; y < 192; y += 18) {
+      ctx.beginPath();
+      ctx.moveTo(10, y);
+      ctx.lineTo(182, y);
+      ctx.stroke();
+    }
+    ctx.strokeStyle = "rgba(160, 48, 42, 0.45)";
+    ctx.beginPath();
+    ctx.moveTo(30, 8);
+    ctx.lineTo(30, 184);
+    ctx.stroke();
+    ctx.fillStyle = "#1c2753";
     ctx.font = `20px ${HANDWRITING_FONT}`;
     ctx.textBaseline = "alphabetic";
     const words = (texts[Math.floor(objectRoll(g, 6) * texts.length)] ?? "").split(" ");
@@ -677,19 +779,11 @@ const photo: Factory = (g, w) => {
         line = word;
       } else line = candidate;
     }
-    lines.push(line);
-    const lineHeight = 26;
-    const startY = (height - lines.length * lineHeight) / 2 + lineHeight * 0.7;
-    // Léger halo clair derrière l'encre sombre : le texte reste lisible quel que soit ce qu'il y a
-    // derrière, une fois la texture posée en alpha sur le mesh.
-    ctx.strokeStyle = "rgba(245, 240, 225, 0.85)";
-    ctx.lineWidth = 3;
-    ctx.fillStyle = "#1c2110";
-    lines.forEach((text, index) => {
-      const y = startY + index * lineHeight;
-      ctx.strokeText(text, 12, y);
-      ctx.fillText(text, 12, y);
-    });
+    ctx.fillText(line, 14, y);
+    ctx.fillStyle = "rgba(110, 64, 36, 0.7)";
+    ctx.font = "bold 9px monospace";
+    ctx.fillText("ARCHIVE / 04", 112, 178);
+    ctx.restore();
     backCanvas.commit();
   }
 
@@ -706,8 +800,7 @@ const photo: Factory = (g, w) => {
       cooldown = 25;
       unseen = 0;
       if (!shot) return;
-      w.audio.playAt("flick", g.object.position, 0.3, `${g.kind}:change`);
-      frontCanvas.ctx.drawImage(shot, 0, 0, photoWidth, photoHeight);
+      frontCanvas.ctx.drawImage(shot, 0, 0, fw, fh);
       frontCanvas.commit();
       frontCanvas.visible = true;
     },
@@ -718,8 +811,12 @@ const photo: Factory = (g, w) => {
   };
 };
 
-function drawFoundPhoto(ctx: CanvasRenderingContext2D, width: number, height: number, seed: number): void {
-  const sky = ctx.createLinearGradient(0, 0, 0, height);
+/** Composé sur un cadre virtuel 192×192, puis mis à l'échelle non uniforme vers `width`×`height`
+ * (le ratio réel de la surface visée) — voir le commentaire équivalent dans `photo`. */
+function drawFoundPhoto(ctx: CanvasRenderingContext2D, seed: number, width: number, height: number): void {
+  ctx.save();
+  ctx.scale(width / 192, height / 192);
+  const sky = ctx.createLinearGradient(0, 0, 0, 192);
   sky.addColorStop(0, "#1b2630");
   sky.addColorStop(1, "#746d55");
   ctx.fillStyle = sky;
@@ -750,20 +847,46 @@ function drawFoundPhoto(ctx: CanvasRenderingContext2D, width: number, height: nu
   vignette.addColorStop(0, "rgba(0, 0, 0, 0)");
   vignette.addColorStop(1, "rgba(0, 0, 0, 0.52)");
   ctx.fillStyle = vignette;
-  ctx.fillRect(0, 0, width, height);
+  ctx.fillRect(0, 0, 192, 192);
+  ctx.restore();
 }
 
 /**
  * Cadran dessiné à la demande (boussole, montre digitale), rafraîchi quand on est près.
  * `raise` recale le calque contre l'axe imprimé sur le modèle (positif : vers l'avant du cadran,
- * négatif : vers le joueur) quand la boîte englobante détectée ne tombe pas pile sur le dessin.
+ * négatif : vers le joueur) quand la boîte englobante détectée ne tombe pas pile sur le dessin —
+ * ignoré si `screenPattern` matche une vraie sous-maille (verre/cadran dédié du modèle : on pose
+ * alors le dessin directement sur elle, comme l'écran de télé ou l'artwork du cadre photo,
+ * plutôt que de coller un plan neuf par-dessus).
  */
-function dial(size: number, rate: number, raise: number, draw: (ctx: CanvasRenderingContext2D, g: Grabbable, w: InteractionWorld, face: ModelFace) => void): Factory {
+function dial(size: number, rate: number, raise: number, draw: (ctx: CanvasRenderingContext2D, g: Grabbable, w: InteractionWorld, face: ModelFace | null) => void, centerPattern?: RegExp, screenPattern?: RegExp): Factory {
   return (g, w) => {
+    const screenMesh = screenPattern ? findMeshByName(g.object, screenPattern) : null;
     // Cadran sur le dessus de l'objet (sa plus grande face serait le dessous, posé à plat).
-    const face = faceOf(g, UP_AXES);
-    if (!face) return {};
-    const canvas = new FaceCanvas(g.object, face, size, size, { shrink: 0.7, glow: true, transparent: true, raise });
+    const face = screenMesh ? null : faceOf(g, UP_AXES);
+    if (!screenMesh && !face) return {};
+    if (screenMesh) {
+      // Cette sous-maille n'est pas qu'une simple plaque (chants biseautés compris dans le même
+      // unwrap) : on ne recadre que sur le sous-rectangle déjà utilisé par sa face plate, sans
+      // quoi le dessin se retrouve tassé dans un coin — voir `remapPlateUVToFace`. L'unwrap
+      // d'origine de ce panneau est monté en miroir vertical par rapport au canevas (texte
+      // inversé constaté sur la montre digitale) : on retourne l'axe V.
+      remapPlateUVToFace(screenMesh, UP_AXES[0]!, 0.9, { v: true });
+    }
+    const canvas = screenMesh
+      ? new FaceCanvas(g.object, null, size, size, { existingMesh: screenMesh, glow: true, transparent: false })
+      : new FaceCanvas(g.object, face!, size, size, { shrink: 0.7, glow: true, transparent: true, raise });
+    // Sous-maille "verre/écran" cachée jusqu'au premier dessin (sinon le canevas vierge,
+    // transparent à l'origine, remplacerait pour de bon le rendu d'origine dès l'apparition).
+    if (screenMesh) canvas.visible = false;
+    // Sur les modèles avec un repère "centre du cadran" dédié (mini sous-maille sans surface
+    // propre, juste un point) : la face auto-détectée peut tomber sur une autre partie plane du
+    // modèle (un couvercle ouvert, par ex.) plutôt que le cadran — on recale sur ce repère.
+    const centerMesh = centerPattern ? findMeshByName(g.object, centerPattern) : null;
+    if (centerMesh) {
+      centerMesh.geometry.computeBoundingBox();
+      canvas.mesh.position.copy(centerMesh.geometry.boundingBox!.getCenter(new THREE.Vector3()));
+    }
     let timer = 0;
     return {
       update: (dt, near) => {
@@ -772,13 +895,15 @@ function dial(size: number, rate: number, raise: number, draw: (ctx: CanvasRende
         timer = rate;
         draw(canvas.ctx, g, w, face);
         canvas.commit();
+        canvas.visible = true;
       },
       dispose: () => canvas.dispose(),
     };
   };
 }
 
-const compass = dial(128, 0.1, 0, (ctx, g, w, face) => {
+const compass = dial(128, 0.1, -0.08, (ctx, g, w, face) => {
+  if (!face) return;
   const exit = w.exitPosition();
   // Direction de la sortie dans le repère de l'objet, projetée sur le plan du cadran.
   const worldDirection = tmp.set(exit.x - g.object.position.x, 0, exit.z - g.object.position.z).normalize();
@@ -802,7 +927,7 @@ const compass = dial(128, 0.1, 0, (ctx, g, w, face) => {
   ctx.lineTo(-7, 0);
   ctx.fill();
   ctx.restore();
-});
+}, /dial_center/i);
 
 const digitalWatch = dial(128, 1, 0.08, (ctx, g, w) => {
   const total = Math.floor(w.runSeconds());
@@ -813,8 +938,7 @@ const digitalWatch = dial(128, 1, 0.08, (ctx, g, w) => {
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
   ctx.fillText(`${String(Math.floor(total / 60)).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`, 64, 64);
-  w.audio.playAt("metalClick", g.object.position, 0.12, `${g.kind}:tick`);
-});
+}, undefined, /glass/i);
 
 /** Manette : vibre dans la vraie manette du joueur. */
 const gamepad: Factory = (g, w) => ({
@@ -1069,7 +1193,6 @@ const securityCamera: Factory = (g, w, system) => {
 const BEHAVIOURS: Record<string, Factory> = {
   securityCamera,
   television,
-  chalkboard,
   storageCart,
   metalShelves,
   wetFloorSign,
@@ -1140,7 +1263,6 @@ const BEHAVIOURS: Record<string, Factory> = {
 export function prepareInteractionFaces(kind: string, template: THREE.Object3D): void {
   const behaviour = BEHAVIOURS[kind];
   if (behaviour === television) findModelFace(template, TV_FRONT);
-  else if (behaviour === chalkboard) findModelFace(template, undefined, FRONT_AXES);
   else if (behaviour === compass || behaviour === digitalWatch) findModelFace(template, undefined, UP_AXES);
 }
 

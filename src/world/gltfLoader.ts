@@ -56,7 +56,18 @@ function dropTransmission(material: THREE.MeshPhysicalMaterial): void {
   material.opacity = Math.min(material.opacity, GLASS_OPACITY);
 }
 
-function mergeByMaterial(root: THREE.Object3D, preserveNames: ReadonlySet<string>): THREE.Object3D {
+/**
+ * Verre en simple alpha blend (pas de KHR_materials_transmission, ex. la vitre d'un cadre photo) :
+ * son alpha vient de la texture (souvent proche de 1, une "vitre" opaque à l'export Blender plutôt
+ * que vraiment translucide) et cachait complètement ce qu'il y a derrière. Même traitement que le
+ * verre réfractif : capé à une opacité basse, sans écriture dans le depth buffer.
+ */
+function capBlendGlassOpacity(material: THREE.MeshStandardMaterial): void {
+  material.depthWrite = false;
+  material.opacity = Math.min(material.opacity, GLASS_OPACITY);
+}
+
+function mergeByMaterial(root: THREE.Object3D): THREE.Object3D {
   root.updateMatrixWorld(true);
   const rootInverse = new THREE.Matrix4().copy(root.matrixWorld).invert();
   const groups = new Map<THREE.Material, THREE.BufferGeometry[]>();
@@ -81,6 +92,7 @@ function mergeByMaterial(root: THREE.Object3D, preserveNames: ReadonlySet<string
   const materials = new Set<THREE.Material>([...groups.keys(), ...preserved.map((mesh) => mesh.material as THREE.Material)]);
   for (const material of materials) {
     if (material instanceof THREE.MeshPhysicalMaterial && material.transmission > 0) dropTransmission(material);
+    else if (material instanceof THREE.MeshStandardMaterial && material.transparent && /glass/i.test(material.name)) capBlendGlassOpacity(material);
     if (material instanceof THREE.MeshStandardMaterial) applyVhsEffect(material);
   }
 

@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Rendu visuel photo (WebGL logiciel, environnement minimal)</title>
+    <style>
+      body {
+        margin: 0;
+        background: #222;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 8px;
+        padding: 12px;
+        font: 13px monospace;
+        color: #fff;
+      }
+      canvas {
+        image-rendering: pixelated;
+        border: 1px solid #555;
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="view" width="480" height="360"></canvas>
+    <pre id="results"></pre>
+    <script type="module" src="./photo-render.test.ts"></script>
+  </body>
+</html>

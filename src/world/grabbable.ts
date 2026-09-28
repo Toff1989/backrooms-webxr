@@ -44,7 +44,6 @@ const PROP_MASS: Record<PropKind, number> = {
   metalShelves: 18,
   bookshelf: 40,
   storageCart: 30,
-  chalkboard: 9,
   cardboardBox: 4,
   plasticCrate: 1.5,
   wetFloorSign: 1.2,

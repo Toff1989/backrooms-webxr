@@ -5,7 +5,6 @@ import officeDeskUrl from "../assets/models/officedesk.glb";
 import armChairUrl from "../assets/models/props/armChair.glb";
 import bookshelfUrl from "../assets/models/props/bookshelf.glb";
 import cardboardBoxUrl from "../assets/models/props/cardboardBox.glb";
-import chalkboardUrl from "../assets/models/props/chalkboard.glb";
 import coffeeTableUrl from "../assets/models/props/coffeeTable.glb";
 import metalShelvesUrl from "../assets/models/props/metalShelves.glb";
 import metalStoolUrl from "../assets/models/props/metalStool.glb";
@@ -39,7 +38,6 @@ const PROP_URLS: Record<PropKind, string> = {
   metalShelves: metalShelvesUrl,
   bookshelf: bookshelfUrl,
   storageCart: storageCartUrl,
-  chalkboard: chalkboardUrl,
   cardboardBox: cardboardBoxUrl,
   plasticCrate: plasticCrateUrl,
   wetFloorSign: wetFloorSignUrl,
