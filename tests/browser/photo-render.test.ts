@@ -14,7 +14,7 @@
  */
 import * as THREE from "three";
 import photoUrl from "../../src/assets/models/collectibles/photo.glb";
-import { FaceCanvas, canvasSizeForAspect, findMeshByName, meshPlateAspect } from "../../src/world/interactions";
+import { FaceCanvas, canvasSizeForAspect, findMeshByName, meshPlateAspect, remapPlateUV } from "../../src/world/interactions";
 import { loadTemplateModel } from "../../src/world/gltfLoader";
 import { findModelFace } from "../../src/world/modelFace";
 
@@ -132,6 +132,7 @@ async function run(): Promise<void> {
   }
   log(backMesh ? `Sous-maille dos détectée : "${backMesh.name || "(sans nom)"}" → remplacement en place.` : "Pas de sous-maille dos dédiée → pose d'un plan sur la face arrière détectée (fallback).");
   frameCamera(camera, template, FRONT_DIR.clone().negate());
+  if (backMesh) remapPlateUV(backMesh);
 
   const backAspect = backMesh ? meshPlateAspect(backMesh) : back!.width / back!.height;
   const [bw, bh] = canvasSizeForAspect(backAspect);

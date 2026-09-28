@@ -621,25 +621,60 @@ function sprayCan(lubricant: boolean): Factory {
   };
 }
 
+type Axis = "x" | "y" | "z";
+
+function axisValue(v: THREE.Vector3, axis: Axis): number {
+  return axis === "x" ? v.x : axis === "y" ? v.y : v.z;
+}
+
 /**
- * Ratio largeur/hauteur d'une sous-maille plate (écran, artwork, dos de cadre...) : évite de
- * plaquer un canvas carré sur une ouverture rectangulaire (l'image ressort étirée, cases pas
- * carrées). Le plus fin des trois axes locaux est l'épaisseur de la plaque ; parmi les deux
- * autres, Y est la hauteur (convention "haut" du modèle), l'axe restant est la largeur.
+ * Les deux axes locaux du plan d'une sous-maille plate (hors épaisseur). Le plus fin des trois
+ * axes locaux est l'épaisseur de la plaque ; parmi les deux autres, Y est la hauteur (convention
+ * "haut" du modèle), l'axe restant est la largeur.
  */
-export function meshPlateAspect(mesh: THREE.Mesh): number {
+function platePlaneAxes(mesh: THREE.Mesh): { widthAxis: Axis; heightAxis: Axis; box: THREE.Box3 } {
   mesh.geometry.computeBoundingBox();
-  const size = mesh.geometry.boundingBox!.getSize(new THREE.Vector3());
-  const dims: Array<[string, number]> = [
+  const box = mesh.geometry.boundingBox!;
+  const size = box.getSize(new THREE.Vector3());
+  const dims: Array<[Axis, number]> = [
     ["x", size.x],
     ["y", size.y],
     ["z", size.z],
   ];
   dims.sort((a, b) => a[1] - b[1]);
-  const [, second, third] = dims as [[string, number], [string, number], [string, number]];
-  const height = second[0] === "y" ? second[1] : third[1];
-  const width = second[0] === "y" ? third[1] : second[1];
-  return width / height;
+  const [, second, third] = dims as [[Axis, number], [Axis, number], [Axis, number]];
+  const heightAxis = second[0] === "y" ? second[0] : third[0];
+  const widthAxis = second[0] === "y" ? third[0] : second[0];
+  return { widthAxis, heightAxis, box };
+}
+
+/** Ratio largeur/hauteur d'une sous-maille plate : évite de plaquer un canvas carré sur une
+ * ouverture rectangulaire (l'image ressort étirée, cases pas carrées). */
+export function meshPlateAspect(mesh: THREE.Mesh): number {
+  const { widthAxis, heightAxis, box } = platePlaneAxes(mesh);
+  const size = box.getSize(new THREE.Vector3());
+  return axisValue(size, widthAxis) / axisValue(size, heightAxis);
+}
+
+/**
+ * Réécrit les UV d'une sous-maille plate pour qu'elles suivent exactement le canvas posé dessus
+ * (u = largeur, v = hauteur), plutôt que de dépendre de l'unwrap d'origine du modèle — sur un
+ * asset CC0, ce panneau peut être tassé dans un coin de l'atlas, tourné ou en miroir par rapport
+ * aux autres pièces (vu sur le dos d'un cadre photo : texte tourné à 90° et inversé).
+ */
+export function remapPlateUV(mesh: THREE.Mesh): void {
+  const { widthAxis, heightAxis, box } = platePlaneAxes(mesh);
+  const position = mesh.geometry.attributes["position"] as THREE.BufferAttribute;
+  const uv = new Float32Array(position.count * 2);
+  const p = new THREE.Vector3();
+  const widthSpan = axisValue(box.max, widthAxis) - axisValue(box.min, widthAxis);
+  const heightSpan = axisValue(box.max, heightAxis) - axisValue(box.min, heightAxis);
+  for (let i = 0; i < position.count; i++) {
+    p.fromBufferAttribute(position, i);
+    uv[i * 2] = (axisValue(p, widthAxis) - axisValue(box.min, widthAxis)) / widthSpan;
+    uv[i * 2 + 1] = (axisValue(p, heightAxis) - axisValue(box.min, heightAxis)) / heightSpan;
+  }
+  mesh.geometry.setAttribute("uv", new THREE.BufferAttribute(uv, 2));
 }
 
 /** Dimensions d'un canvas ajustées à un ratio réel plutôt que de rester carrées par défaut. */
@@ -666,6 +701,9 @@ const photo: Factory = (g, w) => {
   // aucun angle) au lieu d'un plan neuf collé devant (fallback, modèles sans sous-maille dédiée).
   // Transparent dans les deux cas : pas de fond peint, seule l'encre est dessinée.
   const backMesh = findMeshByName(g.object, /back/i);
+  // L'unwrap d'origine de cette sous-maille peut être tourné/en miroir par rapport aux autres
+  // pièces du modèle (texte illisible sinon) : on retrace ses UV nous-mêmes.
+  if (backMesh) remapPlateUV(backMesh);
   const backAspect = backMesh ? meshPlateAspect(backMesh) : back ? back.width / back.height : 1;
   const [bw, bh] = canvasSizeForAspect(backAspect);
   const backCanvas = backMesh ? new FaceCanvas(g.object, null, bw, bh, { existingMesh: backMesh, transparent: true }) : back ? new FaceCanvas(g.object, back, bw, bh, { shrink: 0.9, transparent: true }) : null;
