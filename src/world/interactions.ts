@@ -787,12 +787,20 @@ function drawFoundPhoto(ctx: CanvasRenderingContext2D, seed: number, width: numb
  * `raise` recale le calque contre l'axe imprimé sur le modèle (positif : vers l'avant du cadran,
  * négatif : vers le joueur) quand la boîte englobante détectée ne tombe pas pile sur le dessin.
  */
-function dial(size: number, rate: number, raise: number, draw: (ctx: CanvasRenderingContext2D, g: Grabbable, w: InteractionWorld, face: ModelFace) => void): Factory {
+function dial(size: number, rate: number, raise: number, draw: (ctx: CanvasRenderingContext2D, g: Grabbable, w: InteractionWorld, face: ModelFace) => void, centerPattern?: RegExp): Factory {
   return (g, w) => {
     // Cadran sur le dessus de l'objet (sa plus grande face serait le dessous, posé à plat).
     const face = faceOf(g, UP_AXES);
     if (!face) return {};
     const canvas = new FaceCanvas(g.object, face, size, size, { shrink: 0.7, glow: true, transparent: true, raise });
+    // Sur les modèles avec un repère "centre du cadran" dédié (mini sous-maille sans surface
+    // propre, juste un point) : la face auto-détectée peut tomber sur une autre partie plane du
+    // modèle (un couvercle ouvert, par ex.) plutôt que le cadran — on recale sur ce repère.
+    const centerMesh = centerPattern ? findMeshByName(g.object, centerPattern) : null;
+    if (centerMesh) {
+      centerMesh.geometry.computeBoundingBox();
+      canvas.mesh.position.copy(centerMesh.geometry.boundingBox!.getCenter(new THREE.Vector3()));
+    }
     let timer = 0;
     return {
       update: (dt, near) => {
@@ -831,7 +839,7 @@ const compass = dial(128, 0.1, -0.08, (ctx, g, w, face) => {
   ctx.lineTo(-7, 0);
   ctx.fill();
   ctx.restore();
-});
+}, /dial_center/i);
 
 const digitalWatch = dial(128, 1, 0.08, (ctx, _g, w) => {
   const total = Math.floor(w.runSeconds());

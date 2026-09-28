@@ -11,7 +11,7 @@
  */
 import * as THREE from "three";
 import compassUrl from "../../src/assets/models/collectibles/compass.glb";
-import { FaceCanvas } from "../../src/world/interactions";
+import { FaceCanvas, findMeshByName } from "../../src/world/interactions";
 import { loadTemplateModel } from "../../src/world/gltfLoader";
 import { findModelFace } from "../../src/world/modelFace";
 
@@ -105,6 +105,15 @@ async function run(): Promise<void> {
   await waitForNext();
 
   const dialCanvas = new FaceCanvas(template, face, 128, 128, { shrink: 0.7, glow: true, transparent: true, raise: -0.08 });
+  const centerMesh = findMeshByName(template, /dial_center/i);
+  log(centerMesh ? "Repère \"dial_center\" détecté → recentrage de l'aiguille dessus." : "Pas de repère \"dial_center\" → l'aiguille reste sur la face auto-détectée.");
+  if (centerMesh) {
+    centerMesh.geometry.computeBoundingBox();
+    const bb = centerMesh.geometry.boundingBox!;
+    log(`dial_center bbox : min (${bb.min.x.toFixed(4)}, ${bb.min.y.toFixed(4)}, ${bb.min.z.toFixed(4)}) max (${bb.max.x.toFixed(4)}, ${bb.max.y.toFixed(4)}, ${bb.max.z.toFixed(4)})`);
+    dialCanvas.mesh.position.copy(bb.getCenter(new THREE.Vector3()));
+    log(`aiguille repositionnée à (${dialCanvas.mesh.position.x.toFixed(4)}, ${dialCanvas.mesh.position.y.toFixed(4)}, ${dialCanvas.mesh.position.z.toFixed(4)})`);
+  }
   drawNeedle(dialCanvas.ctx, 0.4);
   dialCanvas.commit();
   dialCanvas.visible = true;
@@ -114,9 +123,10 @@ async function run(): Promise<void> {
   setStage("ON");
   await waitForNext();
 
-  // Vue de profil : révèle un décalage de hauteur (raise) entre le plan de l'aiguille et le
-  // verre du cadran, invisible depuis le dessus.
-  frameCameraOnPoint(camera, face.center, Math.max(face.width, face.height) * 0.6, new THREE.Vector3(1, 0.05, 0));
+  // Vue de profil : révèle un décalage de hauteur entre le plan de l'aiguille et le cadran,
+  // invisible depuis le dessus.
+  const profileCenter = centerMesh ? dialCanvas.mesh.position : face.center;
+  frameCameraOnPoint(camera, profileCenter, Math.max(face.width, face.height) * 0.6, new THREE.Vector3(1, 0.05, 0));
   renderer.render(scene, camera);
   log("Rendu 'profil' (pour repérer un décalage de hauteur de l'aiguille) affiché.");
   setStage("PROFILE");
