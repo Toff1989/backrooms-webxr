@@ -104,7 +104,16 @@ export class FaceCanvas {
       const clone = existingBase.clone();
       clone.map = this.texture;
       clone.color.set(0xffffff);
-      if (options.transparent !== undefined) clone.transparent = options.transparent;
+      if (options.transparent !== undefined) {
+        clone.transparent = options.transparent;
+        // Une sous-maille "glass" (vitre en alpha blend) arrive avec son opacité et son depthWrite
+        // déjà capés par `capBlendGlassOpacity` (gltfLoader.ts) pour paraître translucide — sans
+        // ça, un écran posé dessus en mode opaque resterait délavé/mal trié.
+        if (!options.transparent) {
+          clone.depthWrite = true;
+          clone.opacity = 1;
+        }
+      }
       if (options.glow) {
         clone.emissiveMap = this.texture;
         clone.emissive = new THREE.Color(0xffffff);
@@ -651,6 +660,40 @@ export function remapPlateUV(mesh: THREE.Mesh): void {
   mesh.geometry.setAttribute("uv", new THREE.BufferAttribute(uv, 2));
 }
 
+/**
+ * Comme `remapPlateUV`, mais pour une sous-maille qui n'est pas qu'une simple plaque : un verre
+ * de montre biseauté partage un seul unwrap entre sa face plate (dessus, normale vers
+ * `direction`) et ses chants — la projeter en un seul plan (comme `remapPlateUV`) écrase la face
+ * plate dans une bande dégénérée. On ne recadre donc que sur le sous-rectangle déjà occupé par
+ * les sommets de la face voulue dans l'unwrap d'origine, sans toucher à sa forme (cartes normale/
+ * rugosité restent donc valables, juste zoomées).
+ */
+export function remapPlateUVToFace(mesh: THREE.Mesh, direction: THREE.Vector3, threshold = 0.9): void {
+  const normalAttr = mesh.geometry.attributes["normal"] as THREE.BufferAttribute | undefined;
+  const uvAttr = mesh.geometry.attributes["uv"] as THREE.BufferAttribute | undefined;
+  if (!normalAttr || !uvAttr) return;
+  const n = new THREE.Vector3();
+  let minU = Infinity,
+    maxU = -Infinity,
+    minV = Infinity,
+    maxV = -Infinity;
+  for (let i = 0; i < normalAttr.count; i++) {
+    n.fromBufferAttribute(normalAttr, i);
+    if (n.dot(direction) < threshold) continue;
+    const u = uvAttr.getX(i);
+    const v = uvAttr.getY(i);
+    if (u < minU) minU = u;
+    if (u > maxU) maxU = u;
+    if (v < minV) minV = v;
+    if (v > maxV) maxV = v;
+  }
+  if (!Number.isFinite(minU) || !Number.isFinite(minV)) return; // aucun sommet orienté vers `direction`
+  const uSpan = maxU - minU || 1;
+  const vSpan = maxV - minV || 1;
+  for (let i = 0; i < uvAttr.count; i++) uvAttr.setXY(i, (uvAttr.getX(i) - minU) / uSpan, (uvAttr.getY(i) - minV) / vSpan);
+  uvAttr.needsUpdate = true;
+}
+
 /** Dimensions d'un canvas ajustées à un ratio réel plutôt que de rester carrées par défaut. */
 export function canvasSizeForAspect(aspect: number, maxDim = 192): [number, number] {
   return aspect >= 1 ? [maxDim, Math.round(maxDim / aspect)] : [Math.round(maxDim * aspect), maxDim];
@@ -785,14 +828,29 @@ function drawFoundPhoto(ctx: CanvasRenderingContext2D, seed: number, width: numb
 /**
  * Cadran dessiné à la demande (boussole, montre digitale), rafraîchi quand on est près.
  * `raise` recale le calque contre l'axe imprimé sur le modèle (positif : vers l'avant du cadran,
- * négatif : vers le joueur) quand la boîte englobante détectée ne tombe pas pile sur le dessin.
+ * négatif : vers le joueur) quand la boîte englobante détectée ne tombe pas pile sur le dessin —
+ * ignoré si `screenPattern` matche une vraie sous-maille (verre/cadran dédié du modèle : on pose
+ * alors le dessin directement sur elle, comme l'écran de télé ou l'artwork du cadre photo,
+ * plutôt que de coller un plan neuf par-dessus).
  */
-function dial(size: number, rate: number, raise: number, draw: (ctx: CanvasRenderingContext2D, g: Grabbable, w: InteractionWorld, face: ModelFace) => void, centerPattern?: RegExp): Factory {
+function dial(size: number, rate: number, raise: number, draw: (ctx: CanvasRenderingContext2D, g: Grabbable, w: InteractionWorld, face: ModelFace | null) => void, centerPattern?: RegExp, screenPattern?: RegExp): Factory {
   return (g, w) => {
+    const screenMesh = screenPattern ? findMeshByName(g.object, screenPattern) : null;
     // Cadran sur le dessus de l'objet (sa plus grande face serait le dessous, posé à plat).
-    const face = faceOf(g, UP_AXES);
-    if (!face) return {};
-    const canvas = new FaceCanvas(g.object, face, size, size, { shrink: 0.7, glow: true, transparent: true, raise });
+    const face = screenMesh ? null : faceOf(g, UP_AXES);
+    if (!screenMesh && !face) return {};
+    if (screenMesh) {
+      // Cette sous-maille n'est pas qu'une simple plaque (chants biseautés compris dans le même
+      // unwrap) : on ne recadre que sur le sous-rectangle déjà utilisé par sa face plate, sans
+      // quoi le dessin se retrouve tassé dans un coin — voir `remapPlateUVToFace`.
+      remapPlateUVToFace(screenMesh, UP_AXES[0]!);
+    }
+    const canvas = screenMesh
+      ? new FaceCanvas(g.object, null, size, size, { existingMesh: screenMesh, glow: true, transparent: false })
+      : new FaceCanvas(g.object, face!, size, size, { shrink: 0.7, glow: true, transparent: true, raise });
+    // Sous-maille "verre/écran" cachée jusqu'au premier dessin (sinon le canevas vierge,
+    // transparent à l'origine, remplacerait pour de bon le rendu d'origine dès l'apparition).
+    if (screenMesh) canvas.visible = false;
     // Sur les modèles avec un repère "centre du cadran" dédié (mini sous-maille sans surface
     // propre, juste un point) : la face auto-détectée peut tomber sur une autre partie plane du
     // modèle (un couvercle ouvert, par ex.) plutôt que le cadran — on recale sur ce repère.
@@ -809,6 +867,7 @@ function dial(size: number, rate: number, raise: number, draw: (ctx: CanvasRende
         timer = rate;
         draw(canvas.ctx, g, w, face);
         canvas.commit();
+        canvas.visible = true;
       },
       dispose: () => canvas.dispose(),
     };
@@ -816,6 +875,7 @@ function dial(size: number, rate: number, raise: number, draw: (ctx: CanvasRende
 }
 
 const compass = dial(128, 0.1, -0.08, (ctx, g, w, face) => {
+  if (!face) return;
   const exit = w.exitPosition();
   // Direction de la sortie dans le repère de l'objet, projetée sur le plan du cadran.
   const worldDirection = tmp.set(exit.x - g.object.position.x, 0, exit.z - g.object.position.z).normalize();
@@ -850,7 +910,7 @@ const digitalWatch = dial(128, 1, 0.08, (ctx, _g, w) => {
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
   ctx.fillText(`${String(Math.floor(total / 60)).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`, 64, 64);
-});
+}, undefined, /glass/i);
 
 /** Manette : vibre dans la vraie manette du joueur. */
 const gamepad: Factory = () => ({

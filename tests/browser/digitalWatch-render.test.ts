@@ -1,10 +1,11 @@
 /**
- * Rendu visuel minimal de la montre digitale, même principe que compass-render.test.ts : la
- * vraie détection (`findModelFace` sur l'axe (0,1,0), comme `UP_AXES`/`faceOf` dans
- * `interactions.ts`) et la vraie classe `FaceCanvas`, avec le même dessin d'écran que la factory
- * `digitalWatch` (dupliqué ici car `digitalWatch`/`dial`/`UP_AXES` ne sont pas exportés). Ce
- * modèle n'a pas de repère "centre" dédié (contrairement au compass/dial_center) : la face
- * auto-détectée est directement le cadran.
+ * Rendu visuel minimal de la montre digitale, même principe que television-render.test.ts : la
+ * vraie détection (`findMeshByName(/glass/i)`, la vitre du cadran étant une vraie sous-maille
+ * séparée du modèle, fallback `findModelFace(UP_AXES)` sinon), le vrai recadrage d'UV
+ * (`remapPlateUVToFace`) et la vraie classe `FaceCanvas`, avec le même dessin d'écran que la
+ * factory `digitalWatch` (dupliqué ici car `digitalWatch`/`dial`/`UP_AXES` ne sont pas exportés).
+ * Contrairement au compass, ce modèle n'a pas de repère "centre" dédié — la vitre-écran est posée
+ * directement sur le modèle, comme l'écran de la télé.
  *
  * Socle commun (renderer, scène, cadrage, contrôleur d'étapes) dans support/harness.ts.
  *
@@ -13,7 +14,7 @@
  */
 import * as THREE from "three";
 import digitalWatchUrl from "../../src/assets/models/collectibles/digitalWatch.glb";
-import { FaceCanvas } from "../../src/world/interactions";
+import { FaceCanvas, findMeshByName, remapPlateUVToFace } from "../../src/world/interactions";
 import { loadTemplateModel } from "../../src/world/gltfLoader";
 import { findModelFace } from "../../src/world/modelFace";
 import { createLogger, createRenderer, createScene, createStageController, frameOnPoint } from "./support/harness";
@@ -43,22 +44,33 @@ async function run(): Promise<void> {
   const template = await loadTemplateModel(digitalWatchUrl);
   scene.add(template);
 
-  const face = findModelFace(template, undefined, UP_AXES);
-  log(face ? `Face détectée : centre (${face.center.x.toFixed(3)}, ${face.center.y.toFixed(3)}, ${face.center.z.toFixed(3)}), ${face.width.toFixed(3)}×${face.height.toFixed(3)} m` : "Aucune face détectée sur l'axe haut.");
-  if (!face) {
+  const glass = findMeshByName(template, /glass/i);
+  const face = glass ? null : findModelFace(template, undefined, UP_AXES);
+  log(glass ? `Sous-maille vitre détectée : "${glass.name || "(sans nom)"}" → écran posé en place (dessus le vrai cadran).` : face ? "Pas de sous-maille vitre → pose d'un plan sur la face auto-détectée (fallback)." : "Aucune surface détectée.");
+  if (!glass && !face) {
     renderer.render(scene, camera);
     await stages.enter("OFF");
     await stages.enter("ON");
     await stages.enter("PROFILE");
     return;
   }
-  frameOnPoint(camera, face.center, Math.max(face.width, face.height) * 0.6, new THREE.Vector3(0.35, 1, 0.35));
+
+  if (glass) {
+    // La vitre partage son unwrap entre sa face plate et ses chants biseautés (même modèle
+    // partagé, cf. dial()) : on ne recadre le dessin que sur le sous-rectangle de la face plate.
+    remapPlateUVToFace(glass, UP_AXES[0]!);
+    glass.geometry.computeBoundingBox();
+  }
+  const box = new THREE.Box3().setFromObject(template);
+  const focusCenter = glass ? glass.geometry.boundingBox!.getCenter(new THREE.Vector3()) : face!.center;
+  const focusRadius = glass ? box.getSize(new THREE.Vector3()).length() * 0.12 : Math.max(face!.width, face!.height) * 0.6;
+  frameOnPoint(camera, focusCenter, focusRadius, new THREE.Vector3(0.35, 1, 0.35));
 
   renderer.render(scene, camera);
-  log("Rendu 'vierge' (matériau d'origine) affiché.");
+  log("Rendu 'vierge' (matériau d'origine, vitre translucide) affiché.");
   await stages.enter("OFF");
 
-  const screenCanvas = new FaceCanvas(template, face, 128, 128, { shrink: 0.7, glow: true, transparent: true, raise: 0.08 });
+  const screenCanvas = glass ? new FaceCanvas(template, null, 128, 128, { existingMesh: glass, glow: true, transparent: false }) : new FaceCanvas(template, face!, 128, 128, { shrink: 0.7, glow: true, transparent: true, raise: 0.08 });
   drawClock(screenCanvas.ctx, 754);
   screenCanvas.commit();
   screenCanvas.visible = true;
@@ -68,8 +80,9 @@ async function run(): Promise<void> {
   await stages.enter("ON");
 
   // Vue de profil : révèle un décalage de hauteur entre le plan de l'écran et le boîtier,
-  // invisible depuis le dessus (même vérification que pour le compass).
-  frameOnPoint(camera, face.center, Math.max(face.width, face.height) * 0.6, new THREE.Vector3(1, 0.05, 0));
+  // invisible depuis le dessus (même vérification que pour le compass) — sans objet, sur une
+  // vraie sous-maille collée au modèle il ne devrait plus y en avoir.
+  frameOnPoint(camera, focusCenter, focusRadius, new THREE.Vector3(1, 0.05, 0));
   renderer.render(scene, camera);
   log("Rendu 'profil' (pour repérer un décalage de hauteur de l'écran) affiché.");
   await stages.enter("PROFILE");
