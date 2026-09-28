@@ -59,6 +59,10 @@ try {
   await screenshotCanvas(page, path.join(outDir, "photo-back.png"));
   console.log(`Capture "dos annoté" -> ${path.join(outDir, "photo-back.png")}`);
 
+  await page.waitForFunction(() => (window).__BACK_ANGLE_READY__ === true, { timeout: 30000 });
+  await screenshotCanvas(page, path.join(outDir, "photo-back-angle.png"));
+  console.log(`Capture "dos, vue de 3/4" -> ${path.join(outDir, "photo-back-angle.png")}`);
+
   const text = await page.locator("#results").textContent();
   console.log("\n--- journal ---\n" + text);
 

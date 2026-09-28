@@ -634,9 +634,12 @@ const photo: Factory = (g, w) => {
   drawFoundPhoto(frontCanvas.ctx, objectRoll(g, 7));
   frontCanvas.commit();
   frontCanvas.visible = true;
-  // Transparent : pas de fond peint, seule l'encre est dessinée. Le dos réel du cadre (son bois,
-  // son grain) reste visible sous l'écriture au lieu d'être caché par un carton beige plaqué devant.
-  const backCanvas = back ? new FaceCanvas(g.object, back, 192, 192, { shrink: 0.9, transparent: true }) : null;
+  // Idem pour le dos : sur les modèles avec une sous-maille "back" dédiée, l'écriture remplace
+  // directement son matériau (suit exactement le relief du bois, aucun décalage possible sous
+  // aucun angle) au lieu d'un plan neuf collé devant (fallback, modèles sans sous-maille dédiée).
+  // Transparent dans les deux cas : pas de fond peint, seule l'encre est dessinée.
+  const backMesh = findMeshByName(g.object, /back/i);
+  const backCanvas = backMesh ? new FaceCanvas(g.object, null, 192, 192, { existingMesh: backMesh, transparent: true }) : back ? new FaceCanvas(g.object, back, 192, 192, { shrink: 0.9, transparent: true }) : null;
   if (backCanvas) {
     const texts = tList("interact.photoBacks");
     const ctx = backCanvas.ctx;

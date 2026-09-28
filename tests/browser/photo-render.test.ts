@@ -98,14 +98,16 @@ async function run(): Promise<void> {
     return;
   }
   const back = findModelFace(template, front.normal.clone().negate());
-  if (!back) {
+  const backMesh = findMeshByName(template, /back/i);
+  if (!backMesh && !back) {
     log("Pas de face arrière détectée.");
     markReady("BACK");
     return;
   }
-  frameCamera(camera, template, back.normal);
+  log(backMesh ? `Sous-maille dos détectée : "${backMesh.name || "(sans nom)"}" → remplacement en place.` : "Pas de sous-maille dos dédiée → pose d'un plan sur la face arrière détectée (fallback).");
+  frameCamera(camera, template, backMesh ? front.normal.clone().negate() : back!.normal);
 
-  const backCanvas = new FaceCanvas(template, back, 192, 192, { shrink: 0.9, transparent: true });
+  const backCanvas = backMesh ? new FaceCanvas(template, null, 192, 192, { existingMesh: backMesh, transparent: true }) : new FaceCanvas(template, back!, 192, 192, { shrink: 0.9, transparent: true });
   const ctx = backCanvas.ctx;
   ctx.strokeStyle = "rgba(120, 92, 55, 0.28)";
   ctx.lineWidth = 2;
@@ -124,10 +126,23 @@ async function run(): Promise<void> {
   renderer.render(scene, camera);
   log("Rendu 'dos annoté' (texte en alpha, sans fond — le bois du cadre doit rester visible) affiché.");
   markReady("BACK");
+  await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+
+  // Vue de 3/4 (pas de face) : un plan simplement collé devant la surface se détache visiblement
+  // par parallaxe (bord flottant, décalage de profondeur) alors qu'une vraie sous-maille suit le
+  // modèle sous tous les angles.
+  const backNormal = backMesh ? front.normal.clone().negate() : back!.normal;
+  const angled = backNormal.clone().addScaledVector(new THREE.Vector3(0, 0.25, 1), 0.35).normalize();
+  frameCamera(camera, template, angled);
+  renderer.render(scene, camera);
+  log("Rendu 'dos, vue de 3/4' (pour repérer un décalage de profondeur/bord flottant) affiché.");
+  markReady("BACK_ANGLE");
 }
 
 run().catch((error) => {
   log(`ERREUR : ${error instanceof Error ? error.stack : String(error)}`);
   markReady("OFF");
   markReady("ON");
+  markReady("BACK");
+  markReady("BACK_ANGLE");
 });
