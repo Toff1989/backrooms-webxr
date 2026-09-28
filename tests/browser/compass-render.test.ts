@@ -92,6 +92,8 @@ async function run(): Promise<void> {
     setStage("OFF");
     await waitForNext();
     setStage("ON");
+    await waitForNext();
+    setStage("PROFILE");
     return;
   }
   // Cadré sur le cadran lui-même (pas la bbox globale, faussée par la boucle d'attache au-dessus).
@@ -110,6 +112,14 @@ async function run(): Promise<void> {
   renderer.render(scene, camera);
   log("Rendu 'aiguille dessinée' (angle de test fixe) affiché.");
   setStage("ON");
+  await waitForNext();
+
+  // Vue de profil : révèle un décalage de hauteur (raise) entre le plan de l'aiguille et le
+  // verre du cadran, invisible depuis le dessus.
+  frameCameraOnPoint(camera, face.center, Math.max(face.width, face.height) * 0.6, new THREE.Vector3(1, 0.05, 0));
+  renderer.render(scene, camera);
+  log("Rendu 'profil' (pour repérer un décalage de hauteur de l'aiguille) affiché.");
+  setStage("PROFILE");
 }
 
 run().catch((error) => {

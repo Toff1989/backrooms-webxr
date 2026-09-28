@@ -60,6 +60,8 @@ try {
   await captureStage(page, "OFF", path.join(outDir, "compass-off.png"), "vierge");
   await advance(page);
   await captureStage(page, "ON", path.join(outDir, "compass-on.png"), "aiguille dessinée");
+  await advance(page);
+  await captureStage(page, "PROFILE", path.join(outDir, "compass-profile.png"), "profil");
 
   const text = await page.locator("#results").textContent();
   console.log("\n--- journal ---\n" + text);
