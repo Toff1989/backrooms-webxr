@@ -139,7 +139,7 @@ const FRONT_AXES = [new THREE.Vector3(0, 0, 1), new THREE.Vector3(0, 0, -1)];
 const TV_FRONT = new THREE.Vector3(0, 0, 1);
 const UP_AXES = [new THREE.Vector3(0, 1, 0)];
 
-function findTelevisionScreen(root: THREE.Object3D): THREE.Mesh | null {
+export function findTelevisionScreen(root: THREE.Object3D): THREE.Mesh | null {
   let result: THREE.Mesh | null = null;
   root.traverse((child) => {
     if (result || !(child instanceof THREE.Mesh)) return;
