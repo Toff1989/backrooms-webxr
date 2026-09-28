@@ -11,6 +11,7 @@
     "preview": "vite preview",
     "typecheck": "tsc -b --noEmit",
     "test:physics": "vite-node tests/physics.sim.ts",
+    "test:visual": "node scripts/render-test-all.mjs",
     "debug": "node scripts/debug-local.mjs"
   },
   "dependencies": {
