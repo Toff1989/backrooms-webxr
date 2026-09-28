@@ -157,15 +157,20 @@ const FRONT_AXES = [new THREE.Vector3(0, 0, 1), new THREE.Vector3(0, 0, -1)];
 const TV_FRONT = new THREE.Vector3(0, 0, 1);
 const UP_AXES = [new THREE.Vector3(0, 1, 0)];
 
-export function findTelevisionScreen(root: THREE.Object3D): THREE.Mesh | null {
+/** Sous-maille d'un modèle CC0 dont le nom (ou celui de son matériau) matche `pattern`. */
+export function findMeshByName(root: THREE.Object3D, pattern: RegExp): THREE.Mesh | null {
   let result: THREE.Mesh | null = null;
   root.traverse((child) => {
     if (result || !(child instanceof THREE.Mesh)) return;
     const materials = Array.isArray(child.material) ? child.material : [child.material];
     const names = [child.name, ...materials.map((material) => material.name)].join(" ");
-    if (/screen|display/i.test(names)) result = child;
+    if (pattern.test(names)) result = child;
   });
   return result;
+}
+
+export function findTelevisionScreen(root: THREE.Object3D): THREE.Mesh | null {
+  return findMeshByName(root, /screen|display/i);
 }
 
 /** L'objet est-il dans le champ de vision du joueur ? */
@@ -621,7 +626,11 @@ const photo: Factory = (g, w) => {
   const front = faceOf(g);
   if (!front) return {};
   const back = findModelFace(g.object, front.normal.clone().negate());
-  const frontCanvas = new FaceCanvas(g.object, front, 192, 192, { shrink: 0.82 });
+  // Sur les modèles avec une fenêtre "artwork" dédiée (sous vitre), on s'y cale exactement au
+  // lieu de coller un plan neuf à la taille de la plus grande face détectée (la façade du cadre,
+  // plus grande que l'ouverture — ça débordait par-dessus le cadre et masquait le verre).
+  const artwork = findMeshByName(g.object, /artwork/i);
+  const frontCanvas = artwork ? new FaceCanvas(g.object, null, 192, 192, { existingMesh: artwork }) : new FaceCanvas(g.object, front, 192, 192, { shrink: 0.82 });
   drawFoundPhoto(frontCanvas.ctx, objectRoll(g, 7));
   frontCanvas.commit();
   frontCanvas.visible = true;
