@@ -81,7 +81,7 @@ function topLocalPoint(object: THREE.Object3D): THREE.Vector3 {
 }
 
 /** Écran / surface dessinée sur un canvas, posé sur une face du modèle (lumineux ou non). */
-class FaceCanvas {
+export class FaceCanvas {
   readonly canvas = document.createElement("canvas");
   readonly ctx: CanvasRenderingContext2D;
   readonly texture: THREE.CanvasTexture;

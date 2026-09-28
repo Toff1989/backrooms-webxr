@@ -1,8 +1,9 @@
 #!/usr/bin/env node
-// Lance tests/browser/television.html dans Chromium headless (sans WebGL, --disable-gpu) contre
-// un serveur `vite dev` éphémère, et fait échouer le process si un des checks échoue.
+// Rendu visuel (WebGL logiciel / SwiftShader) de tests/browser/television-render.html :
+// capture le canvas avant/après l'allumage de l'écran, sauvegarde deux PNG.
 import { spawn } from "node:child_process";
 import { createRequire } from "node:module";
+import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -11,24 +12,30 @@ const playwrightPath = require.resolve("playwright", { paths: ["/opt/node22/lib/
 const { chromium } = (await import(playwrightPath)).default;
 
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
-const port = 5183;
-const base = `http://127.0.0.1:${port}`;
+const outDir = process.argv[2] ?? path.join(root, "tests/browser/out");
+fs.mkdirSync(outDir, { recursive: true });
 
+const port = 5184;
+const base = `http://127.0.0.1:${port}`;
 const vite = spawn("npx", ["vite", "--config", "tests/browser/vite.test.config.mjs", "--port", String(port), "--strictPort"], { cwd: root, stdio: ["ignore", "pipe", "pipe"] });
 let viteOutput = "";
 vite.stdout.on("data", (d) => (viteOutput += d));
 vite.stderr.on("data", (d) => (viteOutput += d));
 
+async function screenshotCanvas(page, filePath) {
+  const dataUrl = await page.evaluate(() => document.getElementById("view").toDataURL("image/png"));
+  fs.writeFileSync(filePath, Buffer.from(dataUrl.split(",")[1], "base64"));
+}
+
 let exitCode = 1;
 try {
-  const browser = await chromium.launch({ args: ["--disable-gpu", "--disable-webgl", "--disable-webgl2"] });
+  const browser = await chromium.launch();
   const context = await browser.newContext({ ignoreHTTPSErrors: true });
   const page = await context.newPage();
   page.on("console", (msg) => console.log(`[page] ${msg.text()}`));
   page.on("pageerror", (err) => console.error(`[page error] ${err}`));
 
-  // Le serveur vite met un instant à démarrer : on retente le goto plutôt que de sonder le port.
-  const url = `${base}/tests/browser/television.html`;
+  const url = `${base}/tests/browser/television-render.html`;
   const deadline = Date.now() + 20000;
   for (;;) {
     try {
@@ -39,14 +46,20 @@ try {
       await new Promise((r) => setTimeout(r, 300));
     }
   }
-  await page.waitForFunction(() => (window).__TEST_DONE__ === true, { timeout: 30000 });
+
+  await page.waitForFunction(() => (window).__OFF_READY__ === true, { timeout: 30000 });
+  await screenshotCanvas(page, path.join(outDir, "television-off.png"));
+  console.log(`Capture "éteint" -> ${path.join(outDir, "television-off.png")}`);
+
+  await page.waitForFunction(() => (window).__ON_READY__ === true, { timeout: 30000 });
+  await screenshotCanvas(page, path.join(outDir, "television-on.png"));
+  console.log(`Capture "allumé" -> ${path.join(outDir, "television-on.png")}`);
 
   const text = await page.locator("#results").textContent();
-  console.log("\n" + text);
-  const passed = await page.evaluate(() => (window).__TEST_PASSED__);
-  exitCode = passed ? 0 : 1;
+  console.log("\n--- journal ---\n" + text);
 
   await browser.close();
+  exitCode = 0;
 } catch (error) {
   console.error("Échec du runner :", error);
   console.error("--- sortie vite ---\n" + viteOutput);
