@@ -44,6 +44,8 @@ export class Hand {
   private readonly spareSamples: PoseSample[] = [];
   private readonly body: RAPIER.RigidBody;
   private readonly collider: RAPIER.Collider;
+  private readonly characterController: RAPIER.KinematicCharacterController;
+  private activeCollisionGroups = CollisionGroups.hand;
   private readonly lastBodyPosition = new THREE.Vector3();
   private readonly gripPosition = new THREE.Vector3();
   private readonly scratch = new THREE.Vector3();
@@ -71,6 +73,8 @@ export class Hand {
       RAPIER.ColliderDesc.ball(HAND_COLLIDER_RADIUS).setCollisionGroups(CollisionGroups.hand).setEnabled(false),
       this.body,
     );
+    this.characterController = physics.world.createCharacterController(0.005);
+    this.characterController.setSlideEnabled(true);
   }
 
   get tracked(): boolean {
@@ -160,14 +164,27 @@ export class Hand {
 
   /** Cible du corps cinématique, avant chaque pas de simulation. */
   applyKinematicTarget(): void {
-    const active = this.tracked && this.holding === null;
+    const active = this.tracked;
+    const collisionGroups = this.holding === null ? CollisionGroups.hand : CollisionGroups.handMovement;
+    if (collisionGroups !== this.activeCollisionGroups) {
+      this.collider.setCollisionGroups(collisionGroups);
+      this.activeCollisionGroups = collisionGroups;
+    }
     if (this.collider.isEnabled() !== active) this.collider.setEnabled(active);
     if (!this.tracked) return;
 
     if (this.scratch.subVectors(this.palm, this.lastBodyPosition).length() > TELEPORT_JUMP) {
       this.body.setTranslation(this.palm, false);
     } else {
-      this.body.setNextKinematicTranslation(this.palm);
+      const current = this.body.translation();
+      this.characterController.computeColliderMovement(
+        this.collider,
+        { x: this.palm.x - current.x, y: this.palm.y - current.y, z: this.palm.z - current.z },
+        RAPIER.QueryFilterFlags.EXCLUDE_SENSORS,
+        CollisionGroups.handMovement,
+      );
+      const movement = this.characterController.computedMovement();
+      this.body.setNextKinematicTranslation({ x: current.x + movement.x, y: current.y + movement.y, z: current.z + movement.z });
     }
     this.lastBodyPosition.copy(this.palm);
   }

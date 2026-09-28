@@ -52,6 +52,7 @@ export class PlayerController {
   sprintEnergy = 1;
   sprintRecovery = 1;
   movementNoise = 0;
+  paused = false;
   /** Vrai la frame où le rig a été téléporté/tourné (les objets tenus doivent suivre sans balayer le monde). */
   teleported = false;
   movementIntensity = 0;
@@ -121,6 +122,11 @@ export class PlayerController {
 
   update(deltaSeconds: number, input: XrInput): void {
     this.teleported = false;
+    if (this.paused) {
+      this.movementIntensity = 0;
+      this.movementNoise = 0;
+      return;
+    }
     const presenting = this.renderer.xr.isPresenting;
     if (presenting && !this.wasPresenting) {
       this.presentingSeconds = 0;

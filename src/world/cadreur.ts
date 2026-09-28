@@ -29,6 +29,10 @@ const LIT_THRESHOLD = 0.3;
 /** Si près qu'on le devine même dans le noir. */
 const TOUCH_VISIBLE_DISTANCE = 1.4;
 const MAX_SEE_DISTANCE = 40;
+const NEAR_EFFECT_DISTANCE = 6;
+const PLAYER_DAMAGE_DISTANCE = 4;
+const PLAYER_DAMAGE_MAX_PER_SECOND = 36;
+const NEAR_EFFECT_COOLDOWN = 3;
 /** Il garde son allure un instant après avoir quitté le regard (évite les à-coups en bord de champ). */
 const OBSERVE_GRACE = 0.25;
 const SIGHTING_COOLDOWN = 5;
@@ -64,6 +68,12 @@ export interface CadreurEvents {
   caught: boolean;
   /** Vrai la frame où le joueur le découvre (zoom de la caméra). */
   sighted: boolean;
+  /** Vrai périodiquement quand le joueur s'approche assez pour faire décrocher la VHS. */
+  nearby: boolean;
+  /** Vrai tant que le joueur le fixe à découvert. */
+  watched: boolean;
+  /** Dégâts retirés au joueur, proportionnels à la proximité du Cadreur. */
+  playerDamage: number;
 }
 
 interface TrailPoint {
@@ -80,8 +90,8 @@ interface TrailPoint {
  * - Pris dans le faisceau de la lampe, il se fige — la tête-caméra tressaute et grésille.
  *
  * On l'entend avant de le voir : le moteur de sa caméra qui ronronne, ses pas sur la moquette,
- * le zoom qui se resserre quand on le découvre. S'il atteint le joueur : coupure, réveil un
- * niveau plus bas, les mains vides.
+ * le zoom qui se resserre quand on le découvre. Sa proximité blesse le joueur ; le contact est
+ * fatal et termine la run.
  */
 export class Cadreur {
   private rig: CadreurRig | null = null;
@@ -119,6 +129,7 @@ export class Cadreur {
   /** Bruit vers lequel il marche (leurre), et le temps passé à le chercher. */
   private lure: { x: number; z: number; seconds: number; searching: number } | null = null;
   private lastSeenSeconds = 0;
+  private lastNearEffect = -Infinity;
   /** Étourdi (tapette à souris) : figé, la caméra grésille. */
   private stunnedSeconds = 0;
   /** Modèle chargé et ajouté (caché) à la scène — ou échec journalisé : ne rejette jamais. */
@@ -236,7 +247,7 @@ export class Cadreur {
   }
 
   update(deltaSeconds: number, context: CadreurContext): CadreurEvents {
-    const events: CadreurEvents = { caught: false, sighted: false };
+    const events: CadreurEvents = { caught: false, sighted: false, nearby: false, watched: false, playerDamage: 0 };
     this.elapsed += deltaSeconds;
     this.recordTrail(context.head);
     if (!this.rig || (context.depth < CADREUR_MIN_DEPTH && !this.manual)) return events;
@@ -286,6 +297,11 @@ export class Cadreur {
     } else this.staticTimer = 0;
 
     const distance = this.distanceTo(context.head);
+    events.nearby = distance < NEAR_EFFECT_DISTANCE && this.elapsed - this.lastNearEffect > NEAR_EFFECT_COOLDOWN;
+    if (events.nearby) this.lastNearEffect = this.elapsed;
+    const proximity = THREE.MathUtils.clamp(1 - distance / PLAYER_DAMAGE_DISTANCE, 0, 1);
+    events.playerDamage = PLAYER_DAMAGE_MAX_PER_SECOND * proximity * deltaSeconds;
+    events.watched = sight.seen;
     if (distance < CATCH_DISTANCE) {
       events.caught = true;
       log("cadreur", { action: "caught" });
@@ -300,7 +316,7 @@ export class Cadreur {
       this.timer = 60 + Math.random() * 40;
       return events;
     }
-    if (this.pathBehind() > LOSE_BEHIND) {
+    if (this.pathBehind() > LOSE_BEHIND && !sight.seen) {
       log("cadreur", { action: "lost" });
       this.despawn();
       this.timer = 25 + Math.random() * 25;
@@ -308,7 +324,7 @@ export class Cadreur {
     }
 
     const rig = this.rig;
-    rig.root.visible = distance < MAX_SEE_DISTANCE + 5;
+    rig.root.visible = distance < MAX_SEE_DISTANCE + 5 || sight.seen;
     // REC : clignote une fois par seconde ; affolée quand la lampe le fige.
     rig.led.visible = this.frozenSeconds > 0 ? Math.random() < 0.5 : this.elapsed % 1 < 0.6;
     return events;
@@ -370,6 +386,7 @@ export class Cadreur {
       if (this.sight(context).seen) continue;
       this.trailIndex = i;
       this.stalking = true;
+      this.lastNearEffect = -Infinity;
       this.placeBody();
       this.observedGrace = 0;
       this.lastObserved = this.elapsed;

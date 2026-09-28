@@ -85,6 +85,21 @@ export abstract class UiPanel {
     this.dirty = true;
   }
 
+  /** Prépare le premier affichage hors du chemin d'ouverture du menu. */
+  prepareForDisplay(renderer: THREE.WebGLRenderer, camera: THREE.Camera, scene: THREE.Scene): void {
+    if (this.dirty) {
+      this.dirty = false;
+      this.lastDrawAt = performance.now();
+      this.draw(this.ctx);
+      this.texture.needsUpdate = true;
+    }
+    const wasVisible = this.group.visible;
+    this.group.visible = true;
+    renderer.compile(this.group, camera, scene);
+    renderer.initTexture(this.texture);
+    this.group.visible = wasVisible;
+  }
+
   refresh(): void {
     if (!this.dirty || !this.visible) return;
     const now = performance.now();

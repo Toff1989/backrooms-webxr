@@ -28,6 +28,7 @@ export const CollisionGroups = {
   static: interaction(Groups.STATIC, Groups.PLAYER | Groups.HAND | Groups.DYNAMIC | Groups.HELD),
   player: interaction(Groups.PLAYER, Groups.STATIC | Groups.DYNAMIC),
   hand: interaction(Groups.HAND, Groups.STATIC | Groups.DYNAMIC),
+  handMovement: interaction(Groups.HAND, Groups.STATIC),
   dynamic: interaction(Groups.DYNAMIC, Groups.STATIC | Groups.PLAYER | Groups.HAND | Groups.DYNAMIC | Groups.HELD),
   held: interaction(Groups.HELD, Groups.STATIC | Groups.DYNAMIC),
   /** Requête "que peut-on attraper ici ?" : voit aussi un objet fraîchement lâché. */

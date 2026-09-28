@@ -18,6 +18,7 @@ import { PerfStats, setPerf } from "./player/perfStats";
 import { LiveViews } from "./player/liveViews";
 import { createObjectCapture, createPhotoCapture } from "./player/photoCapture";
 import { PlayerController } from "./player/playerController";
+import { PlayerVitals } from "./player/vitals";
 import { Sfx } from "./player/sfx";
 import { TapePlayer } from "./player/tapePlayer";
 import { VhsOverlay } from "./player/vhsOverlay";
@@ -165,6 +166,7 @@ function setVignette(enabled: boolean): void {
   }
 }
 const hud = new CamcorderHud(camera);
+const vitals = new PlayerVitals();
 /** Bandes perdues : cassettes lues dans le viseur, polaroids photographiés derrière le joueur. */
 const tapePlayer = new TapePlayer(audioListener, hud);
 const capturePhoto = createPhotoCapture(renderer, scene, camera, physics);
@@ -265,7 +267,7 @@ const inventoryMenu = new InventoryMenu(
       {
         label: () => t("debug.level"),
         run: () => {
-          goDeeper(false);
+          goDeeper();
           return t("debug.levelDone");
         },
       },
@@ -305,7 +307,10 @@ const journal = new Journal(camera, player.body, loreJournal, sfx);
 installAccountPanel(loreJournal);
 
 const pointer = new UiPointer(hands, scene, [inventoryMenu, endRunScreen, journal]);
-for (const panel of [inventoryMenu, endRunScreen, journal]) liveViews.hideFromOffscreen(panel.group);
+for (const panel of [inventoryMenu, endRunScreen, journal]) {
+  liveViews.hideFromOffscreen(panel.group);
+  panel.prepareForDisplay(renderer, camera, scene);
+}
 
 /**
  * Bande perdue saisie : lue selon sa forme (photo qui se développe, cassette qui se lance), elle
@@ -522,23 +527,29 @@ function respawn(): void {
   cadreur.reset(levelManager.depth);
 }
 
-/** Prise en cours : chaque fois que le Cadreur rattrape le joueur, « Coupez ! » et on la refait. */
+/** Niveau suivant : sortie atteinte ou menu debug. Une capture est désormais un game over. */
 let take = 1;
-
-/** Niveau suivant : sortie atteinte, rattrapé par le Cadreur (réveil les mains vides), ou menu debug. */
-function goDeeper(caught: boolean): void {
-  if (caught) grabSystem.loseHeld();
+function goDeeper(): void {
   levelManager.descend();
-  log("level", { action: caught ? "caught" : "descend", depth: levelManager.depth });
+  log("level", { action: "descend", depth: levelManager.depth });
   respawn();
-  const lines = [t("blue.level", { n: levelManager.depth })];
-  if (caught) {
-    take += 1;
-    lines.unshift(t("blue.cut"), t("blue.take", { n: take }));
-  }
-  vhsOverlay.blueScreen(caught ? 2.6 : 1.4, lines);
+  vhsOverlay.blueScreen(1.4, [t("blue.level", { n: levelManager.depth })]);
   corruption.add(1);
   if (currentSession) reportLevel(currentSession, levelManager.depth);
+}
+
+let gameOver = false;
+
+function triggerGameOver(reason: "health" | "caught"): void {
+  if (gameOver) return;
+  gameOver = true;
+  player.paused = true;
+  if (inventoryMenu.visible) inventoryMenu.close();
+  if (journal.visible) journal.close();
+  grabSystem.loseHeld();
+  cadreur.reset(levelManager.depth);
+  endRunScreen.showGameOver(levelManager.depth, reason);
+  log("run", { action: "game-over", reason, depth: levelManager.depth });
 }
 
 /**
@@ -559,6 +570,9 @@ function beginNewRun(restartLocallyOnFailure: boolean): void {
 
 /** Nouvelle partie : monde neuf, inventaire vidé, rien en main. */
 function restartWorld(seed: string): void {
+  gameOver = false;
+  player.paused = false;
+  vitals.reset();
   grabSystem.loseHeld();
   collectionStore.clear();
   levelManager.restartRun(seed);
@@ -579,7 +593,7 @@ if (DEBUG_ENABLED) {
       player.teleport(new THREE.Vector3(x, 0, z));
       grabSystem.onTeleport();
     },
-    descend: () => goDeeper(false),
+    descend: () => goDeeper(),
     toggleInventory: () => inventoryMenu.toggle(),
     head: () => ({ x: player.headWorld.x, z: player.headWorld.z }),
     exit: () => levelManager.exitPosition,
@@ -715,8 +729,8 @@ renderer.setAnimationLoop((timestamp) => {
   input.update();
 
   // Y : inventaire, B : lampe (contrôles type Saints & Sinners, voir README).
-  if (input.left.secondary.justPressed) inventoryMenu.toggle();
-  if (input.right.secondary.justPressed) {
+  if (!gameOver && input.left.secondary.justPressed) inventoryMenu.toggle();
+  if (!gameOver && input.right.secondary.justPressed) {
     sfx.play(flashlight.toggle() ? "click" : "denied", 0.3);
   }
 
@@ -777,9 +791,18 @@ renderer.setAnimationLoop((timestamp) => {
   });
   // Découvert : la bande décroche une fraction de seconde.
   if (cadreurEvents.sighted) vhsOverlay.triggerTrackingLoss(0.35);
+  if (cadreurEvents.nearby) vhsOverlay.triggerTrackingLoss(0.45);
+  if (cadreurEvents.playerDamage > 0 && vitals.damage(cadreurEvents.playerDamage)) triggerGameOver("health");
+  if (cadreurEvents.sighted) vitals.addMadness(10);
+  if (cadreurEvents.watched) vitals.addMadness(deltaSeconds * 4);
   perfStats.end("menaces");
 
-  if (cadreurEvents.caught || levelManager.hasReachedExit(player.headWorld)) goDeeper(cadreurEvents.caught);
+  if (cadreurEvents.caught) triggerGameOver("caught");
+  else if (!gameOver && levelManager.hasReachedExit(player.headWorld)) goDeeper();
+  if (levelUpdate.corruptionDelta > 0) vitals.addMadness(levelUpdate.corruptionDelta * 8);
+  if (levelUpdate.wallTrapJustPopped) vitals.addMadness(12);
+  if (blackoutEvents.reachedPlayer) vitals.addMadness(8);
+  vitals.update(deltaSeconds, flashlight.shining && player.movementIntensity < 0.1);
   corruption.update(deltaSeconds);
 
   hud.status = {
@@ -790,6 +813,8 @@ renderer.setAnimationLoop((timestamp) => {
     items: collectionStore.count,
     battery: flashlight.battery,
     sprintEnergy: player.sprintEnergy,
+    health: vitals.health / vitals.maxHealth,
+    madness: vitals.madness / vitals.maxMadness,
     // Plein à moins de 5 m, vide au-delà de 60 m ; brouillé par la corruption.
     signal: THREE.MathUtils.clamp(1 - (levelUpdate.exitDistance - 5) / 55, 0, 1) * (1 - corruption.value * 0.6 * Math.random()),
     debug: perfStats.readAndReset(),

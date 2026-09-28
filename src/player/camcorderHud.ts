@@ -11,7 +11,18 @@ const UPDATE_INTERVAL_SECONDS = 0.25;
 const PANEL_WIDTH = 0.36;
 const PANEL_HEIGHT = (CANVAS_HEIGHT / CANVAS_WIDTH) * PANEL_WIDTH;
 const PANEL_POSITION = new THREE.Vector3(0, 0.1465, -0.5);
-const ENERGY_POSITION = new THREE.Vector3(0.22, -0.22, -0.5);
+const GAUGES_POSITION = new THREE.Vector3(0.2, -0.2, -0.5);
+const GAUGE_SPACING = 0.047;
+
+type GaugeId = "energy" | "health" | "madness";
+
+interface GaugeDisplay {
+  readonly ctx: CanvasRenderingContext2D;
+  readonly texture: THREE.CanvasTexture;
+  readonly mesh: THREE.Mesh;
+  visibleUntil: number;
+  lastValue: number;
+}
 
 export interface HudStatus {
   depth: number;
@@ -25,6 +36,10 @@ export interface HudStatus {
   sprintEnergy: number;
   /** Force du "signal" de la sortie (0..1) : monte en s'en approchant. */
   signal: number;
+  /** Santé du joueur (0..1), irréversible pendant la run. */
+  health: number;
+  /** Folie du joueur (0..1), dissipée par l'attente lampe allumée. */
+  madness: number;
   /** Ligne de mesures de perfs (`?debug=1`), sinon null. */
   debug: string | null;
 }
@@ -35,12 +50,23 @@ export interface HudStatus {
  * boutons soient toujours visibles.
  */
 export class CamcorderHud {
-  status: HudStatus = { depth: 0, crouching: false, sprinting: false, flashlight: false, items: 0, battery: 1, sprintEnergy: 1, signal: 0, debug: null };
+  status: HudStatus = {
+    depth: 0,
+    crouching: false,
+    sprinting: false,
+    flashlight: false,
+    items: 0,
+    battery: 1,
+    sprintEnergy: 1,
+    signal: 0,
+    health: 1,
+    madness: 0,
+    debug: null,
+  };
 
   private readonly ctx: CanvasRenderingContext2D;
   private readonly texture: THREE.CanvasTexture;
-  private readonly energyCtx: CanvasRenderingContext2D;
-  private readonly energyTexture: THREE.CanvasTexture;
+  private readonly gauges = new Map<GaugeId, GaugeDisplay>();
   private elapsedSeconds = 0;
   private timeSinceRedraw = Infinity;
   private notice = "";
@@ -60,15 +86,6 @@ export class CamcorderHud {
     this.texture = new THREE.CanvasTexture(canvas);
     this.texture.colorSpace = THREE.SRGBColorSpace;
 
-    const energyCanvas = document.createElement("canvas");
-    energyCanvas.width = 256;
-    energyCanvas.height = 32;
-    const energyCtx = energyCanvas.getContext("2d");
-    if (!energyCtx) throw new Error("Contexte 2D indisponible pour la jauge d'énergie");
-    this.energyCtx = energyCtx;
-    this.energyTexture = new THREE.CanvasTexture(energyCanvas);
-    this.energyTexture.colorSpace = THREE.SRGBColorSpace;
-
     const mesh = new THREE.Mesh(
       new THREE.PlaneGeometry(PANEL_WIDTH, PANEL_HEIGHT),
       new THREE.MeshBasicMaterial({ map: this.texture, transparent: true, depthTest: false, depthWrite: false, fog: false }),
@@ -78,14 +95,26 @@ export class CamcorderHud {
     mesh.frustumCulled = false;
     camera.add(mesh);
 
-    const energyMesh = new THREE.Mesh(
-      new THREE.PlaneGeometry(0.16, 0.02),
-      new THREE.MeshBasicMaterial({ map: this.energyTexture, transparent: true, depthTest: false, depthWrite: false, fog: false }),
-    );
-    energyMesh.position.copy(ENERGY_POSITION);
-    energyMesh.renderOrder = 998;
-    energyMesh.frustumCulled = false;
-    camera.add(energyMesh);
+    const gaugeIds: GaugeId[] = ["energy", "health", "madness"];
+    gaugeIds.forEach((id, index) => {
+      const canvas = document.createElement("canvas");
+      canvas.width = 64;
+      canvas.height = 256;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) throw new Error("Contexte 2D indisponible pour les jauges de survie");
+      const texture = new THREE.CanvasTexture(canvas);
+      texture.colorSpace = THREE.SRGBColorSpace;
+      const mesh = new THREE.Mesh(
+        new THREE.PlaneGeometry(0.04, 0.18),
+        new THREE.MeshBasicMaterial({ map: texture, transparent: true, depthTest: false, depthWrite: false, fog: false }),
+      );
+      mesh.position.set(GAUGES_POSITION.x + (index - (gaugeIds.length - 1) / 2) * GAUGE_SPACING, GAUGES_POSITION.y, GAUGES_POSITION.z);
+      mesh.renderOrder = 998;
+      mesh.frustumCulled = false;
+      mesh.visible = false;
+      camera.add(mesh);
+      this.gauges.set(id, { ctx, texture, mesh, visibleUntil: 0, lastValue: id === "health" || id === "energy" ? 1 : 0 });
+    });
   }
 
   /**
@@ -134,6 +163,18 @@ export class CamcorderHud {
     ctx.fillText(value, x, y);
   }
 
+  private updateGauge(id: GaugeId, value: number, label: string, color: string): void {
+    const gauge = this.gauges.get(id)!;
+    if (Math.abs(value - gauge.lastValue) > 0.001) {
+      gauge.visibleUntil = this.elapsedSeconds + 2.2;
+      gauge.lastValue = value;
+      gauge.ctx.clearRect(0, 0, 64, 256);
+      drawVerticalBar(gauge.ctx, 32, label, value, color);
+      gauge.texture.needsUpdate = true;
+    }
+    gauge.mesh.visible = this.elapsedSeconds < gauge.visibleUntil;
+  }
+
   private redraw(): void {
     const ctx = this.ctx;
     const blink = Math.floor(this.elapsedSeconds * 1.2) % 2 === 0;
@@ -146,6 +187,11 @@ export class CamcorderHud {
     const level = Math.round(this.status.battery * 100);
     const battery = level >= 10 || blink ? `${t("hud.battery")} ${level}%` : "";
     const energyLevel = THREE.MathUtils.clamp(this.status.sprintEnergy, 0, 1);
+    const healthLevel = THREE.MathUtils.clamp(this.status.health, 0, 1);
+    const madnessLevel = THREE.MathUtils.clamp(this.status.madness, 0, 1);
+    this.updateGauge("energy", energyLevel, t("hud.energyShort"), energyLevel < 0.2 ? "#ff6b5a" : "#9fe39f");
+    this.updateGauge("health", healthLevel, t("hud.healthShort"), "#ff6b5a");
+    this.updateGauge("madness", madnessLevel, t("hud.madnessShort"), "#c48cff");
     const depth = `${t("hud.level")} ${this.status.depth}`;
     const bag = `${t("hud.bag")} ${this.status.items}`;
     // Signal de la sortie (façon réception du caméscope) : 5 barres, de plus en plus pleines.
@@ -156,7 +202,7 @@ export class CamcorderHud {
     const debug = notice ? "" : (this.status.debug ?? "");
     // Rien n'a changé depuis le dernier dessin : ni redessin, ni envoi de la texture au GPU
     // (1024 × 220 px, mipmaps comprises) — le cas le plus courant entre deux secondes du compteur.
-    const signature = `${blink}|${clock}|${battery}|${energyLevel.toFixed(3)}|${depth}|${bag}|${signalText}|${flags}|${notice}|${debug}`;
+    const signature = `${blink}|${clock}|${battery}|${energyLevel.toFixed(3)}|${healthLevel.toFixed(3)}|${madnessLevel.toFixed(3)}|${depth}|${bag}|${signalText}|${flags}|${notice}|${debug}`;
     if (signature === this.lastSignature) return;
     this.lastSignature = signature;
 
@@ -177,17 +223,6 @@ export class CamcorderHud {
     this.text("REC", 60, 48, "left");
     this.text(clock, CANVAS_WIDTH / 2, 48, "center");
     if (battery) this.text(battery, CANVAS_WIDTH - 20, 48, "right", level < 20 ? "#ff6b5a" : "#f4f1e8");
-    const energyCtx = this.energyCtx;
-    energyCtx.clearRect(0, 0, 256, 32);
-    energyCtx.fillStyle = "rgba(0, 0, 0, 0.72)";
-    energyCtx.fillRect(0, 0, 256, 32);
-    energyCtx.fillStyle = energyLevel < 0.2 ? "#ff6b5a" : "#9fe39f";
-    energyCtx.fillRect(3, 3, 250 * energyLevel, 26);
-    energyCtx.lineWidth = 3;
-    energyCtx.strokeStyle = "rgba(244, 241, 232, 0.8)";
-    energyCtx.strokeRect(1.5, 1.5, 253, 29);
-    this.energyTexture.needsUpdate = true;
-
     ctx.font = "bold 34px monospace";
     this.text(depth, 20, 120, "left", "#ffe89a");
     this.text(bag, 200, 120, "left");
@@ -211,6 +246,28 @@ export class CamcorderHud {
 
     this.texture.needsUpdate = true;
   }
+}
+
+function drawVerticalBar(ctx: CanvasRenderingContext2D, x: number, label: string, value: number, color: string): void {
+  const top = 34;
+  const height = 178;
+  const width = 30;
+  ctx.font = "bold 22px monospace";
+  ctx.textBaseline = "alphabetic";
+  ctx.textAlign = "center";
+  ctx.lineWidth = 3;
+  ctx.strokeStyle = "rgba(0, 0, 0, 0.9)";
+  ctx.strokeText(label, x, 25);
+  ctx.fillStyle = "#f4f1e8";
+  ctx.fillText(label, x, 25);
+  ctx.fillStyle = "rgba(0, 0, 0, 0.72)";
+  ctx.fillRect(x - width / 2, top, width, height);
+  ctx.fillStyle = color;
+  const fillHeight = Math.max(0, height * value - 6);
+  ctx.fillRect(x - width / 2 + 3, top + height - fillHeight - 3, width - 6, fillHeight);
+  ctx.lineWidth = 2;
+  ctx.strokeStyle = "rgba(244, 241, 232, 0.8)";
+  ctx.strokeRect(x - width / 2 - 1, top - 1, width + 2, height + 2);
 }
 
 /** Coupe un texte en deux lignes au plus (la seconde tronquée si besoin). */

@@ -105,6 +105,7 @@ export class InventoryMenu extends UiPanel {
   private statusUntil = 0;
   private time = 0;
   private buildToken = 0;
+  private hasInitialPlacement = false;
   private readonly miniatureLight = new THREE.PointLight(0xffe6bd, 0.9, 0.9, 2);
 
   constructor(
@@ -133,7 +134,10 @@ export class InventoryMenu extends UiPanel {
   }
 
   open(): void {
-    this.placeInFrontOfHead();
+    if (!this.hasInitialPlacement) {
+      this.placeInFrontOfHead();
+      this.hasInitialPlacement = true;
+    }
     this.group.visible = true;
     this.stopArmedUntil = 0;
     this.rebuildMiniatures();
@@ -361,12 +365,6 @@ export class InventoryMenu extends UiPanel {
    * pour les 10 cases à chaque fois — source de à-coups mesurés pendant l'interaction.
    */
   private rebuildMiniatures(): void {
-    if (!this.visible) {
-      for (const miniature of this.miniatures.values()) miniature.pivot.removeFromParent();
-      this.miniatures.clear();
-      this.buildToken++;
-      return;
-    }
     const token = ++this.buildToken;
     const entries = this.entriesOnPage();
     for (const [slot, miniature] of this.miniatures) {
@@ -376,6 +374,7 @@ export class InventoryMenu extends UiPanel {
         this.miniatures.delete(slot);
       }
     }
+    if (!this.visible) return;
 
     entries.forEach((entry, slot) => {
       if (this.miniatures.has(slot)) return;
@@ -522,13 +521,9 @@ export class InventoryMenu extends UiPanel {
     const battery = Math.round((perks.batteryCapacity - 1) * 100);
     const decay = Math.round((perks.corruptionDecay - 1) * 100);
     const stamina = Math.round((perks.sprintRecovery - 1) * 100);
-    ctx.fillText(
-      battery === 0 && decay === 0 && stamina === 0 && perks.beaconSteadiness === 0
-        ? t("perks.none")
-        : t("perks.line", { battery, decay, stamina, compass: perks.beaconSteadiness > 0 ? t("perks.compass") : "" }),
-      width / 2,
-      720 + DEBUG_ROW,
-    );
+    if (battery !== 0 || decay !== 0 || stamina !== 0 || perks.beaconSteadiness > 0) {
+      ctx.fillText(t("perks.line", { battery, decay, stamina, compass: perks.beaconSteadiness > 0 ? t("perks.compass") : "" }), width / 2, 720 + DEBUG_ROW);
+    }
     ctx.fillStyle = "#7d7563";
     ctx.fillText(t("inv.footer"), width / 2, 752 + DEBUG_ROW);
     ctx.textAlign = "right";

@@ -57,6 +57,7 @@ export class Journal extends UiPanel {
   private status: { key: TranslationKey; good: boolean } | null = null;
   private readonly hovered = new Map<Hand, string | null>();
   private hitRects: Array<{ id: string; rect: Rect }> = [];
+  private hasInitialPlacement = false;
 
   constructor(
     private readonly camera: THREE.Camera,
@@ -73,12 +74,15 @@ export class Journal extends UiPanel {
   /** Depuis le menu : le journal flotte devant le joueur. */
   openFloating(): void {
     if (this.group.parent !== this.body) this.body.add(this.group);
-    const head = this.camera.position;
-    const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(this.camera.quaternion).setY(0);
-    if (forward.lengthSq() < 1e-6) forward.set(0, 0, -1);
-    forward.normalize();
-    this.group.position.set(head.x + forward.x * FLOAT_DISTANCE, head.y - 0.12, head.z + forward.z * FLOAT_DISTANCE);
-    this.group.rotation.set(-0.2, Math.atan2(-forward.x, -forward.z), 0, "YXZ");
+    if (!this.hasInitialPlacement) {
+      const head = this.camera.position;
+      const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(this.camera.quaternion).setY(0);
+      if (forward.lengthSq() < 1e-6) forward.set(0, 0, -1);
+      forward.normalize();
+      this.group.position.set(head.x + forward.x * FLOAT_DISTANCE, head.y - 0.12, head.z + forward.z * FLOAT_DISTANCE);
+      this.group.rotation.set(-0.2, Math.atan2(-forward.x, -forward.z), 0, "YXZ");
+      this.hasInitialPlacement = true;
+    }
     this.show();
   }
 

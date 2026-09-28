@@ -12,8 +12,9 @@ const PX_PER_M = 1830;
 const DISTANCE = 0.75;
 const LEADERBOARD_ROWS = 7;
 
-type Phase = "review" | "submitting" | "result" | "error";
+type Phase = "review" | "submitting" | "result" | "error" | "gameover";
 type ButtonId = "adjective" | "noun" | "submit" | "restart";
+export type GameOverReason = "health" | "caught";
 
 const BUTTONS: Record<ButtonId, Rect> = {
   adjective: { x: 60, y: 330, w: 420, h: 70 },
@@ -35,7 +36,9 @@ export class EndRunScreen extends UiPanel {
   private suffix = 0;
   private leaderboard: LeaderboardEntry[] = [];
   private errorMessage = "";
+  private gameOverReason: GameOverReason = "health";
   private readonly hovered = new Map<Hand, ButtonId | null>();
+  private hasInitialPlacement = false;
 
   constructor(
     private readonly camera: THREE.Camera,
@@ -56,6 +59,23 @@ export class EndRunScreen extends UiPanel {
     this.nounIndex = Math.floor(Math.random() * PSEUDO_NOUN_COUNT);
     this.suffix = Math.floor(Math.random() * 10000);
     this.phase = "review";
+    this.errorMessage = "";
+    this.placeIfNeeded();
+    this.group.visible = true;
+    this.invalidate();
+  }
+
+  showGameOver(depthReached: number, reason: GameOverReason): void {
+    this.depthReached = depthReached;
+    this.gameOverReason = reason;
+    this.phase = "gameover";
+    this.placeIfNeeded();
+    this.group.visible = true;
+    this.invalidate();
+  }
+
+  private placeIfNeeded(): void {
+    if (this.hasInitialPlacement) return;
     const head = this.camera.position;
     const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(this.camera.quaternion);
     forward.y = 0;
@@ -63,8 +83,7 @@ export class EndRunScreen extends UiPanel {
     forward.normalize();
     this.group.position.set(head.x + forward.x * DISTANCE, head.y - 0.05, head.z + forward.z * DISTANCE);
     this.group.rotation.set(0, Math.atan2(-forward.x, -forward.z), 0);
-    this.group.visible = true;
-    this.invalidate();
+    this.hasInitialPlacement = true;
   }
 
   /** Raccourci : A (main droite) valide / relance. */
@@ -73,7 +92,7 @@ export class EndRunScreen extends UiPanel {
     for (const hand of hands) {
       if (hand.input.handedness !== "right" || !hand.input.primary.justPressed) continue;
       if (this.phase === "review") this.submit();
-      else if (this.phase === "result" || this.phase === "error") this.restart();
+      else if (this.phase === "result" || this.phase === "error" || this.phase === "gameover") this.restart();
     }
   }
 
@@ -164,6 +183,14 @@ export class EndRunScreen extends UiPanel {
       wrapText(ctx, this.errorMessage, 80, 260, width - 160, 32, 3);
       ctx.textAlign = "center";
       drawButton(ctx, BUTTONS.restart, t("end.restart"), { hovered: hovered.has("restart") });
+    } else if (this.phase === "gameover") {
+      ctx.font = "bold 34px monospace";
+      ctx.fillStyle = "#ff6b5a";
+      ctx.fillText(t(this.gameOverReason === "caught" ? "end.caught" : "end.healthEmpty"), width / 2, 220);
+      ctx.font = "26px monospace";
+      ctx.fillStyle = "#cfc5ad";
+      ctx.fillText(t("end.gameOver"), width / 2, 290);
+      drawButton(ctx, BUTTONS.restart, t("end.restart"), { hovered: hovered.has("restart"), accent: "#ff6b5a" });
     } else {
       ctx.font = "bold 26px monospace";
       ctx.fillStyle = "#9fe39f";
