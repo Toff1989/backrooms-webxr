@@ -145,15 +145,6 @@
   "blue.cut": "CUT!",
   "blue.take": "TAKE {n}",
   "fiche.full": "UNCUT",
-  "interact.chalk": [
-    "It sees you",
-    "Take {take}",
-    "Don't turn around",
-    "Still here",
-    "Look ahead",
-    "It continues",
-    "Still filming"
-  ],
   "interact.photoBacks": [
     "No one remembers taking this photo.",
     "The corridor looked different, before.",

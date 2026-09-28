@@ -6,7 +6,7 @@ import type { LiveViews } from "../player/liveViews";
 import type { Hand } from "../player/hand";
 import { stringSeedToInt } from "../shared/rng";
 import type { Grabbable, GrabbableRegistry } from "./grabbable";
-import { HANDWRITING_FONT, wrapLines } from "./loreArt";
+import { HANDWRITING_FONT } from "./loreArt";
 import { createFacePlane, findModelFace, type ModelFace } from "./modelFace";
 import { emitNoise } from "./noise";
 import type { LoopHandle, ObjectAudio } from "./objectAudio";
@@ -57,7 +57,6 @@ const IMPACT_MIN_SPEED = 1.2;
 
 const tmp = new THREE.Vector3();
 const tmp2 = new THREE.Vector3();
-const tmp3 = new THREE.Vector3();
 
 /** Tirage déterministe [0..1) propre à un objet (identifiant de collection, sinon position de départ). */
 function objectRoll(g: Grabbable, salt: number): number {
@@ -153,7 +152,6 @@ export class FaceCanvas {
 function faceOf(g: Grabbable, axes?: THREE.Vector3[]): ModelFace | null {
   return axes ? findModelFace(g.object, undefined, axes) : findModelFace(g.object);
 }
-const FRONT_AXES = [new THREE.Vector3(0, 0, 1), new THREE.Vector3(0, 0, -1)];
 const TV_FRONT = new THREE.Vector3(0, 0, 1);
 const UP_AXES = [new THREE.Vector3(0, 1, 0)];
 
@@ -325,52 +323,6 @@ const television: Factory = (g, w, system) => {
 };
 
 /** Écran de projection : quand on s'approche, le projecteur (invisible) démarre — amorce, compte à rebours. */
-/** Tableau noir : un message apparaît après un court regard posé sur sa surface. */
-const chalkboard: Factory = (g, w) => {
-  const face = faceOf(g, FRONT_AXES);
-  // shrink réduit (marge sur le cadre du tableau) ; raise recentre le message sur la surface
-  // écrite (le bas du tableau, souvent occupé par un porte-craie, tirait le texte vers le bas).
-  const board = face ? new FaceCanvas(g.object, face, 256, 192, { shrink: 0.68, transparent: true, glow: true, raise: 0.1 }) : null;
-  let written = false;
-  let looked = 0;
-  const delay = 0.25 + objectRoll(g, 1) * 0.25;
-  return {
-    update: (dt, near) => {
-      if (written || !board || !near) return;
-      const center = g.object.localToWorld(face!.center.clone());
-      const normal = face!.normal.clone().transformDirection(g.object.matrixWorld).normalize();
-      const toPlayer = tmp.subVectors(w.head(), center).normalize();
-      w.camera.getWorldDirection(tmp2);
-      const toBoard = tmp3.subVectors(center, w.head()).normalize();
-      const looking = center.distanceTo(w.head()) < 9 && normal.dot(toPlayer) > 0.25 && tmp2.dot(toBoard) > 0.78;
-      looked = looking ? looked + dt : 0;
-      if (looked < delay) return;
-      written = true;
-      const messages = tList("interact.chalk");
-      const message = messages[Math.floor(objectRoll(g, 2) * messages.length)]!.replace("{take}", String(w.take()));
-      const ctx = board.ctx;
-      ctx.clearRect(0, 0, 256, 192);
-      // Craie bien contrastée (blanc quasi pur + léger halo) : lisible même de loin, à travers la corruption.
-      ctx.font = "bold 46px " + HANDWRITING_FONT;
-      ctx.textAlign = "center";
-      ctx.textBaseline = "middle";
-      ctx.shadowColor = "rgba(0, 0, 0, 0.55)";
-      ctx.shadowBlur = 6;
-      const lines = wrapLines(ctx, message, 232);
-      const lineHeight = 50;
-      ctx.fillStyle = "rgba(250, 250, 245, 0.97)";
-      lines.forEach((line, index) => {
-        ctx.save();
-        ctx.translate(128, 96 + (index - (lines.length - 1) / 2) * lineHeight);
-        ctx.rotate(-0.05);
-        ctx.fillText(line, 0, 0);
-        ctx.restore();
-      });
-      board.commit();
-    },
-    dispose: () => board?.dispose(),
-  };
-};
 
 /** Chariot : ses roulettes grincent quand on le pousse (plus maintenant, s'il a été graissé). */
 const storageCart: Factory = (g, w) => {
@@ -621,39 +573,63 @@ function sprayCan(lubricant: boolean): Factory {
   };
 }
 
-type Axis = "x" | "y" | "z";
-
-function axisValue(v: THREE.Vector3, axis: Axis): number {
-  return axis === "x" ? v.x : axis === "y" ? v.y : v.z;
+/**
+ * Repère 2D du plan d'une sous-maille plate, à partir de sa normale moyenne (pas de ses axes
+ * X/Y/Z locaux bruts) : reste correct même si la plaque est légèrement inclinée (un tableau
+ * d'écolier posé sur un chevalet, par exemple), là où choisir "l'axe le plus fin de la bounding
+ * box" comme épaisseur se trompe complètement dès que le panneau n'est pas aligné aux axes du
+ * monde. Même convention up/right que `modelFace.ts` (`faceFor`).
+ */
+function platePlaneBasis(mesh: THREE.Mesh): { center: THREE.Vector3; right: THREE.Vector3; up: THREE.Vector3 } {
+  const geometry = mesh.geometry;
+  const normalAttr = geometry.attributes["normal"] as THREE.BufferAttribute | undefined;
+  const normal = new THREE.Vector3();
+  const n = new THREE.Vector3();
+  if (normalAttr) {
+    for (let i = 0; i < normalAttr.count; i++) normal.add(n.fromBufferAttribute(normalAttr, i));
+  }
+  if (normal.lengthSq() < 1e-8) normal.set(0, 0, 1); // repli si pas de normales exploitables
+  normal.normalize();
+  const reference = Math.abs(normal.y) > 0.8 ? new THREE.Vector3(0, 0, -1) : new THREE.Vector3(0, 1, 0);
+  const up = reference.clone().sub(normal.clone().multiplyScalar(reference.dot(normal))).normalize();
+  const right = new THREE.Vector3().crossVectors(up, normal).normalize();
+  geometry.computeBoundingBox();
+  const center = geometry.boundingBox!.getCenter(new THREE.Vector3());
+  return { center, right, up };
 }
 
-/**
- * Les deux axes locaux du plan d'une sous-maille plate (hors épaisseur). Le plus fin des trois
- * axes locaux est l'épaisseur de la plaque ; parmi les deux autres, Y est la hauteur (convention
- * "haut" du modèle), l'axe restant est la largeur.
- */
-function platePlaneAxes(mesh: THREE.Mesh): { widthAxis: Axis; heightAxis: Axis; box: THREE.Box3 } {
-  mesh.geometry.computeBoundingBox();
-  const box = mesh.geometry.boundingBox!;
-  const size = box.getSize(new THREE.Vector3());
-  const dims: Array<[Axis, number]> = [
-    ["x", size.x],
-    ["y", size.y],
-    ["z", size.z],
-  ];
-  dims.sort((a, b) => a[1] - b[1]);
-  const [, second, third] = dims as [[Axis, number], [Axis, number], [Axis, number]];
-  const heightAxis = second[0] === "y" ? second[0] : third[0];
-  const widthAxis = second[0] === "y" ? third[0] : second[0];
-  return { widthAxis, heightAxis, box };
+/** Étendue (u, v) de chaque sommet dans le repère du plan, plus min/max pour normaliser ensuite. */
+function platePlaneExtent(mesh: THREE.Mesh, basis: { center: THREE.Vector3; right: THREE.Vector3; up: THREE.Vector3 }) {
+  const position = mesh.geometry.attributes["position"] as THREE.BufferAttribute;
+  const us = new Float32Array(position.count);
+  const vs = new Float32Array(position.count);
+  const p = new THREE.Vector3();
+  const offset = new THREE.Vector3();
+  let minU = Infinity,
+    maxU = -Infinity,
+    minV = Infinity,
+    maxV = -Infinity;
+  for (let i = 0; i < position.count; i++) {
+    p.fromBufferAttribute(position, i);
+    offset.subVectors(p, basis.center);
+    const u = offset.dot(basis.right);
+    const v = offset.dot(basis.up);
+    us[i] = u;
+    vs[i] = v;
+    if (u < minU) minU = u;
+    if (u > maxU) maxU = u;
+    if (v < minV) minV = v;
+    if (v > maxV) maxV = v;
+  }
+  return { us, vs, minU, maxU, minV, maxV };
 }
 
 /** Ratio largeur/hauteur d'une sous-maille plate : évite de plaquer un canvas carré sur une
  * ouverture rectangulaire (l'image ressort étirée, cases pas carrées). */
 export function meshPlateAspect(mesh: THREE.Mesh): number {
-  const { widthAxis, heightAxis, box } = platePlaneAxes(mesh);
-  const size = box.getSize(new THREE.Vector3());
-  return axisValue(size, widthAxis) / axisValue(size, heightAxis);
+  const basis = platePlaneBasis(mesh);
+  const { minU, maxU, minV, maxV } = platePlaneExtent(mesh, basis);
+  return (maxU - minU) / (maxV - minV);
 }
 
 /**
@@ -663,16 +639,14 @@ export function meshPlateAspect(mesh: THREE.Mesh): number {
  * aux autres pièces (vu sur le dos d'un cadre photo : texte tourné à 90° et inversé).
  */
 export function remapPlateUV(mesh: THREE.Mesh): void {
-  const { widthAxis, heightAxis, box } = platePlaneAxes(mesh);
-  const position = mesh.geometry.attributes["position"] as THREE.BufferAttribute;
-  const uv = new Float32Array(position.count * 2);
-  const p = new THREE.Vector3();
-  const widthSpan = axisValue(box.max, widthAxis) - axisValue(box.min, widthAxis);
-  const heightSpan = axisValue(box.max, heightAxis) - axisValue(box.min, heightAxis);
-  for (let i = 0; i < position.count; i++) {
-    p.fromBufferAttribute(position, i);
-    uv[i * 2] = (axisValue(p, widthAxis) - axisValue(box.min, widthAxis)) / widthSpan;
-    uv[i * 2 + 1] = (axisValue(p, heightAxis) - axisValue(box.min, heightAxis)) / heightSpan;
+  const basis = platePlaneBasis(mesh);
+  const { us, vs, minU, maxU, minV, maxV } = platePlaneExtent(mesh, basis);
+  const uSpan = maxU - minU || 1;
+  const vSpan = maxV - minV || 1;
+  const uv = new Float32Array(us.length * 2);
+  for (let i = 0; i < us.length; i++) {
+    uv[i * 2] = (us[i]! - minU) / uSpan;
+    uv[i * 2 + 1] = (vs[i]! - minV) / vSpan;
   }
   mesh.geometry.setAttribute("uv", new THREE.BufferAttribute(uv, 2));
 }
@@ -1120,7 +1094,6 @@ const securityCamera: Factory = (g, w, system) => {
 const BEHAVIOURS: Record<string, Factory> = {
   securityCamera,
   television,
-  chalkboard,
   storageCart,
   metalShelves,
   wetFloorSign,
@@ -1187,7 +1160,6 @@ const BEHAVIOURS: Record<string, Factory> = {
 export function prepareInteractionFaces(kind: string, template: THREE.Object3D): void {
   const behaviour = BEHAVIOURS[kind];
   if (behaviour === television) findModelFace(template, TV_FRONT);
-  else if (behaviour === chalkboard) findModelFace(template, undefined, FRONT_AXES);
   else if (behaviour === compass || behaviour === digitalWatch) findModelFace(template, undefined, UP_AXES);
   else if (behaviour === photo) {
     const front = findModelFace(template);
