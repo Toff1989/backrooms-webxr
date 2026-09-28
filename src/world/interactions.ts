@@ -96,9 +96,27 @@ export class FaceCanvas {
     this.ctx = this.canvas.getContext("2d")!;
     this.texture = new THREE.CanvasTexture(this.canvas);
     this.texture.colorSpace = THREE.SRGBColorSpace;
-    const material = options.glow
-      ? new THREE.MeshBasicMaterial({ map: this.texture, toneMapped: false, transparent: options.transparent ?? false })
-      : new THREE.MeshStandardMaterial({ map: this.texture, roughness: 0.9, transparent: options.transparent ?? false, emissiveMap: this.texture, emissive: 0xffffff, emissiveIntensity: 0.12 });
+    // Sur une vraie sous-maille écran, on garde son matériau (normal map, rugosité, reflets) et on
+    // ne remplace que la texture diffuse : un écran de télé reste vitreux/réfléchissant même en
+    // affichant l'image, contrairement à un plan neuf entièrement réémissif (cas du fallback).
+    const existingBase = options.existingMesh && !Array.isArray(options.existingMesh.material) && options.existingMesh.material instanceof THREE.MeshStandardMaterial ? options.existingMesh.material : null;
+    let material: THREE.Material;
+    if (existingBase) {
+      const clone = existingBase.clone();
+      clone.map = this.texture;
+      clone.color.set(0xffffff);
+      if (options.transparent !== undefined) clone.transparent = options.transparent;
+      if (options.glow) {
+        clone.emissiveMap = this.texture;
+        clone.emissive = new THREE.Color(0xffffff);
+        clone.emissiveIntensity = 1;
+      }
+      material = clone;
+    } else {
+      material = options.glow
+        ? new THREE.MeshBasicMaterial({ map: this.texture, toneMapped: false, transparent: options.transparent ?? false })
+        : new THREE.MeshStandardMaterial({ map: this.texture, roughness: 0.9, transparent: options.transparent ?? false, emissiveMap: this.texture, emissive: 0xffffff, emissiveIntensity: 0.12 });
+    }
     material.polygonOffset = true;
     material.polygonOffsetFactor = -2;
     this.material = material;
