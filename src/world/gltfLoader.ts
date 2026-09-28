@@ -67,7 +67,7 @@ function capBlendGlassOpacity(material: THREE.MeshStandardMaterial): void {
   material.opacity = Math.min(material.opacity, GLASS_OPACITY);
 }
 
-function mergeByMaterial(root: THREE.Object3D): THREE.Object3D {
+function mergeByMaterial(root: THREE.Object3D, preserveNames: ReadonlySet<string>): THREE.Object3D {
   root.updateMatrixWorld(true);
   const rootInverse = new THREE.Matrix4().copy(root.matrixWorld).invert();
   const groups = new Map<THREE.Material, THREE.BufferGeometry[]>();

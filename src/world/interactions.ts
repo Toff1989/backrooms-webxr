@@ -57,6 +57,9 @@ const IMPACT_MIN_SPEED = 1.2;
 
 const tmp = new THREE.Vector3();
 const tmp2 = new THREE.Vector3();
+const tmpBox = new THREE.Box3();
+/** Marge (m) au-delà du boîtier de la caméra de surveillance, pour ne jamais l'avoir dans le champ. */
+const SECURITY_LENS_CLEARANCE = 0.04;
 
 /** Tirage déterministe [0..1) propre à un objet (identifiant de collection, sinon position de départ). */
 function objectRoll(g: Grabbable, salt: number): number {
@@ -728,7 +731,7 @@ const photo: Factory = (g, w) => {
   // lieu de coller un plan neuf à la taille de la plus grande face détectée (la façade du cadre,
   // plus grande que l'ouverture — ça débordait par-dessus le cadre et masquait le verre).
   const artwork = findMeshByName(g.object, /artwork/i);
-  const [fw, fh] = canvasSizeForAspect(artwork ? meshPlateAspect(artwork) : front.width / front.height);
+  const [fw, fh] = canvasSizeForAspect(artwork ? meshPlateAspect(artwork) : front.width / front.height, PHOTO_TEXTURE_HEIGHT);
   const frontCanvas = artwork ? new FaceCanvas(g.object, null, fw, fh, { existingMesh: artwork }) : new FaceCanvas(g.object, front, fw, fh, { shrink: 0.82 });
   drawFoundPhoto(frontCanvas.ctx, objectRoll(g, 7), fw, fh);
   frontCanvas.commit();
@@ -742,7 +745,7 @@ const photo: Factory = (g, w) => {
   // pièces du modèle (texte illisible sinon) : on retrace ses UV nous-mêmes.
   if (backMesh) remapPlateUV(backMesh);
   const backAspect = backMesh ? meshPlateAspect(backMesh) : back ? back.width / back.height : 1;
-  const [bw, bh] = canvasSizeForAspect(backAspect);
+  const [bw, bh] = canvasSizeForAspect(backAspect, PHOTO_TEXTURE_HEIGHT);
   const backCanvas = backMesh ? new FaceCanvas(g.object, null, bw, bh, { existingMesh: backMesh, transparent: true }) : back ? new FaceCanvas(g.object, back, bw, bh, { shrink: 0.9, transparent: true }) : null;
   if (backCanvas) {
     const texts = tList("interact.photoBacks");
@@ -769,7 +772,7 @@ const photo: Factory = (g, w) => {
     ctx.font = `20px ${HANDWRITING_FONT}`;
     ctx.textBaseline = "alphabetic";
     const words = (texts[Math.floor(objectRoll(g, 6) * texts.length)] ?? "").split(" ");
-    const maxWidth = width - 24;
+    const maxWidth = 168;
     const lines: string[] = [];
     let line = "";
     for (const word of words) {
@@ -779,7 +782,8 @@ const photo: Factory = (g, w) => {
         line = word;
       } else line = candidate;
     }
-    ctx.fillText(line, 14, y);
+    if (line) lines.push(line);
+    for (const [index, text] of lines.entries()) ctx.fillText(text, 42, 44 + index * 24);
     ctx.fillStyle = "rgba(110, 64, 36, 0.7)";
     ctx.font = "bold 9px monospace";
     ctx.fillText("ARCHIVE / 04", 112, 178);
@@ -929,7 +933,7 @@ const compass = dial(128, 0.1, -0.08, (ctx, g, w, face) => {
   ctx.restore();
 }, /dial_center/i);
 
-const digitalWatch = dial(128, 1, 0.08, (ctx, g, w) => {
+const digitalWatch = dial(128, 1, 0.08, (ctx, _g, w) => {
   const total = Math.floor(w.runSeconds());
   ctx.fillStyle = "#9fb08a";
   ctx.fillRect(0, 28, 128, 72);
