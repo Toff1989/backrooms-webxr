@@ -16,6 +16,8 @@ const HEIGHT_LAMBDA = 10;
 const CALIBRATION_DELAY_SECONDS = 0.6;
 
 const CROUCH_SPEED = 1.25;
+const SPRINT_DRAIN_PER_SECOND = 0.22;
+const SPRINT_RECHARGE_PER_SECOND = 0.16;
 const MOVE_DEADZONE = 0.15;
 const SNAP_TURN_ANGLE = THREE.MathUtils.degToRad(45);
 const SNAP_TURN_DEADZONE = 0.6;
@@ -47,6 +49,9 @@ export class PlayerController {
 
   crouching = false;
   sprinting = false;
+  sprintEnergy = 1;
+  sprintRecovery = 1;
+  movementNoise = 0;
   /** Vrai la frame où le rig a été téléporté/tourné (les objets tenus doivent suivre sans balayer le monde). */
   teleported = false;
   movementIntensity = 0;
@@ -138,6 +143,7 @@ export class PlayerController {
     } else if (Math.abs(stickY) < SNAP_TURN_RESET_DEADZONE) {
       this.crouchStickReady = true;
     }
+    if (this.crouching) this.sprinting = false;
     this.updateHeight(deltaSeconds);
 
     if (presenting && !this.wasPresenting) {
@@ -185,8 +191,14 @@ export class PlayerController {
     const y = input.left.stickY;
     const magnitude = Math.min(Math.hypot(x, y), 1);
 
-    if (input.left.stick.justPressed) this.sprinting = !this.sprinting;
+    if (input.left.stick.justPressed && !this.crouching && this.sprintEnergy > 0) this.sprinting = !this.sprinting;
     if (magnitude < MOVE_DEADZONE) this.sprinting = false;
+    if (this.sprinting && magnitude >= MOVE_DEADZONE) {
+      this.sprintEnergy = Math.max(0, this.sprintEnergy - SPRINT_DRAIN_PER_SECOND * deltaSeconds);
+      if (this.sprintEnergy === 0) this.sprinting = false;
+    } else {
+      this.sprintEnergy = Math.min(1, this.sprintEnergy + SPRINT_RECHARGE_PER_SECOND * this.sprintRecovery * deltaSeconds);
+    }
 
     this.updateHeadWorld();
     this.move.set(0, 0, 0);
@@ -200,6 +212,8 @@ export class PlayerController {
       const speed = this.crouching ? CROUCH_SPEED : this.sprinting ? PLAYER_SPRINT_SPEED : PLAYER_MOVE_SPEED;
       this.move.multiplyScalar(speed * deltaSeconds);
     }
+    const movement = magnitude >= MOVE_DEADZONE ? magnitude : 0;
+    this.movementNoise = this.crouching ? movement * 0.12 : this.sprinting ? movement * 0.8 : movement * 0.35;
 
     // La capsule suit la tête (déplacement au stick + déplacement physique dans la pièce).
     const current = this.capsuleBody.translation();
@@ -220,6 +234,6 @@ export class PlayerController {
     this.rig.position.z += this.capsulePosition.z - this.headWorld.z;
     this.updateHeadWorld();
 
-    return magnitude >= MOVE_DEADZONE ? magnitude : 0;
+    return movement;
   }
 }

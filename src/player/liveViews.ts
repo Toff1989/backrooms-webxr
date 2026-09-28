@@ -22,6 +22,7 @@ interface View {
  */
 export class LiveViews {
   private readonly views = new Map<string, View>();
+  private readonly hiddenFromViews = new Set<THREE.Object3D>();
   private time = 0;
   /** Mesures pour le journal de debug (remises à zéro à chaque lecture). */
   private statRenders = 0;
@@ -34,6 +35,14 @@ export class LiveViews {
     private readonly scene: THREE.Scene,
     private readonly playerCamera: THREE.Camera,
   ) {}
+
+  hideFromOffscreen(object: THREE.Object3D): void {
+    this.hiddenFromViews.add(object);
+  }
+
+  showInOffscreen(object: THREE.Object3D): void {
+    this.hiddenFromViews.delete(object);
+  }
 
   /**
    * Demande la vue `id` pour cette frame : renvoie sa caméra (à placer par l'appelant) et la
@@ -82,7 +91,7 @@ export class LiveViews {
     due.timer = due.interval;
     due.camera.updateMatrixWorld();
     const started = performance.now();
-    renderOffscreen(this.renderer, this.scene, this.playerCamera, due.camera, due.target, due.displays);
+    renderOffscreen(this.renderer, this.scene, this.playerCamera, due.camera, due.target, [...due.displays, ...this.hiddenFromViews]);
     const ms = performance.now() - started;
     this.statRenders++;
     this.statMs += ms;

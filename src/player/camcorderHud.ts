@@ -11,6 +11,7 @@ const UPDATE_INTERVAL_SECONDS = 0.25;
 const PANEL_WIDTH = 0.36;
 const PANEL_HEIGHT = (CANVAS_HEIGHT / CANVAS_WIDTH) * PANEL_WIDTH;
 const PANEL_POSITION = new THREE.Vector3(0, 0.1465, -0.5);
+const ENERGY_POSITION = new THREE.Vector3(0.22, -0.22, -0.5);
 
 export interface HudStatus {
   depth: number;
@@ -20,6 +21,8 @@ export interface HudStatus {
   items: number;
   /** Batterie de la lampe torche (0..1). */
   battery: number;
+  /** Energie de sprint (0..1). */
+  sprintEnergy: number;
   /** Force du "signal" de la sortie (0..1) : monte en s'en approchant. */
   signal: number;
   /** Ligne de mesures de perfs (`?debug=1`), sinon null. */
@@ -32,10 +35,12 @@ export interface HudStatus {
  * boutons soient toujours visibles.
  */
 export class CamcorderHud {
-  status: HudStatus = { depth: 0, crouching: false, sprinting: false, flashlight: false, items: 0, battery: 1, signal: 0, debug: null };
+  status: HudStatus = { depth: 0, crouching: false, sprinting: false, flashlight: false, items: 0, battery: 1, sprintEnergy: 1, signal: 0, debug: null };
 
   private readonly ctx: CanvasRenderingContext2D;
   private readonly texture: THREE.CanvasTexture;
+  private readonly energyCtx: CanvasRenderingContext2D;
+  private readonly energyTexture: THREE.CanvasTexture;
   private elapsedSeconds = 0;
   private timeSinceRedraw = Infinity;
   private notice = "";
@@ -55,6 +60,15 @@ export class CamcorderHud {
     this.texture = new THREE.CanvasTexture(canvas);
     this.texture.colorSpace = THREE.SRGBColorSpace;
 
+    const energyCanvas = document.createElement("canvas");
+    energyCanvas.width = 256;
+    energyCanvas.height = 32;
+    const energyCtx = energyCanvas.getContext("2d");
+    if (!energyCtx) throw new Error("Contexte 2D indisponible pour la jauge d'énergie");
+    this.energyCtx = energyCtx;
+    this.energyTexture = new THREE.CanvasTexture(energyCanvas);
+    this.energyTexture.colorSpace = THREE.SRGBColorSpace;
+
     const mesh = new THREE.Mesh(
       new THREE.PlaneGeometry(PANEL_WIDTH, PANEL_HEIGHT),
       new THREE.MeshBasicMaterial({ map: this.texture, transparent: true, depthTest: false, depthWrite: false, fog: false }),
@@ -63,6 +77,15 @@ export class CamcorderHud {
     mesh.renderOrder = 997;
     mesh.frustumCulled = false;
     camera.add(mesh);
+
+    const energyMesh = new THREE.Mesh(
+      new THREE.PlaneGeometry(0.16, 0.02),
+      new THREE.MeshBasicMaterial({ map: this.energyTexture, transparent: true, depthTest: false, depthWrite: false, fog: false }),
+    );
+    energyMesh.position.copy(ENERGY_POSITION);
+    energyMesh.renderOrder = 998;
+    energyMesh.frustumCulled = false;
+    camera.add(energyMesh);
   }
 
   /**
@@ -122,6 +145,7 @@ export class CamcorderHud {
     // Batterie de la lampe torche (vraie ressource de jeu) : rouge sous 20 %, clignote sous 10 %.
     const level = Math.round(this.status.battery * 100);
     const battery = level >= 10 || blink ? `${t("hud.battery")} ${level}%` : "";
+    const energyLevel = THREE.MathUtils.clamp(this.status.sprintEnergy, 0, 1);
     const depth = `${t("hud.level")} ${this.status.depth}`;
     const bag = `${t("hud.bag")} ${this.status.items}`;
     // Signal de la sortie (façon réception du caméscope) : 5 barres, de plus en plus pleines.
@@ -132,7 +156,7 @@ export class CamcorderHud {
     const debug = notice ? "" : (this.status.debug ?? "");
     // Rien n'a changé depuis le dernier dessin : ni redessin, ni envoi de la texture au GPU
     // (1024 × 220 px, mipmaps comprises) — le cas le plus courant entre deux secondes du compteur.
-    const signature = `${blink}|${clock}|${battery}|${depth}|${bag}|${signalText}|${flags}|${notice}|${debug}`;
+    const signature = `${blink}|${clock}|${battery}|${energyLevel.toFixed(3)}|${depth}|${bag}|${signalText}|${flags}|${notice}|${debug}`;
     if (signature === this.lastSignature) return;
     this.lastSignature = signature;
 
@@ -153,6 +177,16 @@ export class CamcorderHud {
     this.text("REC", 60, 48, "left");
     this.text(clock, CANVAS_WIDTH / 2, 48, "center");
     if (battery) this.text(battery, CANVAS_WIDTH - 20, 48, "right", level < 20 ? "#ff6b5a" : "#f4f1e8");
+    const energyCtx = this.energyCtx;
+    energyCtx.clearRect(0, 0, 256, 32);
+    energyCtx.fillStyle = "rgba(0, 0, 0, 0.72)";
+    energyCtx.fillRect(0, 0, 256, 32);
+    energyCtx.fillStyle = energyLevel < 0.2 ? "#ff6b5a" : "#9fe39f";
+    energyCtx.fillRect(3, 3, 250 * energyLevel, 26);
+    energyCtx.lineWidth = 3;
+    energyCtx.strokeStyle = "rgba(244, 241, 232, 0.8)";
+    energyCtx.strokeRect(1.5, 1.5, 253, 29);
+    this.energyTexture.needsUpdate = true;
 
     ctx.font = "bold 34px monospace";
     this.text(depth, 20, 120, "left", "#ffe89a");

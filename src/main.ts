@@ -4,7 +4,7 @@ import { AmbientHum } from "./assets/audio/ambientHum";
 import { getLanguage, onLanguageChange, setLanguage, t, type Language } from "./i18n";
 import { runWarmupStep } from "./assets/audio/synth";
 import { DEBUG_ENABLED, installDebugLog, log } from "./debug/debugLog";
-import { PhysicsWorld } from "./physics/physicsWorld";
+import { PhysicsWorld, RAPIER } from "./physics/physicsWorld";
 import { CamcorderHud } from "./player/camcorderHud";
 import { ComfortVignette } from "./player/comfortVignette";
 import { EndRunScreen } from "./player/endRunScreen";
@@ -16,7 +16,7 @@ import { InventoryMenu } from "./player/inventoryMenu";
 import { Journal } from "./player/journal";
 import { PerfStats, setPerf } from "./player/perfStats";
 import { LiveViews } from "./player/liveViews";
-import { createPhotoCapture } from "./player/photoCapture";
+import { createObjectCapture, createPhotoCapture } from "./player/photoCapture";
 import { PlayerController } from "./player/playerController";
 import { Sfx } from "./player/sfx";
 import { TapePlayer } from "./player/tapePlayer";
@@ -30,9 +30,9 @@ import { Cadreur } from "./world/cadreur";
 import { CollectionStore } from "./world/collection";
 import { computePerks } from "./world/collectionPerks";
 import { corruption } from "./world/corruption";
-import { GrabbableRegistry, type LorePageData } from "./world/grabbable";
+import { GrabbableRegistry, type Grabbable, type LorePageData } from "./world/grabbable";
 import { InteractionSystem } from "./world/interactions";
-import { onNoise } from "./world/noise";
+import { emitNoise, onNoise } from "./world/noise";
 import { ObjectAudio } from "./world/objectAudio";
 import { LevelManager, SPAWN_LOCAL_POSITION } from "./world/levelManager";
 import { COLLECTIBLE_KINDS, generateCollectibleLore, getCollectibleRarity, type CollectibleKind } from "./shared/collectibles";
@@ -53,6 +53,9 @@ installDebugLog();
 const appRoot = document.getElementById("app");
 if (!appRoot) throw new Error("#app introuvable dans index.html");
 const loadingScreen = document.getElementById("loading-screen");
+const visualTestParams = new URLSearchParams(window.location.search);
+const visualTest = visualTestParams.get("visualTest");
+const visualTestObject = visualTestParams.get("object");
 
 function nextPaint(): Promise<void> {
   return new Promise((resolve) => requestAnimationFrame(() => resolve()));
@@ -165,6 +168,7 @@ const hud = new CamcorderHud(camera);
 /** Bandes perdues : cassettes lues dans le viseur, polaroids photographiés derrière le joueur. */
 const tapePlayer = new TapePlayer(audioListener, hud);
 const capturePhoto = createPhotoCapture(renderer, scene, camera, physics);
+const captureObject = createObjectCapture(renderer, scene, camera);
 /** Vues en direct (télé, caméra de surveillance, jumelles, loupe, caméscope). */
 const liveViews = new LiveViews(renderer, scene, camera);
 configureLoreServices({
@@ -210,6 +214,7 @@ warmup.start([cadreur.ready, ...hands.map((hand) => hand.models)]);
 function applyPerks(): void {
   const perks = computePerks(collectionStore.getAll());
   flashlight.capacity = perks.batteryCapacity;
+  player.sprintRecovery = perks.sprintRecovery;
   corruption.decayMultiplier = perks.corruptionDecay;
   levelManager.beaconSteadiness = perks.beaconSteadiness;
 }
@@ -300,6 +305,7 @@ const journal = new Journal(camera, player.body, loreJournal, sfx);
 installAccountPanel(loreJournal);
 
 const pointer = new UiPointer(hands, scene, [inventoryMenu, endRunScreen, journal]);
+for (const panel of [inventoryMenu, endRunScreen, journal]) liveViews.hideFromOffscreen(panel.group);
 
 /**
  * Bande perdue saisie : lue selon sa forme (photo qui se développe, cassette qui se lance), elle
@@ -324,7 +330,17 @@ grabSystem = new GrabSystem(physics, grabbables, hands, sfx, {
     if (grabbable.lorePage) readLorePage(grabbable.lorePage, grabbable.heldBy);
     interactions.grabbed(grabbable.heldBy, grabbable);
   },
-  onUse: (hand, grabbable) => interactions.use(hand, grabbable),
+  onUse: (hand, grabbable) => {
+    if (!grabbable.batteryId) {
+      interactions.use(hand, grabbable);
+      return;
+    }
+    levelManager.markBatteryPicked(grabbable.batteryId);
+    flashlight.recharge(BATTERY_RECHARGE);
+    hand.pulse(0.45, 70);
+    sfx.play("battery", 0.45);
+    grabSystem.consumeHeld(hand, grabbable);
+  },
   head: () => ({ position: player.headWorld, forward: camera.getWorldDirection(new THREE.Vector3()) }),
 }, scene);
 
@@ -338,9 +354,12 @@ const interactions = new InteractionSystem({
   camera,
   head: () => player.headWorld,
   cadreurPosition: () => cadreur.worldPosition,
+  cadreurObject: () => cadreur.renderObject,
   stunCadreur: (seconds) => cadreur.stun(seconds),
   exitPosition: () => levelManager.exitPosition,
   capturePhoto,
+  captureObject,
+  isRemoteTarget: (grabbable) => grabSystem.isRemoteTarget(grabbable),
   take: () => take,
   runSeconds: () => hud.recordingSeconds,
   drop: (grabbable) => grabSystem.drop(grabbable),
@@ -354,19 +373,24 @@ const interactions = new InteractionSystem({
 const DEBUG_SPAWN_UP = new THREE.Vector3(0, 1, 0);
 const debugSpawnDirection = new THREE.Vector3();
 
-async function spawnDebugObject(kind: CollectibleKind | PropKind): Promise<void> {
+interface DebugSpawnOptions {
+  position?: THREE.Vector3;
+  rotation?: number;
+}
+
+async function spawnDebugObject(kind: CollectibleKind | PropKind, options: DebugSpawnOptions = {}): Promise<Grabbable> {
   camera.getWorldDirection(debugSpawnDirection);
   debugSpawnDirection.y = 0;
   if (debugSpawnDirection.lengthSq() < 1e-6) debugSpawnDirection.set(0, 0, -1);
   debugSpawnDirection.normalize();
-  const position = player.headWorld.clone().addScaledVector(debugSpawnDirection, 1.2);
-  const rotation = Math.atan2(-debugSpawnDirection.x, -debugSpawnDirection.z);
+  const position = options.position?.clone() ?? player.headWorld.clone().addScaledVector(debugSpawnDirection, 1.2);
+  const rotation = options.rotation ?? Math.atan2(-debugSpawnDirection.x, -debugSpawnDirection.z);
 
   if ((COLLECTIBLE_KINDS as readonly string[]).includes(kind)) {
     const collectibleKind = kind as CollectibleKind;
     const { model, template } = await spawnCollectibleModel(collectibleKind);
     const lore = generateCollectibleLore(collectibleKind, 0.5, 0.5);
-    grabbables.createCollectible(
+    const grabbable = grabbables.createCollectible(
       {
         id: `debug-${collectibleKind}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
         kind: collectibleKind,
@@ -381,12 +405,109 @@ async function spawnDebugObject(kind: CollectibleKind | PropKind): Promise<void>
       position,
       new THREE.Quaternion().setFromAxisAngle(DEBUG_SPAWN_UP, rotation),
     );
+    log("debug", { action: "spawn", kind });
+    return grabbable;
   } else {
     const propKind = kind as PropKind;
     const { model, template } = await spawnProp(propKind);
-    grabbables.createProp(propKind, model, template, position.x, position.z, rotation);
+    const grabbable = grabbables.createProp(propKind, model, template, position.x, position.z, rotation, position.y);
+    log("debug", { action: "spawn", kind });
+    return grabbable;
   }
-  log("debug", { action: "spawn", kind });
+}
+
+const VISUAL_INTERACTION_STAGES = ["ALIGNED", "INTERACTED"] as const;
+let resolveVisualCapture: (() => void) | null = null;
+
+interface VisualObjectPreview {
+  setAngle(angleRadians: number): void;
+  update(): void;
+}
+
+let visualObjectPreview: VisualObjectPreview | null = null;
+
+function captureVisualStage(stage: string): Promise<void> {
+  (window as unknown as Record<string, string>) ["__STAGE__"] = stage;
+  return new Promise<void>((resolve) => {
+    resolveVisualCapture = resolve;
+  });
+}
+
+async function runVisualInteractionTest(): Promise<void> {
+  (window as unknown as Record<string, readonly string[]>) ["__STAGES__"] = VISUAL_INTERACTION_STAGES;
+  (window as unknown as { __next__: () => void }) ["__next__"] = () => {
+    resolveVisualCapture?.();
+    resolveVisualCapture = null;
+  };
+
+  const forward = camera.getWorldDirection(new THREE.Vector3()).setY(0).normalize();
+  const right = new THREE.Vector3().crossVectors(forward, DEBUG_SPAWN_UP).normalize();
+  const rotation = Math.atan2(-forward.x, -forward.z);
+  const center = player.headWorld.clone().addScaledVector(forward, 2.2).setY(0);
+  const television = await spawnDebugObject("television", { position: center.clone().addScaledVector(right, -0.65), rotation });
+  const sign = await spawnDebugObject("wetFloorSign", { position: center.clone(), rotation });
+  const can = await spawnDebugObject("can", { position: center.clone().addScaledVector(right, 0.65), rotation });
+  const photo = await spawnDebugObject("photo", { position: center.clone().addScaledVector(right, 1.15), rotation });
+  for (const grabbable of [television, sign, can, photo]) grabbable.body.setBodyType(RAPIER.RigidBodyType.Fixed, true);
+
+  log("visual-test", { action: "aligned", kinds: [television.kind, sign.kind, can.kind, photo.kind] });
+  await captureVisualStage("ALIGNED");
+  interactions.use(hands[0]!, television);
+  await new Promise<void>((resolve) => window.setTimeout(resolve, 2600));
+  interactions.use(hands[0]!, sign);
+  interactions.use(hands[0]!, can);
+  log("visual-test", { action: "interacted", kinds: [television.kind, sign.kind, can.kind, photo.kind] });
+  await captureVisualStage("INTERACTED");
+}
+
+async function runVisualObjectTest(kind: CollectibleKind | PropKind): Promise<void> {
+  const angles = Array.from({ length: 8 }, (_, index) => index * 45);
+  const stages = angles.map((angle) => `${angle.toString().padStart(3, "0")}DEG`);
+  (window as unknown as Record<string, readonly string[]>) ["__STAGES__"] = stages;
+  (window as unknown as { __next__: () => void }) ["__next__"] = () => {
+    resolveVisualCapture?.();
+    resolveVisualCapture = null;
+  };
+
+  const forward = camera.getWorldDirection(new THREE.Vector3()).normalize();
+  const right = new THREE.Vector3().crossVectors(forward, DEBUG_SPAWN_UP).normalize();
+  const rotation = Math.atan2(-forward.x, -forward.z);
+  const target = player.headWorld.clone().addScaledVector(forward, 0.9);
+  const nearbyCollectible = kind === "photo" ? await spawnDebugObject("can", { position: target.clone().addScaledVector(right, 0.55), rotation }) : null;
+  const grabbable = await spawnDebugObject(kind, { position: target, rotation });
+  grabbable.body.setBodyType(RAPIER.RigidBodyType.Fixed, true);
+  nearbyCollectible?.body.setBodyType(RAPIER.RigidBodyType.Fixed, true);
+  grabbable.object.updateMatrixWorld(true);
+
+  const visualCenter = new THREE.Box3().setFromObject(grabbable.object).getCenter(new THREE.Vector3());
+  const localCenter = grabbable.object.worldToLocal(visualCenter).multiply(grabbable.object.scale);
+  const position = new THREE.Vector3();
+  const offset = new THREE.Vector3();
+  const spin = new THREE.Quaternion();
+  const baseRotation = grabbable.object.quaternion.clone();
+  const orientation = new THREE.Quaternion();
+  let angleRadians = 0;
+  visualObjectPreview = {
+    setAngle(angle) {
+      angleRadians = angle;
+    },
+    update() {
+      spin.setFromAxisAngle(DEBUG_SPAWN_UP, angleRadians);
+      orientation.copy(baseRotation).multiply(spin);
+      offset.copy(localCenter).applyQuaternion(orientation);
+      position.copy(target).sub(offset);
+      grabbable.body.setRotation(orientation, true);
+      grabbable.body.setTranslation(position, true);
+    },
+  };
+  visualObjectPreview.update();
+
+  log("visual-test", { action: "preview", kind });
+  for (let index = 0; index < stages.length; index++) {
+    visualObjectPreview.setAngle(THREE.MathUtils.degToRad(angles[index]!));
+    visualObjectPreview.update();
+    await captureVisualStage(stages[index]!);
+  }
 }
 
 /** Place le joueur au spawn du level courant (changement de level, nouvelle run). */
@@ -477,6 +598,24 @@ if (DEBUG_ENABLED) {
   };
 }
 
+if (visualTest === "interactions") {
+  void runVisualInteractionTest().catch((error: unknown) => {
+    console.error("Échec du scénario visuel d'interactions", error);
+    (window as unknown as Record<string, string>) ["__STAGE__"] = "ERROR";
+  });
+}
+if (visualTest === "object") {
+  if (!visualTestObject || !DEBUG_SPAWN_KINDS.some((kind) => kind === visualTestObject)) {
+    console.error(`Objet de test visuel invalide : ${visualTestObject ?? "absent"}`);
+    (window as unknown as Record<string, string>) ["__STAGE__"] = "ERROR";
+  } else {
+    void runVisualObjectTest(visualTestObject as CollectibleKind | PropKind).catch((error: unknown) => {
+      console.error("Échec du scénario visuel d'objet", error);
+      (window as unknown as Record<string, string>) ["__STAGE__"] = "ERROR";
+    });
+  }
+}
+
 /**
  * Son : les navigateurs (dont celui du Quest) ne démarrent l'audio que pendant un geste de
  * l'utilisateur. L'événement "sessionstart" n'en est pas toujours un : on relance donc le
@@ -561,10 +700,9 @@ const WALL_TRAP_WARNING_HAPTIC_INTENSITY = 0.35;
 const WALL_TRAP_WARNING_HAPTIC_DURATION_MS = 90;
 const WALL_TRAP_POP_HAPTIC_INTENSITY = 1;
 const WALL_TRAP_POP_HAPTIC_DURATION_MS = 180;
-/** Charge rendue par une pile ramassée (fraction de la batterie de la lampe). */
 const BATTERY_RECHARGE = 0.45;
-const handPalms = hands.map((hand) => hand.palm);
 const bouncePosition = new THREE.Vector3();
+let playerNoiseTimer = 0;
 
 renderer.setAnimationLoop((timestamp) => {
   perfStats.beginFrame(timestamp);
@@ -584,6 +722,11 @@ renderer.setAnimationLoop((timestamp) => {
 
   perfStats.begin("joueur");
   player.update(deltaSeconds, input);
+  playerNoiseTimer -= deltaSeconds;
+  if (playerNoiseTimer <= 0 && player.movementNoise > 0) {
+    emitNoise(player.headWorld, player.movementNoise);
+    playerNoiseTimer = 0.35;
+  }
   syncHands(elapsedSeconds);
   if (player.teleported) grabSystem.onTeleport();
 
@@ -598,18 +741,15 @@ renderer.setAnimationLoop((timestamp) => {
     for (const hand of hands) hand.applyKinematicTarget();
     grabSystem.step(stepSeconds);
   });
+  visualObjectPreview?.update();
   grabbables.sync(player.headWorld);
   grabSystem.updateVisuals();
-  interactions.update(deltaSeconds, hands);
+  interactions.update(deltaSeconds);
   perfStats.end("physique");
 
   perfStats.begin("monde");
-  const levelUpdate = levelManager.update(player.headWorld, handPalms, camera, elapsedSeconds, deltaSeconds, corruption.value);
+  const levelUpdate = levelManager.update(player.headWorld, camera, elapsedSeconds, deltaSeconds, corruption.value);
   perfStats.end("monde");
-  if (levelUpdate.batteriesPicked > 0) {
-    flashlight.recharge(BATTERY_RECHARGE * levelUpdate.batteriesPicked);
-    sfx.play("battery", 0.6);
-  }
   if (levelUpdate.corruptionDelta > 0) corruption.add(levelUpdate.corruptionDelta);
   if (levelUpdate.wallTrapJustWarned) triggerHapticPulse(renderer, WALL_TRAP_WARNING_HAPTIC_INTENSITY, WALL_TRAP_WARNING_HAPTIC_DURATION_MS);
   if (levelUpdate.wallTrapJustPopped) {
@@ -649,6 +789,7 @@ renderer.setAnimationLoop((timestamp) => {
     flashlight: flashlight.on,
     items: collectionStore.count,
     battery: flashlight.battery,
+    sprintEnergy: player.sprintEnergy,
     // Plein à moins de 5 m, vide au-delà de 60 m ; brouillé par la corruption.
     signal: THREE.MathUtils.clamp(1 - (levelUpdate.exitDistance - 5) / 55, 0, 1) * (1 - corruption.value * 0.6 * Math.random()),
     debug: perfStats.readAndReset(),

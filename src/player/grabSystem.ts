@@ -153,6 +153,20 @@ export class GrabSystem {
     return this.held.has(hand);
   }
 
+  isRemoteTarget(grabbable: Grabbable): boolean {
+    return this.isRemoteTargetInternal(grabbable);
+  }
+
+  consumeHeld(hand: Hand, grabbable: Grabbable): void {
+    const state = this.held.get(hand);
+    if (!state || state.grabbable !== grabbable) return;
+    this.held.delete(hand);
+    hand.holding = null;
+    hand.setHeldAnchor(null);
+    grabbable.heldBy = null;
+    this.registry.remove(grabbable);
+  }
+
   /** Mains qui tiennent un objet donné. */
   private holdersOf(grabbable: Grabbable): Hand[] {
     const holders: Hand[] = [];
@@ -160,7 +174,7 @@ export class GrabSystem {
     return holders;
   }
 
-  private isRemoteTarget(grabbable: Grabbable): boolean {
+  private isRemoteTargetInternal(grabbable: Grabbable): boolean {
     for (const state of this.remote.values()) if (state.grabbable === grabbable) return true;
     return false;
   }
@@ -351,7 +365,7 @@ export class GrabSystem {
     for (const [grabbable, until] of this.releasing) {
       if (this.time < until) continue;
       this.releasing.delete(grabbable);
-      if (!grabbable.heldBy && !this.isRemoteTarget(grabbable) && this.registry.all.has(grabbable)) {
+      if (!grabbable.heldBy && !this.isRemoteTargetInternal(grabbable) && this.registry.all.has(grabbable)) {
         grabbable.collider.setCollisionGroups(CollisionGroups.dynamic);
       }
     }
@@ -453,7 +467,7 @@ export class GrabSystem {
       this.grabBall,
       (collider) => {
         const grabbable = this.registry.fromCollider(collider.handle);
-        if (grabbable && !grabbable.heldBy && !grabbable.fixed && !this.isRemoteTarget(grabbable)) {
+        if (grabbable && !grabbable.heldBy && !grabbable.fixed && !this.isRemoteTargetInternal(grabbable)) {
           const projection = collider.projectPoint(hand.palm, true);
           const gap = projection ? hand.palm.distanceTo(tmpVec.set(projection.point.x, projection.point.y, projection.point.z)) : NEAR_GRAB_RADIUS;
           // À distance égale, on préfère le petit objet de collection au meuble qu'il touche.
@@ -570,6 +584,11 @@ export class GrabSystem {
     this.sfx.play("grab", 0.35);
     log("grab", { action: "attach", mode, mass: grabbable.mass, item: grabbable.item?.kind ?? (grabbable.lorePage ? "lore" : "prop"), hands: this.holdersOf(grabbable).length });
     this.hooks.onGrab?.(grabbable);
+    if (!this.registry.all.has(grabbable)) {
+      this.held.delete(hand);
+      hand.holding = null;
+      hand.setHeldAnchor(null);
+    }
   }
 
   /** Objet léger (ou lourd porté à deux) : il flotte en main ; trop lourd : il pèse, on le traîne. */

@@ -54,7 +54,7 @@ const EXTERNAL_SOUNDS: Partial<Record<ObjectSoundName, string>> = {
   rattle: metal02Url,
   plasticClack: tools04Url,
   rustle: noise01Url,
-  metalClick: slam05Url,
+  metalClick: switch02Url,
   flick: switch01Url,
   wheel: wooden01Url,
 };
@@ -92,7 +92,7 @@ const OVERRIDE_SOUNDS: Record<string, string> = {
   "metalShelves:shake": metal01Url,
   "metalStool:impact": metal03Url,
   "metalStool:spin": metal02Url,
-  "monoblocChair:impact": woodedBoxOpenUrl,
+  "monoblocChair:impact": wooden01Url,
   "officeDesk:impact": metal01Url,
   "photo:change": weird04Url,
   "plasticCrate:impact": hit01Url,

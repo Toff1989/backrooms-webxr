@@ -10,12 +10,25 @@ const LASER_COLOR = 0xffe3a0;
 // qu'un panneau est ouvert, simple source de pression sur le ramasse-miettes sinon.
 const tmpIdleEnd = new THREE.Vector3();
 const tmpCursorQuaternion = new THREE.Quaternion();
+const tmpDragDelta = new THREE.Vector3();
+const tmpDragWorldPosition = new THREE.Vector3();
+const tmpDragWorldRotation = new THREE.Quaternion();
+const tmpDragParentRotation = new THREE.Quaternion();
 
 interface HandPointer {
   hand: Hand;
   line: THREE.Line;
   cursor: THREE.Mesh;
   hovered: UiPanel | null;
+  drag: DragState | null;
+}
+
+interface DragState {
+  panel: UiPanel;
+  startAimOrigin: THREE.Vector3;
+  startHandRotationInverse: THREE.Quaternion;
+  startGroupWorld: THREE.Vector3;
+  startGroupWorldRotation: THREE.Quaternion;
 }
 
 export interface PointerFrame {
@@ -51,7 +64,7 @@ export class UiPointer {
       cursor.visible = false;
       cursor.renderOrder = 12;
       scene.add(line, cursor);
-      return { hand, line, cursor, hovered: null };
+      return { hand, line, cursor, hovered: null, drag: null };
     });
     for (const hand of hands) this.frames.set(hand, { target: null, consumedGrip: false });
   }
@@ -69,10 +82,25 @@ export class UiPointer {
       frame.consumedGrip = false;
 
       if (!anyVisible || !hand.tracked) {
+        pointer.drag = null;
         this.setHover(pointer, null, null, null);
         pointer.line.visible = false;
         pointer.cursor.visible = false;
         continue;
+      }
+
+      if (pointer.drag && (!hand.input.trigger.pressed || hand.holding)) pointer.drag = null;
+
+      if (pointer.drag) {
+        const parent = pointer.drag.panel.group.parent;
+        if (parent) {
+          tmpDragWorldPosition.copy(pointer.drag.startGroupWorld).add(tmpDragDelta.subVectors(hand.aimOrigin, pointer.drag.startAimOrigin));
+          pointer.drag.panel.group.position.copy(parent.worldToLocal(tmpDragWorldPosition));
+          tmpDragWorldRotation.multiplyQuaternions(hand.quaternion, pointer.drag.startHandRotationInverse).multiply(pointer.drag.startGroupWorldRotation);
+          parent.getWorldQuaternion(tmpDragParentRotation).invert();
+          pointer.drag.panel.group.quaternion.copy(tmpDragParentRotation.multiply(tmpDragWorldRotation));
+          pointer.drag.panel.group.updateMatrixWorld(true);
+        }
       }
 
       let best: { panel: UiPanel; hit: NonNullable<ReturnType<UiPanel["raycast"]>> } | null = null;
@@ -100,7 +128,17 @@ export class UiPointer {
       pointer.cursor.quaternion.copy(best.panel.group.getWorldQuaternion(tmpCursorQuaternion));
       this.setHover(pointer, best.panel, best.hit.px, best.hit.py);
 
-      if (hand.input.trigger.justPressed) best.panel.onPress(hand, best.hit.px, best.hit.py, "trigger");
+      if (hand.input.trigger.justPressed && !hand.holding) {
+        if (best.panel.isDragHandle(best.hit.py)) {
+          pointer.drag = {
+            panel: best.panel,
+            startAimOrigin: hand.aimOrigin.clone(),
+            startHandRotationInverse: hand.quaternion.clone().invert(),
+            startGroupWorld: best.panel.group.getWorldPosition(new THREE.Vector3()),
+            startGroupWorldRotation: best.panel.group.getWorldQuaternion(new THREE.Quaternion()),
+          };
+        } else best.panel.onPress(hand, best.hit.px, best.hit.py, "trigger");
+      }
       if (hand.input.squeeze.justPressed && !hand.holding) {
         frame.consumedGrip = best.panel.onPress(hand, best.hit.px, best.hit.py, "grip");
       }

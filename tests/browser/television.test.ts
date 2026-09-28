@@ -76,7 +76,7 @@ async function run(): Promise<void> {
     const flatness = dims[0]! / dims[1]!;
     check("l'écran est une surface plate", flatness < 0.2, `plus petite dimension / dimension médiane = ${flatness.toFixed(3)} (doit être proche de 0)`);
 
-    // Le pipeline doit remplacer le matériau EN PLACE (FaceCanvas + existingMesh), jamais ajouter
+    // Le pipeline doit remplacer le matériau EN PLACE, jamais ajouter
     // un objet par-dessus : on simule l'échange et on vérifie que le nombre de meshes ne bouge pas.
     const original = screen.material;
     const testMaterial = new THREE.MeshBasicMaterial({ color: 0x00ff00 });

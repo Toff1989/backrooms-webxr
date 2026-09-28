@@ -1,6 +1,6 @@
 import * as THREE from "three";
 
-const ON_INTENSITY = 26;
+const ON_INTENSITY = 9;
 const LIGHT_COLOR = 0xfff1d6;
 const RANGE = 18;
 const DECAY = 1.3;

@@ -16,3 +16,4 @@ tmp
 
 # Captures des tests navigateur (scripts/test-television-render.mjs et consorts).
 tests/browser/out
+tests/browser/out-windows

@@ -8,7 +8,7 @@ import { createSeededNoise2D } from "../shared/noise";
 import { log } from "../debug/debugLog";
 import { perf } from "../player/perfStats";
 import { BatteryPickup } from "./batteryPickup";
-import { buildChunkGroup, freezeMatrices } from "./chunkMesh";
+import { buildChunkGroup } from "./chunkMesh";
 import { spawnCollectibleModel } from "./collectibleLoader";
 import { toCollectionEntry } from "./collection";
 import type { GrabbableRegistry } from "./grabbable";
@@ -30,6 +30,8 @@ const REGEN_BEHIND_CHANCE = 0.35;
  * en masque déjà plus des trois quarts. Économise les draw calls des coins de la zone chargée.
  */
 const CHUNK_RENDER_DISTANCE = 34;
+const CHUNK_RENDER_ENTER_DISTANCE = CHUNK_RENDER_DISTANCE - 3;
+const CHUNK_RENDER_EXIT_DISTANCE = CHUNK_RENDER_DISTANCE + 3;
 /** Distance minimale (m) entre le joueur et les limites d'un chunk voisin régénéré. */
 const REGEN_BEHIND_MIN_DISTANCE = 4;
 /** Corruption ajoutée quand un chunk hors champ se régénère (masque discrètement le changement). */
@@ -55,7 +57,6 @@ interface LoadedChunk {
   staticBody: RAPIER.RigidBody;
   layout: ChunkLayout;
   wallTraps: WallTrap[];
-  batteries: BatteryPickup[];
   epoch: number;
   bounds: THREE.Box3;
 }
@@ -64,8 +65,6 @@ export interface ChunkStreamerUpdateResult {
   corruptionDelta: number;
   wallTrapJustWarned: boolean;
   wallTrapJustPopped: boolean;
-  /** Nombre de piles ramassées cette frame. */
-  batteriesPicked: number;
 }
 
 /**
@@ -114,6 +113,10 @@ export class ChunkStreamer {
     this.profile = profile;
     this.noise2D = createSeededNoise2D(profile.seed);
     this.prepareLorePage();
+  }
+
+  markBatteryPicked(id: string): void {
+    this.pickedBatteries.add(id);
   }
 
   /** Change de level : décharge tout le monde courant, repart à vide sur le nouveau profil/seed. */
@@ -166,7 +169,6 @@ export class ChunkStreamer {
 
   update(
     playerPosition: THREE.Vector3,
-    hands: readonly THREE.Vector3[],
     camera: THREE.Camera,
     deltaSeconds: number,
   ): ChunkStreamerUpdateResult {
@@ -183,18 +185,9 @@ export class ChunkStreamer {
     let corruptionDelta = 0;
     let wallTrapJustWarned = false;
     let wallTrapJustPopped = false;
-    let batteriesPicked = 0;
-
     for (const chunk of this.loaded.values()) {
-      chunk.group.visible = distanceToBox(playerPosition, chunk.bounds) < CHUNK_RENDER_DISTANCE;
-      for (let i = chunk.batteries.length - 1; i >= 0; i--) {
-        const battery = chunk.batteries[i]!;
-        if (!battery.isPickedBy(playerPosition, hands)) continue;
-        this.pickedBatteries.add(battery.id);
-        chunk.group.remove(battery.object);
-        chunk.batteries.splice(i, 1);
-        batteriesPicked++;
-      }
+      const distance = distanceToBox(playerPosition, chunk.bounds);
+      chunk.group.visible = chunk.group.visible ? distance < CHUNK_RENDER_EXIT_DISTANCE : distance < CHUNK_RENDER_ENTER_DISTANCE;
       for (const trap of chunk.wallTraps) {
         const result = trap.update(playerPosition, deltaSeconds);
         corruptionDelta += result.corruptionDelta;
@@ -205,7 +198,7 @@ export class ChunkStreamer {
 
     corruptionDelta += this.updateDynamicMaze(camera, playerPosition, deltaSeconds);
 
-    return { corruptionDelta, wallTrapJustWarned, wallTrapJustPopped, batteriesPicked };
+    return { corruptionDelta, wallTrapJustWarned, wallTrapJustPopped };
   }
 
   private streamAround(chunkX: number, chunkZ: number): void {
@@ -339,18 +332,16 @@ export class ChunkStreamer {
       return trap;
     });
 
-    const batteries = layout.batteryPlacements
+    layout.batteryPlacements
       .filter((placement) => !this.pickedBatteries.has(placement.id))
-      .map((placement) => {
+      .forEach((placement) => {
         const battery = new BatteryPickup(placement.id, placement.x, placement.z, placement.rotationY);
-        freezeMatrices(battery.object);
-        group.add(battery.object);
-        return battery;
+        this.grabbables.createBattery(battery);
       });
 
     const bounds = new THREE.Box3(new THREE.Vector3(originX, 0, originZ), new THREE.Vector3(originX + CHUNK_SIZE, WALL_HEIGHT, originZ + CHUNK_SIZE));
 
-    const loadedChunk: LoadedChunk = { group, staticBody, layout, wallTraps, batteries, epoch, bounds };
+    const loadedChunk: LoadedChunk = { group, staticBody, layout, wallTraps, epoch, bounds };
     this.loaded.set(key, loadedChunk);
     log("chunk", { action: "load", key, epoch, ms: Math.round((performance.now() - startedAt) * 10) / 10, walls: layout.wallSegments.length, props: layout.propPlacements.length });
 

@@ -57,3 +57,59 @@ export function createPhotoCapture(renderer: THREE.WebGLRenderer, scene: THREE.S
     return canvas;
   };
 }
+
+/** Capture dédiée aux cadres photo : isole visuellement un collectible depuis la position du cadre. */
+export function createObjectCapture(renderer: THREE.WebGLRenderer, scene: THREE.Scene, camera: THREE.Camera): (object: THREE.Object3D, origin: THREE.Vector3, hidden: THREE.Object3D | undefined, width: number, height: number) => HTMLCanvasElement | null {
+  const lens = new THREE.PerspectiveCamera(42, 1, 0.05, 40);
+  const bounds = new THREE.Box3();
+  const center = new THREE.Vector3();
+  const size = new THREE.Vector3();
+  const direction = new THREE.Vector3();
+
+  return (object, origin, hidden, width, height) => {
+    const target = new THREE.WebGLRenderTarget(width, height);
+    target.texture.colorSpace = THREE.SRGBColorSpace;
+    const pixels = new Uint8Array(width * height * 4);
+    lens.aspect = width / height;
+    bounds.setFromObject(object);
+    bounds.getCenter(center);
+    bounds.getSize(size);
+    const radius = Math.max(0.12, size.length() * 0.5);
+    direction.subVectors(origin, center);
+    if (direction.lengthSq() < 1e-6) direction.set(0, 0, 1);
+    direction.normalize();
+    lens.position.copy(center).addScaledVector(direction, Math.max(0.8, radius * 3.2));
+    lens.near = 0.05;
+    lens.far = Math.max(10, lens.position.distanceTo(center) + radius * 5);
+    lens.updateProjectionMatrix();
+    lens.lookAt(center);
+    lens.updateMatrixWorld();
+
+    const photoFill = new THREE.HemisphereLight(0xfff1d6, 0x17120f, 1.15);
+    const photoKey = new THREE.DirectionalLight(0xffead0, 1.4);
+    photoKey.position.copy(lens.position);
+    photoKey.target.position.copy(center);
+    scene.add(photoFill, photoKey, photoKey.target);
+    const rendered = renderOffscreen(renderer, scene, camera, lens, target, hidden ? [hidden] : []);
+    scene.remove(photoFill, photoKey, photoKey.target);
+    if (!rendered) {
+      target.dispose();
+      return null;
+    }
+    renderer.readRenderTargetPixels(target, 0, 0, width, height, pixels);
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) {
+      target.dispose();
+      return null;
+    }
+    const image = ctx.createImageData(width, height);
+    const row = width * 4;
+    for (let y = 0; y < height; y++) image.data.set(pixels.subarray((height - 1 - y) * row, (height - y) * row), y * row);
+    ctx.putImageData(image, 0, 0);
+    target.dispose();
+    return canvas;
+  };
+}

@@ -521,10 +521,11 @@ export class InventoryMenu extends UiPanel {
     const perks = computePerks(this.store.getAll());
     const battery = Math.round((perks.batteryCapacity - 1) * 100);
     const decay = Math.round((perks.corruptionDecay - 1) * 100);
+    const stamina = Math.round((perks.sprintRecovery - 1) * 100);
     ctx.fillText(
-      battery === 0 && decay === 0 && perks.beaconSteadiness === 0
+      battery === 0 && decay === 0 && stamina === 0 && perks.beaconSteadiness === 0
         ? t("perks.none")
-        : t("perks.line", { battery, decay, compass: perks.beaconSteadiness > 0 ? t("perks.compass") : "" }),
+        : t("perks.line", { battery, decay, stamina, compass: perks.beaconSteadiness > 0 ? t("perks.compass") : "" }),
       width / 2,
       720 + DEBUG_ROW,
     );

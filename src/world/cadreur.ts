@@ -16,7 +16,7 @@ const TRAIL_MAX = 400;
 const SPAWN_MIN_BEHIND = 14;
 const SPAWN_MAX_BEHIND = 26;
 /** Si le joueur le distance de plus de 50 m de chemin, il le perd (et reviendra plus tard). */
-const LOSE_BEHIND = 50;
+const LOSE_BEHIND = 34;
 const CATCH_DISTANCE = 0.75;
 /** Ligne directe vers le joueur quand il est proche et que rien ne les sépare. */
 const DIRECT_CHASE_DISTANCE = 9;
@@ -33,7 +33,8 @@ const MAX_SEE_DISTANCE = 40;
 const OBSERVE_GRACE = 0.25;
 const SIGHTING_COOLDOWN = 5;
 /** Vitesse sous les yeux du joueur (m/s) : lente, il marche vers toi. */
-const WATCHED_SPEED = 0.6;
+const WATCHED_SPEED = 0.85;
+const FLASHLIGHT_SPEED_FACTOR = 0.22;
 /** Corps (capsule) : il bute sur les murs et glisse le long, comme le joueur. */
 const BODY_RADIUS = 0.3;
 const BODY_HALF_HEIGHT = 0.6;
@@ -111,11 +112,13 @@ export class Cadreur {
   private stuckSeconds = 0;
   private readonly forward = new THREE.Vector3();
   private readonly cameraPosition = new THREE.Vector3();
+  private readonly lastSeenPosition = new THREE.Vector3();
   private readonly tmp = new THREE.Vector3();
   /** Appelé à la main (menu debug) : ignore la profondeur minimale, apparaît plus près. */
   private manual = false;
   /** Bruit vers lequel il marche (leurre), et le temps passé à le chercher. */
   private lure: { x: number; z: number; seconds: number; searching: number } | null = null;
+  private lastSeenSeconds = 0;
   /** Étourdi (tapette à souris) : figé, la caméra grésille. */
   private stunnedSeconds = 0;
   /** Modèle chargé et ajouté (caché) à la scène — ou échec journalisé : ne rejette jamais. */
@@ -168,6 +171,10 @@ export class Cadreur {
   /** Position au sol (x, z) quand il est là, sinon null. */
   get worldPosition(): THREE.Vector3 | null {
     return this.stalking ? this.position : null;
+  }
+
+  get renderObject(): THREE.Object3D | null {
+    return this.rig?.root ?? null;
   }
 
   /** Position réelle de l'objectif (LED "REC", son œil), quand il est là — pas une approximation. */
@@ -251,17 +258,23 @@ export class Cadreur {
       }
       this.lastObserved = this.elapsed;
       this.observedGrace = OBSERVE_GRACE;
+      this.lastSeenPosition.set(context.head.x, 0, context.head.z);
+      this.lastSeenSeconds = 3.5;
     } else {
       this.observedGrace -= deltaSeconds;
+      this.lastSeenSeconds = Math.max(0, this.lastSeenSeconds - deltaSeconds);
     }
     const watched = this.observedGrace > 0;
-    const hunting = Math.min(2.3, 1.25 + context.depth * 0.1);
+    const hunting = Math.min(3, 1.45 + context.depth * 0.12);
     this.stunnedSeconds = Math.max(0, this.stunnedSeconds - deltaSeconds);
-    const frozen = sight.flashlit || this.stunnedSeconds > 0;
-    this.frozenSeconds = frozen ? this.frozenSeconds + deltaSeconds : 0;
+    const stunned = this.stunnedSeconds > 0;
+    this.frozenSeconds = sight.flashlit || stunned ? this.frozenSeconds + deltaSeconds : 0;
+    if (!sight.seen && this.lastSeenSeconds > 0 && !this.lure && !stunned) {
+      this.lure = { x: this.lastSeenPosition.x, z: this.lastSeenPosition.z, seconds: 0, searching: 0 };
+    }
     this.updateLure(deltaSeconds, context.head);
     const searching = this.lure !== null && this.lure.searching > 0;
-    const speed = frozen || searching ? 0 : watched ? WATCHED_SPEED : hunting;
+    const speed = stunned || searching ? 0 : watched ? WATCHED_SPEED * (sight.flashlit ? FLASHLIGHT_SPEED_FACTOR : 1) : hunting;
     this.advance(deltaSeconds, speed, watched, context);
     if (sight.flashlit) {
       // Pris dans la lampe : la caméra grésille par salves.

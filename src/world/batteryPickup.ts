@@ -1,11 +1,6 @@
 import * as THREE from "three";
 import { applyVhsEffect } from "./vhsMaterial";
 
-/** Rayon (m, au sol) sous lequel on ramasse une pile en marchant dessus. */
-const WALK_PICKUP_RADIUS = 0.55;
-/** Rayon (m, 3D) sous lequel une main ramasse une pile. */
-const HAND_PICKUP_RADIUS = 0.2;
-
 let geometry: THREE.BufferGeometry | null = null;
 let bodyMaterial: THREE.MeshStandardMaterial | null = null;
 let capMaterial: THREE.MeshStandardMaterial | null = null;
@@ -29,11 +24,12 @@ function sharedAssets(): { geometry: THREE.BufferGeometry; body: THREE.MeshStand
  */
 export class BatteryPickup {
   readonly object: THREE.Group;
+  readonly template: THREE.Group;
 
   constructor(
     readonly id: string,
-    private readonly x: number,
-    private readonly z: number,
+    x: number,
+    z: number,
     rotationY: number,
   ) {
     const { geometry, body, cap } = sharedAssets();
@@ -46,10 +42,8 @@ export class BatteryPickup {
     ring.scale.set(1.04, 0.25, 1.04);
     ring.position.y = 0.026;
     this.object.add(cell, ring);
-  }
-
-  isPickedBy(head: THREE.Vector3, hands: readonly THREE.Vector3[]): boolean {
-    if (Math.hypot(head.x - this.x, head.z - this.z) < WALK_PICKUP_RADIUS) return true;
-    return hands.some((hand) => hand.distanceTo(this.object.position) < HAND_PICKUP_RADIUS);
+    this.template = this.object.clone();
+    this.template.position.set(0, 0, 0);
+    this.template.rotation.set(0, 0, 0);
   }
 }

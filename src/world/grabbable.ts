@@ -10,6 +10,7 @@ import { applyVhsEffect } from "./vhsMaterial";
  * mais bien en dessous du rayon de streaming pour contenir les draw calls.
  */
 const RENDER_DISTANCE = 25;
+const FLOOR_CLEARANCE = 0.025;
 
 /** Au-delà, un objet ne se soulève pas (on peut seulement le pousser) — fiche : physique réaliste. */
 export const MAX_LIFT_MASS = 32;
@@ -101,6 +102,8 @@ export interface GrabbableInit {
   onDispose?: () => void;
   /** Type de meuble (le type d'un objet de collection vient de `item`). */
   propKind?: PropKind;
+  /** Identifiant d'une pile saisissable, consommée immédiatement au grab. */
+  batteryId?: string;
 }
 
 /** Page de bande perdue posée dans le monde : identifiant unique par level, fragment de récit porté. */
@@ -124,6 +127,7 @@ export class Grabbable {
   readonly lorePage: LorePageData | null;
   /** Type de meuble ou d'objet de collection (null : page de bande perdue). */
   readonly kind: string | null;
+  readonly batteryId: string | null;
   /** Centre de la boîte englobante, en espace local du corps (échelle comprise). */
   readonly localCenter: THREE.Vector3;
   /** Meuble de soutien ou trop encombrant : jamais saisissable, seulement poussable. */
@@ -136,6 +140,7 @@ export class Grabbable {
   private wasMoving = true;
   private readonly onDispose: (() => void) | undefined;
   private readonly meshes: Array<{ mesh: THREE.Mesh; original: THREE.Material | THREE.Material[] }> = [];
+  private readonly highlightedBases = new Map<THREE.Mesh, THREE.Material | THREE.Material[]>();
 
   constructor(
     private readonly physics: PhysicsWorld,
@@ -145,6 +150,7 @@ export class Grabbable {
     this.item = init.item;
     this.lorePage = init.lorePage ?? null;
     this.kind = init.item?.kind ?? init.propKind ?? null;
+    this.batteryId = init.batteryId ?? null;
     this.fixed = init.propKind !== undefined && NON_GRABBABLE_PROPS.has(init.propKind);
     this.onDispose = init.onDispose;
     // Meuble : endormi, fortement amorti. Petit objet (collection, page) : libre, il roule.
@@ -209,8 +215,16 @@ export class Grabbable {
     if (level === this.highlight) return;
     this.highlight = level;
     for (const { mesh, original } of this.meshes) {
-      if (level === 0) mesh.material = original;
-      else mesh.material = Array.isArray(original) ? original.map((material) => highlightVariant(material, level)) : highlightVariant(original, level);
+      if (level === 0) {
+        const base = this.highlightedBases.get(mesh);
+        if (base && mesh.material !== original) mesh.material = base;
+        else mesh.material = original;
+        this.highlightedBases.delete(mesh);
+        continue;
+      }
+      const base = this.highlightedBases.get(mesh) ?? mesh.material;
+      this.highlightedBases.set(mesh, base);
+      mesh.material = Array.isArray(base) ? base.map((material) => highlightVariant(material, level)) : highlightVariant(base, level);
     }
   }
 
@@ -231,6 +245,7 @@ export class Grabbable {
 
   dispose(): void {
     this.setHighlight(0);
+    this.highlightedBases.clear();
     this.object.removeFromParent();
     this.physics.world.removeRigidBody(this.body);
     this.onDispose?.();
@@ -279,11 +294,14 @@ export class GrabbableRegistry {
   createProp(kind: PropKind, model: THREE.Object3D, template: THREE.Object3D, x: number, z: number, rotationY: number, y = 0, tipped = false): Grabbable {
     const quaternion = new THREE.Quaternion().setFromAxisAngle(Y_AXIS, rotationY);
     if (tipped) quaternion.multiply(new THREE.Quaternion().setFromAxisAngle(X_AXIS, Math.PI / 2));
+    const scale = PROP_SCALE[kind] ?? 1;
+    const lowest = lowestRotatedBox(getModelShape(template).box, scale, quaternion);
+    const spawnY = tipped ? TIPPED_SPAWN_HEIGHT : y + 0.005;
     return this.create({
       model,
       template,
-      scale: PROP_SCALE[kind] ?? 1,
-      position: new THREE.Vector3(x, tipped ? TIPPED_SPAWN_HEIGHT : y + 0.005, z),
+      scale,
+      position: new THREE.Vector3(x, Math.max(spawnY, FLOOR_CLEARANCE - lowest), z),
       quaternion,
       mass: PROP_MASS[kind],
       item: null,
@@ -295,9 +313,22 @@ export class GrabbableRegistry {
 
   createCollectible(item: CollectionEntry, model: THREE.Object3D, template: THREE.Object3D, position: THREE.Vector3, quaternion: THREE.Quaternion): Grabbable {
     // Jamais enfoncé dans le sol : le point le plus bas du modèle est posé juste au-dessus.
-    const lowest = getModelShape(template).box.min.y * item.scale;
-    if (position.y + lowest < 0.01) position = position.clone().setY(0.01 - lowest);
+    const lowest = lowestRotatedBox(getModelShape(template).box, item.scale, quaternion);
+    if (position.y + lowest < FLOOR_CLEARANCE) position = position.clone().setY(FLOOR_CLEARANCE - lowest);
     return this.create({ model, template, scale: item.scale, position, quaternion, mass: collectibleMass(template, item.scale), item });
+  }
+
+  createBattery(pickup: { id: string; object: THREE.Object3D; template: THREE.Object3D }): Grabbable {
+    return this.create({
+      model: pickup.object,
+      template: pickup.template,
+      scale: 1,
+      position: pickup.object.position.clone(),
+      quaternion: pickup.object.quaternion.clone(),
+      mass: 0.06,
+      item: null,
+      batteryId: pickup.id,
+    });
   }
 
   fromCollider(handle: number): Grabbable | undefined {
@@ -359,6 +390,20 @@ export class GrabbableRegistry {
       if (grabbable.object.position.y < -3 && !grabbable.heldBy) this.remove(grabbable);
     }
   }
+}
+
+function lowestRotatedBox(box: THREE.Box3, scale: number, quaternion: THREE.Quaternion): number {
+  let lowest = Infinity;
+  const point = new THREE.Vector3();
+  for (const x of [box.min.x, box.max.x]) {
+    for (const y of [box.min.y, box.max.y]) {
+      for (const z of [box.min.z, box.max.z]) {
+        point.set(x, y, z).multiplyScalar(scale).applyQuaternion(quaternion);
+        lowest = Math.min(lowest, point.y);
+      }
+    }
+  }
+  return lowest;
 }
 
 /** Masse plausible d'un petit objet d'après son volume englobant (de ~100 g à 6 kg). */

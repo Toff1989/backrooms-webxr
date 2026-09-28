@@ -6,5 +6,8 @@ import { defineConfig } from "vite";
 
 export default defineConfig({
   root: process.cwd(),
+  define: {
+    __BUILD_ID__: JSON.stringify("visual-test"),
+  },
   assetsInclude: ["**/*.glb", "**/*.ktx2"],
 });

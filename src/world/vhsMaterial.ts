@@ -10,7 +10,7 @@ const DARK_ZONE_AMBIENT = 0.09;
  * sans elle, tout ce qui sort du cône restait d'un noir d'encre, découpé net — ça faisait
  * "trou" plutôt que pénombre. Éclairage indirect doux autour du joueur, proportionnel à la lampe.
  */
-const FLASHLIGHT_BOUNCE = 0.2;
+const FLASHLIGHT_BOUNCE = 0.05;
 const FLASHLIGHT_BOUNCE_FALLOFF = 0.3;
 
 /**

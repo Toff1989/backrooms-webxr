@@ -4,7 +4,7 @@
  *   comme `propLoader.ts`) ;
  * - même détection que la factory `television` : `findTelevisionScreen` puis fallback
  *   `findModelFace(TV_FRONT)` (voir `interactions.ts`) ;
- * - même classe `FaceCanvas` que la factory réelle pour poser/remplacer l'écran.
+ * - même remplacement direct de matériau que la factory réelle, sur la sous-maille écran.
  *
  * Socle commun (renderer, scène, cadrage, contrôleur d'étapes) dans support/harness.ts.
  *
@@ -13,9 +13,8 @@
  */
 import * as THREE from "three";
 import televisionUrl from "../../src/assets/models/props/television.glb";
-import { FaceCanvas, findTelevisionScreen } from "../../src/world/interactions";
+import { createMeshCanvas, findTelevisionScreen } from "../../src/world/interactions";
 import { loadTemplateModel } from "../../src/world/gltfLoader";
-import { findModelFace } from "../../src/world/modelFace";
 import { createLogger, createRenderer, createScene, createStageController, drawStaticNoise, frameOnObject } from "./support/harness";
 
 const { log } = createLogger();
@@ -35,12 +34,10 @@ async function run(): Promise<void> {
   await stages.enter("OFF");
 
   // --- Reproduit exactement la logique de la factory `television` (interactions.ts) ---
-  const TV_FRONT = new THREE.Vector3(0, 0, 1);
   const existingScreen = findTelevisionScreen(template);
-  const face = existingScreen ? null : findModelFace(template, TV_FRONT);
-  log(existingScreen ? `Sous-maille écran détectée : "${existingScreen.name || "(sans nom)"}" → remplacement en place.` : "Pas de sous-maille écran dédiée → pose d'un plan sur la face avant détectée (fallback).");
+  log(existingScreen ? `Sous-maille écran détectée : "${existingScreen.name || "(sans nom)"}" → remplacement en place.` : "Pas de sous-maille écran dédiée : aucune surface de repli n'est créée.");
 
-  const screen = existingScreen ? new FaceCanvas(template, null, 160, 120, { existingMesh: existingScreen, glow: true }) : face ? new FaceCanvas(template, face, 160, 120, { shrink: 0.68, glow: true }) : null;
+  const screen = existingScreen ? createMeshCanvas(existingScreen, 160, 120, { glow: true, remapUv: true }) : null;
 
   if (!screen) {
     log("ÉCHEC : ni sous-maille écran ni face avant détectée — impossible de poser un écran.");
@@ -50,7 +47,7 @@ async function run(): Promise<void> {
 
   drawStaticNoise(screen.ctx, 160, 120);
   screen.commit();
-  screen.visible = true;
+  screen.activate();
 
   renderer.render(scene, camera);
   log("Rendu 'allumé' (écran remplacé par le bruit statique) affiché.");

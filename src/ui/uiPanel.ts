@@ -132,6 +132,10 @@ export abstract class UiPanel {
     );
   }
 
+  isDragHandle(py: number): boolean {
+    return py <= this.canvas.height * 0.1;
+  }
+
   /** Survol courant du pointeur de cette main (null = plus survolé). */
   abstract onHover(hand: Hand, px: number | null, py: number | null): void;
   /** Clic ; renvoie vrai si l'appui est consommé (il ne doit alors rien attraper dans le monde). */

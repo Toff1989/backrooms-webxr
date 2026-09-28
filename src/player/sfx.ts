@@ -1,5 +1,4 @@
 import * as THREE from "three";
-import metal01Url from "../assets/audio/cc0/metal_01.ogg?url";
 import metal03Url from "../assets/audio/cc0/metal_03.ogg?url";
 import paper01Url from "../assets/audio/cc0/paper_01.ogg?url";
 import paper02Url from "../assets/audio/cc0/paper_02.ogg?url";
@@ -15,7 +14,6 @@ const EXTERNAL_SOUNDS: Partial<Record<SoundName, string>> = {
   grab: metal03Url,
   click: switch01Url,
   denied: slam01Url,
-  battery: metal01Url,
 };
 
 /**
@@ -131,15 +129,15 @@ function createBuffer(context: BaseAudioContext, name: SoundName): AudioBuffer {
     }
     case "battery": {
       // Pile qu'on glisse dans la lampe : cliquetis métallique puis ressort qui se referme.
-      data = createSamples(sampleRate, 0.35);
-      for (const [at, gain, freq] of [[0, 0.8, 3200], [0.07, 0.5, 2600], [0.2, 1, 1800]] as const) {
+      data = createSamples(sampleRate, 0.24);
+      for (const [at, gain, freq] of [[0, 0.7, 2850], [0.095, 0.55, 2250]] as const) {
         const start = Math.floor(at * sampleRate);
         for (let i = 0; start + i < data.length; i++) {
           const t = i / sampleRate;
           data[start + i] = data[start + i]! + ((Math.random() * 2 - 1) * 0.6 + Math.sin(2 * Math.PI * freq * t) * 0.4) * Math.exp(-t / 0.006) * gain;
         }
       }
-      highpass(data, sampleRate, 500);
+      highpass(data, sampleRate, 700);
       break;
     }
   }

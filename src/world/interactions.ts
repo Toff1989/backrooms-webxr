@@ -1,13 +1,11 @@
 import * as THREE from "three";
 import { log } from "../debug/debugLog";
-import { tList } from "../i18n";
 import { CollisionGroups, RAPIER, type PhysicsWorld } from "../physics/physicsWorld";
 import type { LiveViews } from "../player/liveViews";
 import type { Hand } from "../player/hand";
 import { stringSeedToInt } from "../shared/rng";
 import type { Grabbable, GrabbableRegistry } from "./grabbable";
-import { HANDWRITING_FONT } from "./loreArt";
-import { createFacePlane, findModelFace, type ModelFace } from "./modelFace";
+import { findModelFace, type ModelFace } from "./modelFace";
 import { emitNoise } from "./noise";
 import type { LoopHandle, ObjectAudio } from "./objectAudio";
 
@@ -20,9 +18,12 @@ export interface InteractionWorld {
   camera: THREE.Camera;
   head(): THREE.Vector3;
   cadreurPosition(): THREE.Vector3 | null;
+  cadreurObject(): THREE.Object3D | null;
   stunCadreur(seconds: number): void;
   exitPosition(): { x: number; z: number };
   capturePhoto(): HTMLCanvasElement | null;
+  captureObject(object: THREE.Object3D, origin: THREE.Vector3, hidden: THREE.Object3D | undefined, width: number, height: number): HTMLCanvasElement | null;
+  isRemoteTarget(grabbable: Grabbable): boolean;
   take(): number;
   runSeconds(): number;
   drop(grabbable: Grabbable): void;
@@ -35,8 +36,6 @@ export interface InteractionWorld {
 interface Behaviour {
   /** Gâchette pressée en tenant l'objet. */
   use?(hand: Hand): void;
-  /** Doigt tendu posé sur l'objet (meubles, objet posé). */
-  poke?(hand: Hand): void;
   /** Choc (vitesse avant l'impact, m/s) : objet lancé, tombé. */
   impact?(speed: number): void;
   grab?(hand: Hand): void;
@@ -50,9 +49,6 @@ interface Behaviour {
 type Factory = (g: Grabbable, w: InteractionWorld, system: InteractionSystem) => Behaviour;
 
 const NEAR_DISTANCE = 12;
-/** Doigt à moins de 2,5 cm de la surface = appui. */
-const POKE_DISTANCE = 0.025;
-const POKE_COOLDOWN = 0.7;
 const IMPACT_MIN_SPEED = 1.2;
 
 const tmp = new THREE.Vector3();
@@ -82,89 +78,81 @@ function topLocalPoint(object: THREE.Object3D): THREE.Vector3 {
   return object.worldToLocal(topWorld);
 }
 
-/** Écran / surface dessinée sur un canvas, posé sur une face du modèle (lumineux ou non). */
-export class FaceCanvas {
-  readonly canvas = document.createElement("canvas");
-  readonly ctx: CanvasRenderingContext2D;
-  readonly texture: THREE.CanvasTexture;
-  readonly mesh: THREE.Mesh;
-  private readonly material: THREE.Material;
-  private readonly originalMaterial: THREE.Material | THREE.Material[] | null;
-  private readonly ownsMesh: boolean;
-
-  constructor(owner: THREE.Object3D, face: ModelFace | null, width: number, height: number, options: { shrink?: number; glow?: boolean; transparent?: boolean; raise?: number; existingMesh?: THREE.Mesh } = {}) {
-    this.canvas.width = width;
-    this.canvas.height = height;
-    this.ctx = this.canvas.getContext("2d")!;
-    this.texture = new THREE.CanvasTexture(this.canvas);
-    this.texture.colorSpace = THREE.SRGBColorSpace;
-    // Sur une vraie sous-maille écran, on garde son matériau (normal map, rugosité, reflets) et on
-    // ne remplace que la texture diffuse : un écran de télé reste vitreux/réfléchissant même en
-    // affichant l'image, contrairement à un plan neuf entièrement réémissif (cas du fallback).
-    const existingBase = options.existingMesh && !Array.isArray(options.existingMesh.material) && options.existingMesh.material instanceof THREE.MeshStandardMaterial ? options.existingMesh.material : null;
-    let material: THREE.Material;
-    if (existingBase) {
-      const clone = existingBase.clone();
-      clone.map = this.texture;
-      clone.color.set(0xffffff);
-      if (options.transparent !== undefined) {
-        clone.transparent = options.transparent;
-        // Une sous-maille "glass" (vitre en alpha blend) arrive avec son opacité et son depthWrite
-        // déjà capés par `capBlendGlassOpacity` (gltfLoader.ts) pour paraître translucide — sans
-        // ça, un écran posé dessus en mode opaque resterait délavé/mal trié.
-        if (!options.transparent) {
-          clone.depthWrite = true;
-          clone.opacity = 1;
-        }
-      }
-      if (options.glow) {
-        clone.emissiveMap = this.texture;
-        clone.emissive = new THREE.Color(0xffffff);
-        clone.emissiveIntensity = 1;
-      }
-      material = clone;
-    } else {
-      material = options.glow
-        ? new THREE.MeshBasicMaterial({ map: this.texture, toneMapped: false, transparent: options.transparent ?? false })
-        : new THREE.MeshStandardMaterial({ map: this.texture, roughness: 0.9, transparent: options.transparent ?? false, emissiveMap: this.texture, emissive: 0xffffff, emissiveIntensity: 0.12 });
-    }
-    material.polygonOffset = true;
-    material.polygonOffsetFactor = -2;
-    this.material = material;
-    this.originalMaterial = options.existingMesh?.material ?? null;
-    this.ownsMesh = !options.existingMesh;
-    this.mesh = options.existingMesh ?? createFacePlane(face!, material, options.shrink ?? 1, width / height);
-    if (options.existingMesh) {
-      this.mesh.material = material;
-    } else {
-      // Décalage vers le haut de la face (écran d'une télé au-dessus de ses boutons).
-      if (options.raise) this.mesh.position.addScaledVector(face!.up, face!.height * options.raise);
-      owner.add(this.mesh);
-    }
-  }
-
-  set visible(value: boolean) {
-    this.mesh.visible = value;
-  }
-
-  commit(): void {
-    this.texture.needsUpdate = true;
-  }
-
-  dispose(): void {
-    if (this.ownsMesh) this.mesh.removeFromParent();
-    else if (this.originalMaterial) this.mesh.material = this.originalMaterial;
-    this.texture.dispose();
-    this.material.dispose();
-    if (this.ownsMesh) this.mesh.geometry.dispose();
-  }
+interface MeshCanvas {
+  canvas: HTMLCanvasElement;
+  ctx: CanvasRenderingContext2D;
+  texture: THREE.CanvasTexture;
+  mesh: THREE.Mesh;
+  activate(): void;
+  deactivate(): void;
+  commit(): void;
+  dispose(): void;
 }
 
-/** Face d'un objet : axe imposé ou, à défaut, la plus grande face plane. */
-function faceOf(g: Grabbable, axes?: THREE.Vector3[]): ModelFace | null {
-  return axes ? findModelFace(g.object, undefined, axes) : findModelFace(g.object);
+/** Canvas appliqué à une sous-maille explicitement nommée du modèle, jamais à une face de repli. */
+export function createMeshCanvas(mesh: THREE.Mesh, width: number, height: number, options: { glow?: boolean; transparent?: boolean; remapUv?: boolean; unlit?: boolean } = {}): MeshCanvas {
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext("2d")!;
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  const originalMaterial = mesh.material;
+  const originalGeometry = mesh.geometry;
+  const base = !Array.isArray(originalMaterial) && originalMaterial instanceof THREE.MeshStandardMaterial ? originalMaterial : null;
+  const material = options.unlit ? new THREE.MeshBasicMaterial({ toneMapped: false }) : base ? base.clone() : new THREE.MeshBasicMaterial({ toneMapped: false });
+  material.map = texture;
+  material.color.set(0xffffff);
+  if (options.transparent !== undefined) {
+    material.transparent = options.transparent;
+    if (!options.transparent) {
+      material.depthWrite = true;
+      material.opacity = 1;
+    }
+  }
+  if (options.glow && material instanceof THREE.MeshStandardMaterial) {
+    material.emissiveMap = texture;
+    material.emissive.set(0xffffff);
+    material.emissiveIntensity = 1;
+  }
+  material.polygonOffset = true;
+  material.polygonOffsetFactor = -2;
+  let remappedGeometry: THREE.BufferGeometry | null = null;
+
+  return {
+    canvas,
+    ctx,
+    texture,
+    mesh,
+    activate: () => {
+      mesh.material = material;
+      if (options.remapUv && !remappedGeometry) {
+        remappedGeometry = originalGeometry.clone();
+        mesh.geometry = remappedGeometry;
+        remapPlateUV(mesh);
+      }
+    },
+    deactivate: () => {
+      mesh.material = originalMaterial;
+      if (remappedGeometry) {
+        remappedGeometry.dispose();
+        remappedGeometry = null;
+        mesh.geometry = originalGeometry;
+      }
+    },
+    commit: () => {
+      texture.needsUpdate = true;
+    },
+    dispose: () => {
+      mesh.material = originalMaterial;
+      if (remappedGeometry) mesh.geometry = originalGeometry;
+      remappedGeometry?.dispose();
+      texture.dispose();
+      material.dispose();
+    },
+  };
 }
-const TV_FRONT = new THREE.Vector3(0, 0, 1);
+
 const UP_AXES = [new THREE.Vector3(0, 1, 0)];
 
 /** Sous-maille d'un modèle CC0 dont le nom (ou celui de son matériau) matche `pattern`. */
@@ -210,25 +198,9 @@ function placeBehindPlayer(w: InteractionWorld, camera: THREE.PerspectiveCamera)
 /** Télévision : neige qui grésille, puis passe en direct après quelques secondes. */
 const television: Factory = (g, w, system) => {
   const existingScreen = findTelevisionScreen(g.object);
-  if (!existingScreen) {
-    const meshNames: string[] = [];
-    g.object.traverse((child) => {
-      if (child instanceof THREE.Mesh) meshNames.push(child.name || "(sans nom)");
-    });
-    log("interact", { action: "tv-screen-not-found", meshNames });
-  }
-  const face = existingScreen ? null : findModelFace(g.object, TV_FRONT);
-  // Pas de décalage artificiel ("raise") : l'écran se pose exactement sur la face détectée du
-  // boîtier, pour ne pas paraître flotter au-dessus du modèle 3D.
-  const screen = existingScreen
-    ? new FaceCanvas(g.object, null, 160, 120, { existingMesh: existingScreen, glow: true })
-    : face
-      ? new FaceCanvas(g.object, face, 160, 120, { shrink: 0.68, glow: true })
-      : null;
-  if (screen) {
-    screen.visible = false;
-    system.displays.add(screen.mesh);
-  }
+  if (!existingScreen) return {};
+  const screen = createMeshCanvas(existingScreen, 160, 120, { remapUv: true, unlit: true });
+  system.displays.add(screen.mesh);
   let onSince = 0;
   let glitchUntil = 0;
   let wentLive = false;
@@ -245,7 +217,8 @@ const television: Factory = (g, w, system) => {
     on = value;
     onSince = time;
     wentLive = false;
-    if (screen) screen.visible = on;
+    if (on) screen.activate();
+    else screen.deactivate();
     w.audio.playAt(on ? "tvOn" : "tvOff", g.object.position, 0.7, `${g.kind}:${on ? "on" : "off"}`);
     if (on) hum = w.audio.loop("tvStatic", g.object, 0.28);
     else {
@@ -277,7 +250,10 @@ const television: Factory = (g, w, system) => {
     const security = system.securityCamera;
     const eye = w.cadreurEye();
     const id = security ? "security" : eye ? "cadreur" : "behind";
-    const view = w.views.use(id, 192, 144, 10, security ? 70 : 55, security ? [...system.displays, security.object] : [...system.displays]);
+    const viewDisplays = security ? [...system.displays, security.object] : [...system.displays];
+    const cadreurObject = w.cadreurObject();
+    if (cadreurObject) viewDisplays.push(cadreurObject);
+    const view = w.views.use(id, 192, 144, 10, security ? 70 : 55, viewDisplays);
     if (security) system.aimSecurityView(view.camera);
     else if (eye) {
       view.camera.position.copy(eye.position);
@@ -291,9 +267,8 @@ const television: Factory = (g, w, system) => {
 
   return {
     use: () => setOn(!on),
-    poke: () => setOn(!on),
     update: (dt, near) => {
-      if (!on || !screen) return;
+      if (!on) return;
       time += dt;
       noiseTimer -= dt;
       if (noiseTimer <= 0) {
@@ -332,11 +307,8 @@ const television: Factory = (g, w, system) => {
     },
     dispose: () => {
       hum?.stop();
-      if (screen) {
-        system.displays.delete(screen.mesh);
-        (screen.mesh.material as THREE.MeshBasicMaterial).map = screen.texture;
-        screen.dispose();
-      }
+      system.displays.delete(screen.mesh);
+      screen.dispose();
     },
   };
 };
@@ -397,7 +369,6 @@ const wetFloorSign: Factory = (g, w, system) => {
       w.audio.playAt("plasticClack", g.object.position, 0.5, `${g.kind}:fold`);
     },
   };
-  toggle.poke = toggle.use;
   return merge(toggle, impactNoise("thump", 1.1, 0.3)(g, w, system));
 };
 
@@ -432,7 +403,6 @@ const metalStool: Factory = (g, w, system) => {
       noiseAt(g, 0.2);
     },
   };
-  spin.poke = spin.use;
   return merge(spin, impactNoise("clank", 1.4, 0.3)(g, w, system));
 };
 
@@ -514,7 +484,6 @@ function breakable(minSpeed: number, loudness: number, sound: "shatter" | "potBr
 function merge(...parts: Behaviour[]): Behaviour {
   return {
     use: parts.find((p) => p.use)?.use,
-    poke: parts.find((p) => p.poke)?.poke,
     impact: parts.find((p) => p.impact)?.impact,
     grab: parts.find((p) => p.grab)?.grab,
     oil: parts.find((p) => p.oil)?.oil,
@@ -718,102 +687,40 @@ export function canvasSizeForAspect(aspect: number, maxDim = 192): [number, numb
   return aspect >= 1 ? [maxDim, Math.round(maxDim / aspect)] : [Math.round(maxDim * aspect), maxDim];
 }
 
-/** Photo : annotation au dos ; quand on ne la regarde pas, l'image change (l'endroit où l'on est). */
 /** Hauteur de référence (px) pour les textures générées sur les meshes nommés du cadre-photo. */
 const PHOTO_TEXTURE_HEIGHT = 192;
 
-/** Cadre-photo : le modèle nomme ses deux faces dynamiques ("picture_photo", "picture_note"). */
+/** Cadre-photo : seule la sous-maille `artwork` reçoit l'image trouvée. */
 const photo: Factory = (g, w) => {
-  const front = faceOf(g);
-  if (!front) return {};
-  const back = findModelFace(g.object, front.normal.clone().negate());
-  // Sur les modèles avec une fenêtre "artwork" dédiée (sous vitre), on s'y cale exactement au
-  // lieu de coller un plan neuf à la taille de la plus grande face détectée (la façade du cadre,
-  // plus grande que l'ouverture — ça débordait par-dessus le cadre et masquait le verre).
   const artwork = findMeshByName(g.object, /artwork/i);
-  const [fw, fh] = canvasSizeForAspect(artwork ? meshPlateAspect(artwork) : front.width / front.height, PHOTO_TEXTURE_HEIGHT);
-  const frontCanvas = artwork ? new FaceCanvas(g.object, null, fw, fh, { existingMesh: artwork }) : new FaceCanvas(g.object, front, fw, fh, { shrink: 0.82 });
-  drawFoundPhoto(frontCanvas.ctx, objectRoll(g, 7), fw, fh);
+  if (!artwork) return {};
+  const [fw, fh] = canvasSizeForAspect(meshPlateAspect(artwork), PHOTO_TEXTURE_HEIGHT);
+  const frontCanvas = createMeshCanvas(artwork, fw, fh, { remapUv: true });
+  const target = [...w.registry.all]
+    .filter((candidate) => candidate !== g && candidate.item !== null && candidate.heldBy === null)
+    .sort((a, b) => a.object.position.distanceToSquared(g.object.position) - b.object.position.distanceToSquared(g.object.position))[0];
+  const shot = target ? w.captureObject(target.object, g.object.position, g.object, fw, fh) : null;
+  if (target?.item && shot) drawTargetPhoto(frontCanvas.ctx, shot, fw, fh);
+  else drawFoundPhoto(frontCanvas.ctx, objectRoll(g, 7), fw, fh);
   frontCanvas.commit();
-  frontCanvas.visible = true;
-  // Idem pour le dos : sur les modèles avec une sous-maille "back" dédiée, l'écriture remplace
-  // directement son matériau (suit exactement le relief du bois, aucun décalage possible sous
-  // aucun angle) au lieu d'un plan neuf collé devant (fallback, modèles sans sous-maille dédiée).
-  // Transparent dans les deux cas : pas de fond peint, seule l'encre est dessinée.
+  frontCanvas.activate();
   const backMesh = findMeshByName(g.object, /back/i);
-  // L'unwrap d'origine de cette sous-maille peut être tourné/en miroir par rapport aux autres
-  // pièces du modèle (texte illisible sinon) : on retrace ses UV nous-mêmes.
-  if (backMesh) remapPlateUV(backMesh);
-  const backAspect = backMesh ? meshPlateAspect(backMesh) : back ? back.width / back.height : 1;
-  const [bw, bh] = canvasSizeForAspect(backAspect, PHOTO_TEXTURE_HEIGHT);
-  const backCanvas = backMesh ? new FaceCanvas(g.object, null, bw, bh, { existingMesh: backMesh, transparent: true }) : back ? new FaceCanvas(g.object, back, bw, bh, { shrink: 0.9, transparent: true }) : null;
-  if (backCanvas) {
-    const texts = tList("interact.photoBacks");
-    const ctx = backCanvas.ctx;
-    // Le tracé ci-dessous est composé sur un cadre virtuel 192×192 (mise en page d'origine),
-    // puis mis à l'échelle non uniforme vers les dimensions réelles du dos — plus simple et
-    // plus sûr que de recalculer chaque coordonnée pour un ratio arbitraire.
-    ctx.save();
-    ctx.scale(bw / 192, bh / 192);
-    ctx.strokeStyle = "rgba(120, 92, 55, 0.28)";
-    ctx.lineWidth = 2;
-    for (let y = 18; y < 192; y += 18) {
-      ctx.beginPath();
-      ctx.moveTo(10, y);
-      ctx.lineTo(182, y);
-      ctx.stroke();
-    }
-    ctx.strokeStyle = "rgba(160, 48, 42, 0.45)";
-    ctx.beginPath();
-    ctx.moveTo(30, 8);
-    ctx.lineTo(30, 184);
-    ctx.stroke();
-    ctx.fillStyle = "#1c2753";
-    ctx.font = `20px ${HANDWRITING_FONT}`;
-    ctx.textBaseline = "alphabetic";
-    const words = (texts[Math.floor(objectRoll(g, 6) * texts.length)] ?? "").split(" ");
-    const maxWidth = 168;
-    const lines: string[] = [];
-    let line = "";
-    for (const word of words) {
-      const candidate = line ? `${line} ${word}` : word;
-      if (ctx.measureText(candidate).width > maxWidth && line) {
-        lines.push(line);
-        line = word;
-      } else line = candidate;
-    }
-    if (line) lines.push(line);
-    for (const [index, text] of lines.entries()) ctx.fillText(text, 42, 44 + index * 24);
-    ctx.fillStyle = "rgba(110, 64, 36, 0.7)";
-    ctx.font = "bold 9px monospace";
-    ctx.fillText("ARCHIVE / 04", 112, 178);
-    ctx.restore();
-    backCanvas.commit();
-  }
+  const backWasVisible = backMesh?.visible;
+  if (backMesh) backMesh.visible = false;
 
-  let unseen = 0;
-  let cooldown = 0;
   return {
-    update: (dt, near) => {
-      cooldown -= dt;
-      if (!near || cooldown > 0) return;
-      const position = g.object.position;
-      unseen = position.distanceTo(w.head()) < 6 && !inView(w, position, 0.35) ? unseen + dt : 0;
-      if (unseen < 3) return;
-      const shot = w.capturePhoto();
-      cooldown = 25;
-      unseen = 0;
-      if (!shot) return;
-      frontCanvas.ctx.drawImage(shot, 0, 0, fw, fh);
-      frontCanvas.commit();
-      frontCanvas.visible = true;
-    },
     dispose: () => {
       frontCanvas.dispose();
-      backCanvas?.dispose();
+      if (backMesh && backWasVisible !== undefined) backMesh.visible = backWasVisible;
     },
   };
 };
+
+function drawTargetPhoto(ctx: CanvasRenderingContext2D, shot: HTMLCanvasElement, width: number, height: number): void {
+  ctx.fillStyle = "#11151a";
+  ctx.fillRect(0, 0, width, height);
+  ctx.drawImage(shot, 0, 0, width, height);
+}
 
 /** Composé sur un cadre virtuel 192×192, puis mis à l'échelle non uniforme vers `width`×`height`
  * (le ratio réel de la surface visée) — voir le commentaire équivalent dans `photo`. */
@@ -863,26 +770,13 @@ function drawFoundPhoto(ctx: CanvasRenderingContext2D, seed: number, width: numb
  * alors le dessin directement sur elle, comme l'écran de télé ou l'artwork du cadre photo,
  * plutôt que de coller un plan neuf par-dessus).
  */
-function dial(size: number, rate: number, raise: number, draw: (ctx: CanvasRenderingContext2D, g: Grabbable, w: InteractionWorld, face: ModelFace | null) => void, centerPattern?: RegExp, screenPattern?: RegExp): Factory {
+function dial(size: number, rate: number, _raise: number, draw: (ctx: CanvasRenderingContext2D, g: Grabbable, w: InteractionWorld, face: ModelFace | null) => void, centerPattern?: RegExp, screenPattern?: RegExp): Factory {
   return (g, w) => {
     const screenMesh = screenPattern ? findMeshByName(g.object, screenPattern) : null;
-    // Cadran sur le dessus de l'objet (sa plus grande face serait le dessous, posé à plat).
-    const face = screenMesh ? null : faceOf(g, UP_AXES);
-    if (!screenMesh && !face) return {};
-    if (screenMesh) {
-      // Cette sous-maille n'est pas qu'une simple plaque (chants biseautés compris dans le même
-      // unwrap) : on ne recadre que sur le sous-rectangle déjà utilisé par sa face plate, sans
-      // quoi le dessin se retrouve tassé dans un coin — voir `remapPlateUVToFace`. L'unwrap
-      // d'origine de ce panneau est monté en miroir vertical par rapport au canevas (texte
-      // inversé constaté sur la montre digitale) : on retourne l'axe V.
-      remapPlateUVToFace(screenMesh, UP_AXES[0]!, 0.9, { v: true });
-    }
-    const canvas = screenMesh
-      ? new FaceCanvas(g.object, null, size, size, { existingMesh: screenMesh, glow: true, transparent: false })
-      : new FaceCanvas(g.object, face!, size, size, { shrink: 0.7, glow: true, transparent: true, raise });
-    // Sous-maille "verre/écran" cachée jusqu'au premier dessin (sinon le canevas vierge,
-    // transparent à l'origine, remplacerait pour de bon le rendu d'origine dès l'apparition).
-    if (screenMesh) canvas.visible = false;
+    if (!screenMesh) return {};
+    remapPlateUVToFace(screenMesh, UP_AXES[0]!, 0.9, { v: true });
+    const face = null;
+    const canvas = createMeshCanvas(screenMesh, size, size, { glow: true, transparent: false });
     // Sur les modèles avec un repère "centre du cadran" dédié (mini sous-maille sans surface
     // propre, juste un point) : la face auto-détectée peut tomber sur une autre partie plane du
     // modèle (un couvercle ouvert, par ex.) plutôt que le cadran — on recale sur ce repère.
@@ -899,39 +793,70 @@ function dial(size: number, rate: number, raise: number, draw: (ctx: CanvasRende
         timer = rate;
         draw(canvas.ctx, g, w, face);
         canvas.commit();
-        canvas.visible = true;
+        canvas.activate();
       },
       dispose: () => canvas.dispose(),
     };
   };
 }
 
-const compass = dial(128, 0.1, -0.08, (ctx, g, w, face) => {
-  if (!face) return;
-  const exit = w.exitPosition();
-  // Direction de la sortie dans le repère de l'objet, projetée sur le plan du cadran.
-  const worldDirection = tmp.set(exit.x - g.object.position.x, 0, exit.z - g.object.position.z).normalize();
-  const local = worldDirection.applyQuaternion(g.object.quaternion.clone().invert());
-  const right = tmp2.crossVectors(face.up, face.normal).normalize();
-  const angle = Math.atan2(local.dot(right), local.dot(face.up));
-  ctx.clearRect(0, 0, 128, 128);
-  ctx.save();
-  ctx.translate(64, 64);
-  ctx.rotate(angle + (Math.random() - 0.5) * 0.05);
-  ctx.fillStyle = "rgba(200, 30, 30, 0.95)";
-  ctx.beginPath();
-  ctx.moveTo(0, -46);
-  ctx.lineTo(7, 0);
-  ctx.lineTo(-7, 0);
-  ctx.fill();
-  ctx.fillStyle = "rgba(230, 230, 220, 0.9)";
-  ctx.beginPath();
-  ctx.moveTo(0, 46);
-  ctx.lineTo(7, 0);
-  ctx.lineTo(-7, 0);
-  ctx.fill();
-  ctx.restore();
-}, /dial_center/i);
+/** Boussole : son modèle fournit un repère central, mais pas de sous-maille de cadran dédiée. */
+const compass: Factory = (g, w) => {
+  const face = findModelFace(g.object, undefined, UP_AXES);
+  if (!face) return {};
+  const canvas = document.createElement("canvas");
+  canvas.width = canvas.height = 128;
+  const ctx = canvas.getContext("2d")!;
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  const material = new THREE.MeshBasicMaterial({ map: texture, toneMapped: false, transparent: true });
+  const plane = new THREE.Mesh(new THREE.PlaneGeometry(face.width * 0.7, face.height * 0.7), material);
+  const right = new THREE.Vector3().crossVectors(face.up, face.normal).normalize();
+  plane.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(right, face.up, face.normal));
+  plane.position.copy(face.center);
+  const centerMesh = findMeshByName(g.object, /dial_center/i);
+  if (centerMesh) {
+    centerMesh.geometry.computeBoundingBox();
+    plane.position.copy(centerMesh.geometry.boundingBox!.getCenter(new THREE.Vector3()));
+  }
+  g.object.add(plane);
+  let timer = 0;
+  return {
+    update: (dt, near) => {
+      timer -= dt;
+      if (timer > 0 || !near || g.object.position.distanceTo(w.head()) > 4) return;
+      timer = 0.1;
+      const exit = w.exitPosition();
+      const worldDirection = tmp.set(exit.x - g.object.position.x, 0, exit.z - g.object.position.z).normalize();
+      const local = worldDirection.applyQuaternion(g.object.quaternion.clone().invert());
+      const angle = Math.atan2(local.dot(right), local.dot(face.up));
+      ctx.clearRect(0, 0, 128, 128);
+      ctx.save();
+      ctx.translate(64, 64);
+      ctx.rotate(angle + (Math.random() - 0.5) * 0.05);
+      ctx.fillStyle = "rgba(200, 30, 30, 0.95)";
+      ctx.beginPath();
+      ctx.moveTo(0, -46);
+      ctx.lineTo(7, 0);
+      ctx.lineTo(-7, 0);
+      ctx.fill();
+      ctx.fillStyle = "rgba(230, 230, 220, 0.9)";
+      ctx.beginPath();
+      ctx.moveTo(0, 46);
+      ctx.lineTo(7, 0);
+      ctx.lineTo(-7, 0);
+      ctx.fill();
+      ctx.restore();
+      texture.needsUpdate = true;
+    },
+    dispose: () => {
+      plane.removeFromParent();
+      plane.geometry.dispose();
+      material.dispose();
+      texture.dispose();
+    },
+  };
+};
 
 const digitalWatch = dial(128, 1, 0.08, (ctx, _g, w) => {
   const total = Math.floor(w.runSeconds());
@@ -1223,7 +1148,6 @@ const BEHAVIOURS: Record<string, Factory> = {
   }),
   can,
   // Seuil abaissé (1.5 -> 0.9) : un rebond de ballon typique n'atteignait pas la vitesse minimale, restait muet.
-  football: impactNoise("thump", 0.9, 0.4),
   hammer: impactNoise("bang", 3, 0.9),
   vase: breakable(2.5, 0.8, "potBreak"),
   lightbulb,
@@ -1265,9 +1189,8 @@ const BEHAVIOURS: Record<string, Factory> = {
  * comportements, donc mêmes entrées du cache de `findModelFace`.
  */
 export function prepareInteractionFaces(kind: string, template: THREE.Object3D): void {
-  const behaviour = BEHAVIOURS[kind];
-  if (behaviour === television) findModelFace(template, TV_FRONT);
-  else if (behaviour === compass || behaviour === digitalWatch) findModelFace(template, undefined, UP_AXES);
+  void kind;
+  void template;
 }
 
 /**
@@ -1282,8 +1205,6 @@ export function prepareInteractionFaces(kind: string, template: THREE.Object3D):
 export class InteractionSystem {
   private readonly behaviours = new Map<Grabbable, Behaviour>();
   private readonly speeds = new Map<Grabbable, number>();
-  private readonly touching = new Set<string>();
-  private readonly lastPoke = new Map<Grabbable, number>();
   private readonly puffs: Array<{ points: THREE.Points; age: number; velocity: THREE.Vector3 }> = [];
   private time = 0;
   /** Surfaces qui affichent une vue en direct : masquées pendant le rendu des vues. */
@@ -1295,11 +1216,13 @@ export class InteractionSystem {
   placeSecurityCamera(g: Grabbable, direction: THREE.Vector3): void {
     this.securityCamera = g;
     this.securityDirection.copy(direction);
+    this.world.views.hideFromOffscreen(g.object);
   }
 
   removeSecurityCamera(g: Grabbable): void {
     if (this.securityCamera !== g) return;
     this.securityCamera = null;
+    this.world.views.showInOffscreen(g.object);
     this.world.views.release("security");
   }
 
@@ -1341,7 +1264,6 @@ export class InteractionSystem {
     this.behaviours.get(g)?.dispose?.();
     this.behaviours.delete(g);
     this.speeds.delete(g);
-    this.lastPoke.delete(g);
   }
 
   use(hand: Hand, g: Grabbable): void {
@@ -1371,7 +1293,7 @@ export class InteractionSystem {
     this.puffs.push({ points, age: 0, velocity: direction.clone().multiplyScalar(0.8) });
   }
 
-  update(deltaSeconds: number, hands: readonly Hand[]): void {
+  update(deltaSeconds: number): void {
     this.time += deltaSeconds;
     const head = this.world.head();
     for (const [g, behaviour] of this.behaviours) {
@@ -1380,12 +1302,15 @@ export class InteractionSystem {
       // Choc détecté aussi en main (heurter un mur en le tenant) : même heuristique que lancé/tombé.
       if (behaviour.impact && this.behaviours.has(g)) this.detectImpact(g, behaviour);
     }
-    this.detectPokes(hands);
     this.updatePuffs(deltaSeconds);
   }
 
   /** Choc : la vitesse chute brutalement d'une frame à l'autre (objet lancé contre un mur, au sol). */
   private detectImpact(g: Grabbable, behaviour: Behaviour): void {
+    if (this.world.isRemoteTarget(g)) {
+      this.speeds.delete(g);
+      return;
+    }
     if (g.body.isSleeping()) {
       this.speeds.set(g, 0);
       return;
@@ -1397,29 +1322,6 @@ export class InteractionSystem {
     if (previous > IMPACT_MIN_SPEED && speed < previous * 0.45) {
       log("interact", { action: "impact", kind: g.kind, speed: Math.round(previous * 10) / 10 });
       behaviour.impact!(previous);
-    }
-  }
-
-  /** Doigt tendu (gâchette relâchée) posé sur un objet qui réagit au toucher. */
-  private detectPokes(hands: readonly Hand[]): void {
-    for (const hand of hands) {
-      if (!hand.tracked || hand.holding || hand.input.trigger.value > 0.5) continue;
-      const tip = hand.getIndexTipWorld(tmp);
-      if (!tip) continue;
-      for (const [g, behaviour] of this.behaviours) {
-        if (!behaviour.poke || g.heldBy || g.object.position.distanceTo(tip) > 2) continue;
-        const key = `${hand.input.handedness}:${g.collider.handle}`;
-        const projection = g.collider.projectPoint(tip, true);
-        const touching = !!projection && (projection.isInside || tip.distanceTo(tmp2.set(projection.point.x, projection.point.y, projection.point.z)) < POKE_DISTANCE);
-        if (touching && !this.touching.has(key) && this.time - (this.lastPoke.get(g) ?? -Infinity) > POKE_COOLDOWN) {
-          this.lastPoke.set(g, this.time);
-          hand.pulse(0.3, 25);
-          log("interact", { action: "poke", kind: g.kind });
-          behaviour.poke(hand);
-        }
-        if (touching) this.touching.add(key);
-        else this.touching.delete(key);
-      }
     }
   }
 

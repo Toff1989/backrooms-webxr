@@ -1,8 +1,8 @@
 /**
  * Rendu visuel minimal de la montre digitale, même principe que television-render.test.ts : la
  * vraie détection (`findMeshByName(/glass/i)`, la vitre du cadran étant une vraie sous-maille
- * séparée du modèle, fallback `findModelFace(UP_AXES)` sinon), le vrai recadrage d'UV
- * (`remapPlateUVToFace`) et la vraie classe `FaceCanvas`, avec le même dessin d'écran que la
+ * séparée du modèle), le vrai recadrage d'UV (`remapPlateUVToFace`) et l'application directe du
+ * canvas sur cette sous-maille, avec le même dessin d'écran que la
  * factory `digitalWatch` (dupliqué ici car `digitalWatch`/`dial`/`UP_AXES` ne sont pas exportés).
  * Contrairement au compass, ce modèle n'a pas de repère "centre" dédié — la vitre-écran est posée
  * directement sur le modèle, comme l'écran de la télé.
@@ -14,9 +14,8 @@
  */
 import * as THREE from "three";
 import digitalWatchUrl from "../../src/assets/models/collectibles/digitalWatch.glb";
-import { FaceCanvas, findMeshByName, remapPlateUVToFace } from "../../src/world/interactions";
+import { createMeshCanvas, findMeshByName, remapPlateUVToFace } from "../../src/world/interactions";
 import { loadTemplateModel } from "../../src/world/gltfLoader";
-import { findModelFace } from "../../src/world/modelFace";
 import { createLogger, createRenderer, createScene, createStageController, frameOnPoint } from "./support/harness";
 
 const { log } = createLogger();
@@ -45,9 +44,8 @@ async function run(): Promise<void> {
   scene.add(template);
 
   const glass = findMeshByName(template, /glass/i);
-  const face = glass ? null : findModelFace(template, undefined, UP_AXES);
-  log(glass ? `Sous-maille vitre détectée : "${glass.name || "(sans nom)"}" → écran posé en place (dessus le vrai cadran).` : face ? "Pas de sous-maille vitre → pose d'un plan sur la face auto-détectée (fallback)." : "Aucune surface détectée.");
-  if (!glass && !face) {
+  log(glass ? `Sous-maille vitre détectée : "${glass.name || "(sans nom)"}" → écran posé en place (dessus le vrai cadran).` : "Pas de sous-maille vitre : aucun écran de repli n'est créé.");
+  if (!glass) {
     renderer.render(scene, camera);
     await stages.enter("OFF");
     await stages.enter("ON");
@@ -63,18 +61,18 @@ async function run(): Promise<void> {
     glass.geometry.computeBoundingBox();
   }
   const box = new THREE.Box3().setFromObject(template);
-  const focusCenter = glass ? glass.geometry.boundingBox!.getCenter(new THREE.Vector3()) : face!.center;
-  const focusRadius = glass ? box.getSize(new THREE.Vector3()).length() * 0.12 : Math.max(face!.width, face!.height) * 0.6;
+  const focusCenter = glass.geometry.boundingBox!.getCenter(new THREE.Vector3());
+  const focusRadius = box.getSize(new THREE.Vector3()).length() * 0.12;
   frameOnPoint(camera, focusCenter, focusRadius, new THREE.Vector3(0.35, 1, 0.35));
 
   renderer.render(scene, camera);
   log("Rendu 'vierge' (matériau d'origine, vitre translucide) affiché.");
   await stages.enter("OFF");
 
-  const screenCanvas = glass ? new FaceCanvas(template, null, 128, 128, { existingMesh: glass, glow: true, transparent: false }) : new FaceCanvas(template, face!, 128, 128, { shrink: 0.7, glow: true, transparent: true, raise: 0.08 });
+  const screenCanvas = createMeshCanvas(glass, 128, 128, { glow: true, transparent: false });
   drawClock(screenCanvas.ctx, 754);
   screenCanvas.commit();
-  screenCanvas.visible = true;
+  screenCanvas.activate();
 
   renderer.render(scene, camera);
   log("Rendu 'écran allumé' (heure de test fixe) affiché.");

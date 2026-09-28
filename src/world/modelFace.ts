@@ -226,20 +226,3 @@ export function findModelFace(template: THREE.Object3D, axis?: THREE.Vector3, ca
   return result;
 }
 
-/**
- * Plan texturé posé sur une face (écran, cadran...) : à ajouter comme enfant du modèle.
- * `shrink` réduit la surface (l'écran d'une télé est plus petit que sa façade).
- */
-export function createFacePlane(face: ModelFace, material: THREE.Material, shrink = 1, aspect?: number): THREE.Mesh {
-  let width = face.width * shrink;
-  let height = face.height * shrink;
-  if (aspect) {
-    if (width / height > aspect) width = height * aspect;
-    else height = width / aspect;
-  }
-  const mesh = new THREE.Mesh(new THREE.PlaneGeometry(width, height), material);
-  const right = new THREE.Vector3().crossVectors(face.up, face.normal).normalize();
-  mesh.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(right, face.up, face.normal));
-  mesh.position.copy(face.center);
-  return mesh;
-}

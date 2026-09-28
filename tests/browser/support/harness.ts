@@ -2,7 +2,7 @@
  * Socle commun aux tests de rendu visuel (`tests/browser/*-render.test.ts`) : scène three.js
  * minimale (renderer + lumières), contrôleur d'étapes bloquant, et deux façons de cadrer la
  * caméra. Pas d'InteractionSystem/monde/joueur : juste assez pour exercer le vrai code de
- * détection/pose d'écran (`FaceCanvas`, `findModelFace`, `findMeshByName`...) avec un
+ * détection de sous-mailles (`findModelFace`, `findMeshByName`...) avec un
  * `WebGLRenderer` réel (logiciel/SwiftShader en Chromium headless, voir `scripts/render-test.mjs`).
  *
  * Le contrôleur d'étapes bloque le script après chaque rendu jusqu'à ce que le runner

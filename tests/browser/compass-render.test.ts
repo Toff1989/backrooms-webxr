@@ -1,9 +1,6 @@
 /**
- * Rendu visuel minimal de la boussole, même principe que les autres tests de rendu : la vraie
- * détection (`findModelFace` sur l'axe (0,1,0), comme `UP_AXES` dans `interactions.ts` — un seul
- * candidat, donc pas d'ambiguïté haut/bas à reproduire ici), le repère "dial_center" (si présent)
- * pour recentrer l'aiguille, et la vraie classe `FaceCanvas`, avec le même dessin d'aiguille que
- * la factory `compass` (dupliqué ici car `compass`/`dial`/`UP_AXES` ne sont pas exportés).
+ * Rendu visuel minimal de la boussole : le modèle n'a pas de sous-maille de cadran dédiée, donc
+ * son comportement crée son aiguille directement sur la face supérieure.
  *
  * Socle commun (renderer, scène, cadrage, contrôleur d'étapes) dans support/harness.ts.
  *
@@ -12,7 +9,7 @@
  */
 import * as THREE from "three";
 import compassUrl from "../../src/assets/models/collectibles/compass.glb";
-import { FaceCanvas, findMeshByName } from "../../src/world/interactions";
+import { findMeshByName } from "../../src/world/interactions";
 import { loadTemplateModel } from "../../src/world/gltfLoader";
 import { findModelFace } from "../../src/world/modelFace";
 import { createLogger, createRenderer, createScene, createStageController, frameOnPoint } from "./support/harness";
@@ -20,8 +17,6 @@ import { createLogger, createRenderer, createScene, createStageController, frame
 const { log } = createLogger();
 const stages = createStageController(["OFF", "ON", "PROFILE"]);
 
-// Reproduit exactement le dessin de `compass` dans interactions.ts, pour un angle de test fixe
-// (sans dépendre de la logique de sortie/monde).
 function drawNeedle(ctx: CanvasRenderingContext2D, angle: number): void {
   ctx.clearRect(0, 0, 128, 128);
   ctx.save();
@@ -66,27 +61,30 @@ async function run(): Promise<void> {
   log("Rendu 'vierge' (matériau d'origine) affiché.");
   await stages.enter("OFF");
 
-  const dialCanvas = new FaceCanvas(template, face, 128, 128, { shrink: 0.7, glow: true, transparent: true, raise: -0.08 });
+  const texture = new THREE.CanvasTexture(document.createElement("canvas"));
+  texture.image.width = texture.image.height = 128;
+  const ctx = texture.image.getContext("2d")!;
+  const material = new THREE.MeshBasicMaterial({ map: texture, toneMapped: false, transparent: true });
+  const needle = new THREE.Mesh(new THREE.PlaneGeometry(face.width * 0.7, face.height * 0.7), material);
+  const right = new THREE.Vector3().crossVectors(face.up, face.normal).normalize();
+  needle.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(right, face.up, face.normal));
+  needle.position.copy(face.center);
   const centerMesh = findMeshByName(template, /dial_center/i);
-  log(centerMesh ? 'Repère "dial_center" détecté → recentrage de l\'aiguille dessus.' : 'Pas de repère "dial_center" → l\'aiguille reste sur la face auto-détectée.');
   if (centerMesh) {
     centerMesh.geometry.computeBoundingBox();
-    dialCanvas.mesh.position.copy(centerMesh.geometry.boundingBox!.getCenter(new THREE.Vector3()));
+    needle.position.copy(centerMesh.geometry.boundingBox!.getCenter(new THREE.Vector3()));
   }
-  drawNeedle(dialCanvas.ctx, 0.4);
-  dialCanvas.commit();
-  dialCanvas.visible = true;
+  drawNeedle(ctx, 0.4);
+  texture.needsUpdate = true;
+  template.add(needle);
 
   renderer.render(scene, camera);
   log("Rendu 'aiguille dessinée' (angle de test fixe) affiché.");
   await stages.enter("ON");
 
-  // Vue de profil : révèle un décalage de hauteur entre le plan de l'aiguille et le cadran,
-  // invisible depuis le dessus.
-  const profileCenter = centerMesh ? dialCanvas.mesh.position : face.center;
-  frameOnPoint(camera, profileCenter, Math.max(face.width, face.height) * 0.6, new THREE.Vector3(1, 0.05, 0));
+  frameOnPoint(camera, needle.position, Math.max(face.width, face.height) * 0.6, new THREE.Vector3(1, 0.05, 0));
   renderer.render(scene, camera);
-  log("Rendu 'profil' (pour repérer un décalage de hauteur de l'aiguille) affiché.");
+  log("Rendu 'profil' (pour repérer le décalage de hauteur de l'aiguille) affiché.");
   await stages.enter("PROFILE");
 }
 

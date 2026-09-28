@@ -24,8 +24,6 @@ export interface LevelUpdateResult {
   wallTrapJustWarned: boolean;
   /** Vrai la frame où un mur-piège surgit pleinement (signal haptique fort). */
   wallTrapJustPopped: boolean;
-  /** Nombre de piles ramassées cette frame. */
-  batteriesPicked: number;
   /** Obscurité à la position du joueur (0 = zone éclairée, 1 = néons éteints). */
   darkness: number;
   /** Distance (m) à la sortie, pour l'indicateur de signal du HUD. */
@@ -97,13 +95,12 @@ export class LevelManager {
   /** `playerPosition` : position XZ de la tête du joueur (pas l'origine du rig). */
   update(
     playerPosition: THREE.Vector3,
-    hands: readonly THREE.Vector3[],
     camera: THREE.Camera,
     elapsedSeconds: number,
     deltaSeconds: number,
     corruption: number,
   ): LevelUpdateResult {
-    const streamerResult = this.chunkStreamer.update(playerPosition, hands, camera, deltaSeconds);
+    const streamerResult = this.chunkStreamer.update(playerPosition, camera, deltaSeconds);
     this.exitBeacon.update(elapsedSeconds, deltaSeconds, corruption * (1 - this.beaconSteadiness), playerPosition, this.scene);
     this.floorCeiling.update(playerPosition);
 
@@ -124,6 +121,10 @@ export class LevelManager {
   /** Seed du level courant (objets cachés dans les meubles : un par meuble et par level). */
   get levelSeed(): string {
     return this.profile.seed;
+  }
+
+  markBatteryPicked(id: string): void {
+    this.chunkStreamer.markBatteryPicked(id);
   }
 
   /** Position monde de la sortie du level (boussole, multimètre). */

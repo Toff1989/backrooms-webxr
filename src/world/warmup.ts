@@ -187,7 +187,7 @@ function representativeObjects(): THREE.Object3D[] {
   const point = new THREE.BufferGeometry();
   point.setAttribute("position", new THREE.Float32BufferAttribute([0, 0, 0], 3));
   return [
-    // Écrans et cadrans (`FaceCanvas`, interactions.ts).
+    // Sous-mailles interactives (interactions.ts).
     mesh(new THREE.MeshBasicMaterial({ map: texture, toneMapped: false })),
     mesh(new THREE.MeshBasicMaterial({ map: texture, toneMapped: false, transparent: true })),
     mesh(new THREE.MeshStandardMaterial({ map: texture, emissiveMap: texture, emissive: 0xffffff })),

@@ -8,8 +8,6 @@ import type { HandInput } from "./xrInput";
 /** Point de saisie devant la paume, dans l'espace grip (paume vers -X main droite, +X main gauche). */
 const PALM_OFFSET = { right: new THREE.Vector3(-0.035, -0.005, -0.01), left: new THREE.Vector3(0.035, -0.005, -0.01) };
 const HAND_COLLIDER_RADIUS = 0.045;
-/** Main ouverte : ne bouscule les objets qu'au-delà de cette vitesse (sinon on renverse ce qu'on veut attraper). */
-const SWIPE_SPEED = 1.1;
 const TELEPORT_JUMP = 0.35;
 const HISTORY_SECONDS = 0.09;
 /** Flexion des doigts au repos (main posée sur la manette, sans appuyer). */
@@ -162,8 +160,7 @@ export class Hand {
 
   /** Cible du corps cinématique, avant chaque pas de simulation. */
   applyKinematicTarget(): void {
-    const active =
-      this.tracked && this.holding === null && (this.input.squeeze.value > 0.6 || this.speed > SWIPE_SPEED);
+    const active = this.tracked && this.holding === null;
     if (this.collider.isEnabled() !== active) this.collider.setEnabled(active);
     if (!this.tracked) return;
 

@@ -147,9 +147,11 @@ export class ExitBeacon {
     // faiblement — le portail doit rester sombre ; on le trouve surtout à l'oreille (balise)
     // et au signal du caméscope.
     this.signMaterial = materials.sign;
-    const sign = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.16, 0.05), this.signMaterial);
+    const sign = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.16, 0.05), this.doorMaterial);
     sign.position.set(0, DOOR_HEIGHT + 0.3, 0.03);
-    this.group.add(sign);
+    const signFront = new THREE.Mesh(new THREE.PlaneGeometry(0.42, 0.16), this.signMaterial);
+    signFront.position.set(0, DOOR_HEIGHT + 0.3, 0.056);
+    this.group.add(sign, signFront);
 
     // Intérieur noir (faces intérieures d'une boîte) : ce qu'on voit par l'entrebâillement.
     this.voidMaterial = materials.void;

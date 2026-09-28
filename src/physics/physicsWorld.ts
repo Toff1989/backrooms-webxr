@@ -25,15 +25,15 @@ function interaction(membership: number, filter: number): number {
 }
 
 export const CollisionGroups = {
-  static: interaction(Groups.STATIC, Groups.PLAYER | Groups.DYNAMIC | Groups.HELD),
+  static: interaction(Groups.STATIC, Groups.PLAYER | Groups.HAND | Groups.DYNAMIC | Groups.HELD),
   player: interaction(Groups.PLAYER, Groups.STATIC | Groups.DYNAMIC),
-  hand: interaction(Groups.HAND, Groups.DYNAMIC),
+  hand: interaction(Groups.HAND, Groups.STATIC | Groups.DYNAMIC),
   dynamic: interaction(Groups.DYNAMIC, Groups.STATIC | Groups.PLAYER | Groups.HAND | Groups.DYNAMIC | Groups.HELD),
   held: interaction(Groups.HELD, Groups.STATIC | Groups.DYNAMIC),
-  /** Requête "que peut-on attraper ici ?" : ne voit que les objets dynamiques libres. */
-  queryGrabbable: interaction(Groups.HAND, Groups.DYNAMIC),
+  /** Requête "que peut-on attraper ici ?" : voit aussi un objet fraîchement lâché. */
+  queryGrabbable: interaction(Groups.HAND, Groups.DYNAMIC | Groups.HELD),
   /** Requête de visée (saisie à distance) : décor + objets, pour que les murs masquent. */
-  querySight: interaction(Groups.PLAYER, Groups.STATIC | Groups.DYNAMIC),
+  querySight: interaction(Groups.PLAYER, Groups.STATIC | Groups.DYNAMIC | Groups.HELD),
   /** Ligne de vue à travers le labyrinthe : murs et piliers seulement (les meubles ne cachent pas). */
   queryWalls: interaction(Groups.PLAYER, Groups.STATIC),
   /** Corps du Cadreur : aucune interaction physique (ses déplacements testent les murs via `queryWalls`). */
