@@ -18,6 +18,7 @@ import { Journal } from "./player/journal";
 import { LoadingGate } from "./player/loadingGate";
 import { MainMenu } from "./player/mainMenu";
 import { SettingsMenu } from "./player/settingsMenu";
+import { AchievementsMenu } from "./player/achievementsMenu";
 import { PerfStats, setPerf } from "./player/perfStats";
 import { LiveViews } from "./player/liveViews";
 import { createObjectCapture, createPhotoCapture } from "./player/photoCapture";
@@ -40,7 +41,8 @@ import { InteractionSystem } from "./world/interactions";
 import { emitNoise, onNoise } from "./world/noise";
 import { ObjectAudio } from "./world/objectAudio";
 import { LevelManager, SPAWN_LOCAL_POSITION } from "./world/levelManager";
-import { resetProgress } from "./world/playerIdentity";
+import { resetProgress, setPseudo } from "./world/playerIdentity";
+import { AchievementTracker, computeAchievementPerks } from "./world/achievements";
 import { COLLECTIBLE_KINDS, generateCollectibleLore, getCollectibleRarity, type CollectibleKind } from "./shared/collectibles";
 import { PROP_HALF_EXTENTS, type PropKind } from "./shared/props";
 import { loreFormat } from "./shared/lore";
@@ -132,6 +134,10 @@ const loreJournal = new LoreJournal();
 await loreJournal.load();
 /** Sauvegarde de la partie en cours (seed, profondeur, inventaire, vitals, position) : locale, synchronisée entre appareils jumelés (voir saveManager.ts). */
 const saveManager = new SaveManager();
+/** Succès (~30 défis permanents, voir achievements.ts) : statistiques cumulées, indépendantes de la run en cours. */
+const achievements = new AchievementTracker();
+await achievements.load();
+loreJournal.onChange(() => achievements.raise("archivesRead", loreJournal.count));
 
 /**
  * Seed fixe du niveau 0 fictif (voir `buildMenuRoom` plus bas) : l'espace où s'affiche le menu
@@ -186,6 +192,7 @@ function setVignette(enabled: boolean): void {
   }
 }
 const hud = new CamcorderHud(camera);
+achievements.onUnlock((def) => hud.showNotice(t("achievements.unlocked", { title: t(def.titleKey) })));
 const vitals = new PlayerVitals();
 /** Archives perdues : cassettes lues dans le viseur, polaroids photographiés derrière le joueur. */
 const tapePlayer = new TapePlayer(audioListener, hud);
@@ -194,8 +201,15 @@ const captureObject = createObjectCapture(renderer, scene, camera);
 /** Vues en direct (télé, caméra de surveillance, jumelles, loupe, caméscope). */
 const liveViews = new LiveViews(renderer, scene, camera);
 configureLoreServices({
-  capturePhoto,
-  playTape: (fragment) => tapePlayer.play(fragment),
+  capturePhoto: () => {
+    const canvas = capturePhoto();
+    if (canvas) achievements.bump("photosCount");
+    return canvas;
+  },
+  playTape: (fragment) => {
+    tapePlayer.play(fragment);
+    achievements.bump("tapesPlayed");
+  },
 });
 const ambientHum = new AmbientHum(audioListener, scene);
 const flashlight = new Flashlight(camera);
@@ -233,14 +247,18 @@ const warmup = new Warmup(renderer, scene, camera);
 warmup.start([cadreur.ready, ...hands.map((hand) => hand.models)]);
 
 /** Bonus de collection : recalculés à chaque rangement/sortie d'objet. */
+/** Perks de run (inventaire, remis à zéro chaque partie) + perks permanents des succès débloqués (cumulés). */
 function applyPerks(): void {
-  const perks = computePerks(collectionStore.getAll());
-  flashlight.capacity = perks.batteryCapacity;
-  player.sprintRecovery = perks.sprintRecovery;
-  corruption.decayMultiplier = perks.corruptionDecay;
-  levelManager.beaconSteadiness = perks.beaconSteadiness;
+  const runPerks = computePerks(collectionStore.getAll());
+  const achievementPerks = computeAchievementPerks(achievements.unlockedIds);
+  flashlight.capacity = runPerks.batteryCapacity + achievementPerks.batteryCapacity;
+  player.sprintRecovery = runPerks.sprintRecovery + achievementPerks.sprintRecovery;
+  corruption.decayMultiplier = runPerks.corruptionDecay + achievementPerks.corruptionDecay;
+  levelManager.beaconSteadiness = runPerks.beaconSteadiness + achievementPerks.beaconSteadiness;
 }
 collectionStore.onChange(applyPerks);
+collectionStore.onChange(() => achievements.raise("maxItemsHeldInRun", collectionStore.count));
+achievements.onUnlock(applyPerks);
 applyPerks();
 
 let currentSession: RunSessionInfo | null = null;
@@ -315,12 +333,21 @@ const settingsMenu = new SettingsMenu(camera, player.body, sfx, {
     return comfortVignette.enabled;
   },
   currentPseudo: () => loreJournal.serverProfile?.pseudo ?? null,
-  // Efface toujours l'état local (même hors ligne) ; l'appel serveur (archives, sauvegarde) est
-  // best-effort, comme le reste de la synchro — voir `resetProgress` dans playerIdentity.ts.
+  setPseudo: (pseudo) =>
+    setPseudo(pseudo).then((confirmed) => {
+      if (confirmed) {
+        achievements.raise("pseudoChanged", 1);
+        void achievements.sync();
+      }
+      return confirmed;
+    }),
+  // Efface toujours l'état local (même hors ligne) ; l'appel serveur (archives, sauvegarde,
+  // succès) est best-effort, comme le reste de la synchro — voir `resetProgress` dans playerIdentity.ts.
   resetProgress: async () => {
     pausedRun = null;
     saveManager.clear();
     loreJournal.reset();
+    achievements.reset();
     return resetProgress();
   },
   // Ouverts depuis l'inventaire en jeu (aperçu léger, sans figer le joueur), "retour" referme
@@ -407,6 +434,10 @@ const mainMenu = new MainMenu(camera, player.body, sfx, {
     mainMenu.close();
     settingsMenu.open();
   },
+  openAchievements: () => {
+    mainMenu.close();
+    achievementsMenu.open();
+  },
   // Ex-STOP REC de l'inventaire : ne termine plus la run (la sauvegarde mise en pause, voir
   // `openMainMenu`, reste intacte pour "Continuer" la prochaine fois) — un simple "sauvegarder
   // et quitter", confirmé par un écran bleu qui reste affiché (rien d'autre à faire ensuite que
@@ -417,10 +448,11 @@ const mainMenu = new MainMenu(camera, player.body, sfx, {
     vhsOverlay.showLoading([t("blue.saved"), t("blue.closeTab")]);
   },
 });
-installAccountPanel(loreJournal);
+const achievementsMenu = new AchievementsMenu(camera, player.body, sfx, achievements, () => mainMenu.open());
+installAccountPanel(loreJournal, achievements);
 
-const pointer = new UiPointer(hands, scene, [inventoryMenu, endRunScreen, journal, mainMenu, settingsMenu, debugMenu]);
-for (const panel of [inventoryMenu, endRunScreen, journal, mainMenu, settingsMenu, debugMenu]) {
+const pointer = new UiPointer(hands, scene, [inventoryMenu, endRunScreen, journal, mainMenu, settingsMenu, debugMenu, achievementsMenu]);
+for (const panel of [inventoryMenu, endRunScreen, journal, mainMenu, settingsMenu, debugMenu, achievementsMenu]) {
   liveViews.hideFromOffscreen(panel.group);
   panel.prepareForDisplay(renderer, camera, scene);
 }
@@ -437,14 +469,29 @@ function readLorePage(page: LorePageData, hand: Hand): void {
   hud.showNotice(t("lore.new", { n: fragment + 1 }));
   hand.pulse(0.5, 120);
   log("lore", { action: "read", fragment, format: loreFormat(fragment), depth: levelManager.depth });
+  archiveReadThisLevel = true;
   // Condition de victoire : toutes les archives réunies.
   if (loreJournal.nextFragment === null) triggerGameOver("victory");
+}
+
+// Un objet ramassé puis reposé (id inchangé) ne doit compter qu'une fois — contrairement à
+// l'inventaire de run (vidé à chaque partie), cet ensemble n'est jamais réinitialisé : les ids
+// sont uniques par apparition, jamais réutilisés d'une run à l'autre.
+const seenCollectibleIds = new Set<string>();
+function recordItemCollected(entry: { id: string; rarity: "common" | "rare" | "legendary" }): void {
+  if (seenCollectibleIds.has(entry.id)) return;
+  seenCollectibleIds.add(entry.id);
+  achievements.bump("itemsTotal");
+  achievements.bump(entry.rarity === "common" ? "itemsCommon" : entry.rarity === "rare" ? "itemsRare" : "itemsLegendary");
 }
 
 grabSystem = new GrabSystem(physics, grabbables, hands, sfx, {
   isOverInventory: (hand) => inventoryMenu.visible && (inventoryMenu.containsPoint(hand.palm) || pointer.frame(hand).target === inventoryMenu),
   inventorySlotAt: (hand) => inventoryMenu.slotIndexFor(hand),
-  store: (item, slotIndex) => collectionStore.add(item, slotIndex ?? null),
+  store: (item, slotIndex) => {
+    recordItemCollected(item);
+    collectionStore.add(item, slotIndex ?? null);
+  },
   onGrab: (grabbable) => {
     if (!(grabbable.heldBy instanceof Hand)) return;
     if (grabbable.lorePage) readLorePage(grabbable.lorePage, grabbable.heldBy);
@@ -457,6 +504,8 @@ grabSystem = new GrabSystem(physics, grabbables, hands, sfx, {
     }
     levelManager.markBatteryPicked(grabbable.batteryId);
     flashlight.recharge(BATTERY_RECHARGE);
+    achievements.bump("batteriesPicked");
+    batteriesPickedThisRun++;
     hand.pulse(0.45, 70);
     sfx.play("battery", 0.45);
     grabSystem.consumeHeld(hand, grabbable);
@@ -630,6 +679,29 @@ async function runVisualObjectTest(kind: CollectibleKind | PropKind): Promise<vo
   }
 }
 
+// État de run pour les succès (voir achievements.ts) : remis à zéro à chaque vraie run
+// (restartWorld/resumeFromSave), jamais dans le niveau 0 fictif (pas une run).
+let wasSighted = false;
+let damagedThisLevel = false;
+let flashlightToggledOffThisRun = false;
+let batteriesPickedThisRun = 0;
+let archiveReadThisLevel = false;
+let archiveStreak = 0;
+let runStartedAt = 0;
+/** Sous ce délai réel (pas le temps de jeu simulé), atteindre le niveau 10 débloque "fastDepth10". */
+const FAST_DEPTH10_MS = 10 * 60 * 1000;
+
+/** Nouvelle run (jamais à la reprise d'une run mise en pause, voir `resumeFromSave`) : l'ardoise des succès liés "depuis le début de cette run" est effacée. */
+function resetRunAchievementState(): void {
+  wasSighted = false;
+  damagedThisLevel = false;
+  flashlightToggledOffThisRun = false;
+  batteriesPickedThisRun = 0;
+  archiveReadThisLevel = false;
+  archiveStreak = 0;
+  runStartedAt = performance.now();
+}
+
 /** Place le joueur au spawn du level courant (changement de level, nouvelle run). */
 function respawn(): void {
   tapePlayer.stop();
@@ -649,8 +721,24 @@ function respawn(): void {
  */
 let take = 1;
 function goDeeper(): void {
+  // Bilan du level qu'on quitte, avant d'incrémenter la profondeur.
+  if (!damagedThisLevel) achievements.bump("levelsNoDamage");
+  if (archiveReadThisLevel) {
+    archiveStreak += 1;
+    achievements.raise("archiveStreakLevels", archiveStreak);
+  } else {
+    archiveStreak = 0;
+  }
+  damagedThisLevel = false;
+  archiveReadThisLevel = false;
+
   levelManager.descend();
   log("level", { action: "descend", depth: levelManager.depth });
+  achievements.raise("depthMax", levelManager.depth);
+  if (levelManager.depth === 10) {
+    if (batteriesPickedThisRun === 0) achievements.raise("reachedDepth10NoBattery", 1);
+    if (performance.now() - runStartedAt <= FAST_DEPTH10_MS) achievements.raise("fastDepth10", 1);
+  }
   respawn();
   loadingGate.start([t("blue.loading")], () => vhsOverlay.showCard(1.4, [t("blue.level", { n: levelManager.depth })]));
   loadingGate.ready();
@@ -668,6 +756,7 @@ function closeAllMenus(): void {
   if (settingsMenu.visible) settingsMenu.close();
   if (debugMenu.visible) debugMenu.close();
   if (mainMenu.visible) mainMenu.close();
+  if (achievementsMenu.visible) achievementsMenu.close();
 }
 
 function triggerGameOver(reason: "health" | "caught" | "victory"): void {
@@ -680,6 +769,17 @@ function triggerGameOver(reason: "health" | "caught" | "victory"): void {
   saveManager.clear();
   endRunScreen.showGameOver(levelManager.depth, reason);
   log("run", { action: reason === "victory" ? "victory" : "game-over", reason, depth: levelManager.depth });
+
+  achievements.raise("depthMax", levelManager.depth);
+  achievements.bump("runsEnded");
+  if (!flashlightToggledOffThisRun) achievements.bump("runsNoFlashlightOff");
+  if (reason === "health") achievements.bump("deaths");
+  else if (reason === "caught") achievements.bump("catches");
+  else {
+    if (achievements.get("deaths") === 0) achievements.raise("victoryWithoutPriorDeath", 1);
+    achievements.bump("victories");
+  }
+  void achievements.sync();
 }
 
 /**
@@ -712,6 +812,7 @@ function restartWorld(seed: string): void {
   take = 1;
   hud.resetClock();
   respawn();
+  resetRunAchievementState();
   loadingGate.ready();
   log("run", { action: "start", seed });
 }
@@ -752,7 +853,10 @@ function autosave(): void {
  */
 function resumeFromSave(save: SaveData, keepSession = false): void {
   gameOver = false;
-  if (!keepSession) currentSession = null;
+  if (!keepSession) {
+    currentSession = null;
+    resetRunAchievementState();
+  }
   vitals.health = save.health;
   vitals.madness = save.madness;
   flashlight.battery = save.flashlightBattery;
@@ -811,6 +915,7 @@ bootSavePromise = saveManager.load();
 buildMenuRoom();
 htmlLoadingScreen?.classList.add("is-hidden");
 void loreJournal.sync();
+void achievements.sync();
 
 // Sauvegarde périodique (filet de sécurité) et à la mise en arrière-plan de la page (casque
 // retiré, onglet changé) — plus fiable que `beforeunload` pour un travail asynchrone (IndexedDB).
@@ -843,6 +948,14 @@ if (DEBUG_ENABLED) {
       });
       return awake;
     },
+    openAchievements: () => {
+      mainMenu.close();
+      achievementsMenu.open();
+    },
+    openSettings: () => settingsMenu.open(),
+    openMainMenu: () => mainMenu.open(),
+    achievementsUnlocked: () => achievements.unlockedCount,
+    achievements,
     renderer,
   };
 }
@@ -965,7 +1078,9 @@ renderer.setAnimationLoop((timestamp) => {
   // pendant un game over ou dans le niveau 0 fictif (rien d'autre que le menu n'y est interactif).
   if (!gameOver && !menuLimbo && input.left.secondary.justPressed) inventoryMenu.toggle();
   if (!gameOver && !menuLimbo && input.right.secondary.justPressed) {
-    sfx.play(flashlight.toggle() ? "click" : "denied", 0.3);
+    const toggled = flashlight.toggle();
+    sfx.play(toggled ? "click" : "denied", 0.3);
+    if (toggled && !flashlight.on) flashlightToggledOffThisRun = true;
   }
 
   perfStats.begin("joueur");
@@ -1027,6 +1142,7 @@ renderer.setAnimationLoop((timestamp) => {
     if (blackoutEvents.reachedPlayer) {
       triggerHapticPulse(renderer, 0.25, 70);
       cadreur.summon();
+      achievements.bump("blackoutsTriggered");
     }
     localLight = blackout.lightAt(head.x, head.z);
     darkness = Math.max(levelUpdate.darkness, 1 - localLight);
@@ -1038,9 +1154,12 @@ renderer.setAnimationLoop((timestamp) => {
       depth: levelManager.depth,
     });
     // Découvert : la bande décroche une fraction de seconde.
+    if (cadreurEvents.sighted && !wasSighted) achievements.bump("cadreurSightings");
+    wasSighted = cadreurEvents.sighted;
     if (cadreurEvents.sighted) vhsOverlay.triggerTrackingLoss(0.35);
     if (cadreurEvents.nearby) vhsOverlay.triggerTrackingLoss(0.45);
     if (cadreurEvents.playerDamage > 0 && vitals.damage(cadreurEvents.playerDamage)) triggerGameOver("health");
+    if (cadreurEvents.playerDamage > 0) damagedThisLevel = true;
     if (cadreurEvents.sighted) vitals.addMadness(10);
     if (cadreurEvents.watched) vitals.addMadness(deltaSeconds * 4);
     perfStats.end("menaces");
@@ -1050,7 +1169,9 @@ renderer.setAnimationLoop((timestamp) => {
     if (levelUpdate.corruptionDelta > 0) vitals.addMadness(levelUpdate.corruptionDelta * 8);
     if (levelUpdate.wallTrapJustPopped) vitals.addMadness(12);
     if (blackoutEvents.reachedPlayer) vitals.addMadness(8);
+    const healthBeforeVitalsUpdate = vitals.health;
     if (vitals.update(deltaSeconds, flashlight.shining && player.movementIntensity < 0.1)) triggerGameOver("health");
+    if (vitals.health < healthBeforeVitalsUpdate) damagedThisLevel = true;
     corruption.update(deltaSeconds);
   }
 

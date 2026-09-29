@@ -3,7 +3,6 @@ import { isDebugMenuEnabled, setDebugMenuEnabled } from "../debug/debugLog";
 import { getLanguage, onLanguageChange, setLanguage, t } from "../i18n";
 import { generatePseudoSuggestion, PSEUDO_ADJECTIVE_COUNT, PSEUDO_NOUN_COUNT } from "../shared/pseudoGenerator";
 import { drawButton, drawPanelBackground, inRect, UiPanel, wrapText, type PressButton, type Rect } from "../ui/uiPanel";
-import { setPseudo } from "../world/playerIdentity";
 import type { Hand } from "./hand";
 import type { Sfx } from "./sfx";
 
@@ -45,6 +44,8 @@ export interface SettingsMenuActions {
   toggleVignette(): boolean;
   /** Pseudo actuel (null si jamais choisi — pas encore soumis de score). */
   currentPseudo(): string | null;
+  /** Choisit/change le pseudo persistant (voir playerIdentity.ts). */
+  setPseudo(pseudo: string): Promise<string | null>;
   /**
    * Recommencer à zéro (archives, sauvegarde en cours, succès une fois ajoutés) — pas
    * l'identité/le pseudo/le code de cassette. Renvoie faux si le serveur était injoignable
@@ -175,7 +176,8 @@ export class SettingsMenu extends UiPanel {
       case "confirm": {
         const pseudo = this.pendingPseudo();
         this.mode = "list";
-        setPseudo(pseudo)
+        this.actions
+          .setPseudo(pseudo)
           .then((confirmed) => this.showStatus(confirmed ? t("settings.pseudoSet", { pseudo: confirmed }) : t("settings.pseudoFailed")))
           .catch(() => this.showStatus(t("settings.pseudoFailed")));
         break;
