@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import { getLanguage, onLanguageChange, t } from "../i18n";
 import { getModelShape } from "../physics/modelShape";
-import { drawButton, drawPanelBackground, inRect, UiPanel, type PressButton, type Rect } from "../ui/uiPanel";
+import { drawButton, drawPanelBackground, inRect, UiPanel, wrapText, type PressButton, type Rect } from "../ui/uiPanel";
 import { spawnCollectibleModel } from "../world/collectibleLoader";
 import { SORT_MODES, type CollectionEntry, type CollectionStore } from "../world/collection";
 import { computePerks } from "../world/collectionPerks";
@@ -447,12 +447,12 @@ export class InventoryMenu extends UiPanel {
     } else if (this.statusUntil) {
       ctx.font = "26px monospace";
       ctx.fillStyle = "#9fe39f";
-      ctx.fillText(this.statusMessage, 40, 480);
+      wrapText(ctx, this.statusMessage, 40, 470, width - 80, 28, 2);
     } else {
       ctx.font = "21px monospace";
       ctx.fillStyle = "#a79d86";
-      ctx.fillText(this.store.count === 0 ? t("inv.empty") : t("inv.aim"), 40, 480);
-      ctx.fillText(t("inv.store"), 40, 514);
+      wrapText(ctx, this.store.count === 0 ? t("inv.empty") : t("inv.aim"), 40, 470, width - 80, 24, 2);
+      wrapText(ctx, t("inv.store"), 40, 518, width - 80, 24, 2);
     }
 
     const hoveredButtons = new Set(this.hoverButton.values());
@@ -473,7 +473,7 @@ export class InventoryMenu extends UiPanel {
     const decay = Math.round((perks.corruptionDecay - 1) * 100);
     const stamina = Math.round((perks.sprintRecovery - 1) * 100);
     if (battery !== 0 || decay !== 0 || stamina !== 0 || perks.beaconSteadiness > 0) {
-      ctx.fillText(t("perks.line", { battery, decay, stamina, compass: perks.beaconSteadiness > 0 ? t("perks.compass") : "" }), width / 2, 720);
+      wrapText(ctx, t("perks.line", { battery, decay, stamina, compass: perks.beaconSteadiness > 0 ? t("perks.compass") : "" }), width / 2, 708, width - 80, 22, 2);
     }
     ctx.fillStyle = "#7d7563";
     ctx.fillText(t("inv.footer"), width / 2, 752);

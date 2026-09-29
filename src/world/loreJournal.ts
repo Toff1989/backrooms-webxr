@@ -1,6 +1,6 @@
 import { get, set } from "idb-keyval";
 import { LORE_FRAGMENT_COUNT } from "../shared/lore";
-import { fetchProfile, LORE_PROGRESS_KEY, syncLoreCount, type PlayerProfile } from "./playerIdentity";
+import { fetchProfile, LORE_PROGRESS_KEY, setPseudo as savePseudo, syncLoreCount, type PlayerProfile } from "./playerIdentity";
 
 /**
  * Journal des archives perdues : combien de fragments du récit le joueur a lus (toujours les
@@ -12,6 +12,7 @@ import { fetchProfile, LORE_PROGRESS_KEY, syncLoreCount, type PlayerProfile } fr
 export class LoreJournal {
   private unlocked = 0;
   private profile: PlayerProfile | null = null;
+  private knownPseudo: string | null = null;
   private readonly listeners = new Set<() => void>();
 
   /** À attendre avant de construire le premier level : la page posée dépend de la progression. */
@@ -35,8 +36,22 @@ export class LoreJournal {
     return this.profile;
   }
 
+  get currentPseudo(): string | null {
+    return this.knownPseudo;
+  }
+
   onChange(listener: () => void): void {
     this.listeners.add(listener);
+  }
+
+  async setPseudo(pseudo: string): Promise<string | null> {
+    const confirmed = await savePseudo(pseudo);
+    if (confirmed) {
+      this.knownPseudo = confirmed;
+      if (this.profile) this.profile = { ...this.profile, pseudo: confirmed };
+      this.emit();
+    }
+    return confirmed;
   }
 
   /**
@@ -60,6 +75,7 @@ export class LoreJournal {
     const profile = await fetchProfile();
     if (profile) {
       this.profile = profile;
+      this.knownPseudo = profile.pseudo;
       this.raiseTo(profile.loreCount);
       this.emit();
     }

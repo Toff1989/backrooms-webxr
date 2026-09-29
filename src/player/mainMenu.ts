@@ -54,7 +54,7 @@ export class MainMenu extends UiPanel {
 
   open(): void {
     this.worldParent.add(this.group);
-    this.placeInFrontOfHead();
+    this.reposition();
     this.quitArmedUntil = 0;
     this.group.visible = true;
     this.invalidate();
@@ -72,7 +72,7 @@ export class MainMenu extends UiPanel {
     }
   }
 
-  private placeInFrontOfHead(): void {
+  reposition(): void {
     const head = this.camera.position;
     const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(this.camera.quaternion);
     forward.y = 0;

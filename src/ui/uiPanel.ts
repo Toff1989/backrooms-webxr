@@ -171,10 +171,19 @@ export function drawButton(ctx: CanvasRenderingContext2D, rect: Rect, label: str
   ctx.strokeStyle = state.accent ?? "rgba(255, 244, 214, 0.45)";
   ctx.stroke();
   ctx.fillStyle = state.hovered ? "#15110b" : (state.accent ?? "#efe6cf");
-  ctx.font = "bold 30px monospace";
+  let fontSize = 30;
+  const maxWidth = rect.w - 32;
+  do {
+    ctx.font = `bold ${fontSize}px monospace`;
+    fontSize -= 1;
+  } while (fontSize >= 18 && ctx.measureText(label).width > maxWidth);
+  ctx.font = `bold ${Math.max(18, fontSize + 1)}px monospace`;
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
-  ctx.fillText(label, rect.x + rect.w / 2, rect.y + rect.h / 2 + 1);
+  let fitted = label;
+  while (ctx.measureText(`${fitted}...`).width > maxWidth && fitted.length > 1) fitted = fitted.slice(0, -1);
+  if (fitted !== label) fitted = `${fitted.trimEnd()}...`;
+  ctx.fillText(fitted, rect.x + rect.w / 2, rect.y + rect.h / 2 + 1);
   ctx.restore();
 }
 
@@ -191,19 +200,25 @@ export function drawPanelBackground(ctx: CanvasRenderingContext2D, width: number
 }
 
 export function wrapText(ctx: CanvasRenderingContext2D, text: string, x: number, y: number, maxWidth: number, lineHeight: number, maxLines: number): void {
-  const words = text.split(" ");
-  let line = "";
   let lines = 0;
-  for (const word of words) {
-    const candidate = line ? `${line} ${word}` : word;
-    if (ctx.measureText(candidate).width > maxWidth && line) {
+  for (const paragraph of text.split(/\r?\n/)) {
+    const words = paragraph.split(" ");
+    let line = "";
+    for (const word of words) {
+      const candidate = line ? `${line} ${word}` : word;
+      if (ctx.measureText(candidate).width > maxWidth && line) {
+        ctx.fillText(line, x, y + lines * lineHeight);
+        line = word;
+        lines += 1;
+        if (lines >= maxLines) return;
+      } else {
+        line = candidate;
+      }
+    }
+    if (line) {
       ctx.fillText(line, x, y + lines * lineHeight);
-      line = word;
       lines += 1;
       if (lines >= maxLines) return;
-    } else {
-      line = candidate;
     }
   }
-  if (line) ctx.fillText(line, x, y + lines * lineHeight);
 }

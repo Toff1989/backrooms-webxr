@@ -61,10 +61,11 @@ export function registerRunRoutes(app: FastifyInstance): void {
 
     const run = findRun(runId);
     if (!run || run.status !== "active") return reply.code(404).send({ error: "run introuvable ou déjà close" });
+    const player = authenticate(request);
+    if (!player || run.player_id !== player.id) return reply.code(403).send({ error: "run étrangère" });
 
     // Le pseudo se choisit une fois (première fin de run/victoire) puis se reprend pour toutes
     // les suivantes — modifiable ensuite dans les paramètres (/player/pseudo), pas à chaque run.
-    const player = authenticate(request);
     let cleanPseudo: string;
     if (player?.pseudo) {
       cleanPseudo = player.pseudo;

@@ -102,6 +102,10 @@ export class PlayerController {
     return this.camera.position.y;
   }
 
+  get heightCalibrated(): boolean {
+    return this.calibrated;
+  }
+
   /** Relance la mesure assis/debout (bouton du menu). */
   recalibrate(): void {
     const measured = this.realEyeHeight;
@@ -122,11 +126,6 @@ export class PlayerController {
 
   update(deltaSeconds: number, input: XrInput): void {
     this.teleported = false;
-    if (this.paused) {
-      this.movementIntensity = 0;
-      this.movementNoise = 0;
-      return;
-    }
     const presenting = this.renderer.xr.isPresenting;
     if (presenting && !this.wasPresenting) {
       this.presentingSeconds = 0;
@@ -135,6 +134,14 @@ export class PlayerController {
     if (!presenting) this.camera.position.set(0, FLAT_PREVIEW_EYE_HEIGHT, 0);
     this.presentingSeconds += deltaSeconds;
     if (presenting && !this.calibrated && this.presentingSeconds > CALIBRATION_DELAY_SECONDS) this.recalibrate();
+    this.updateHeight(deltaSeconds);
+
+    if (this.paused) {
+      this.movementIntensity = 0;
+      this.movementNoise = 0;
+      this.wasPresenting = presenting;
+      return;
+    }
 
     if (input.right.stick.justPressed) this.crouching = !this.crouching;
     // Stick droit bas/haut (fronts) : plus fiable que le clic, facile à rater en jeu.
@@ -150,8 +157,6 @@ export class PlayerController {
       this.crouchStickReady = true;
     }
     if (this.crouching) this.sprinting = false;
-    this.updateHeight(deltaSeconds);
-
     if (presenting && !this.wasPresenting) {
       // Première frame en XR : la tête "saute" à sa vraie position — on y recale la capsule.
       this.updateHeadWorld();

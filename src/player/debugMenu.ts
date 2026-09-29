@@ -1,11 +1,11 @@
 import * as THREE from "three";
 import { onLanguageChange, t } from "../i18n";
-import { drawButton, drawPanelBackground, inRect, UiPanel, type PressButton, type Rect } from "../ui/uiPanel";
+import { drawButton, drawPanelBackground, inRect, UiPanel, wrapText, type PressButton, type Rect } from "../ui/uiPanel";
 import type { Hand } from "./hand";
 import type { Sfx } from "./sfx";
 
 const WIDTH = 0.56;
-const HEIGHT = 0.4;
+const HEIGHT = 0.44;
 const PX_PER_M = 1700;
 const DISTANCE = 0.6;
 
@@ -14,17 +14,17 @@ export interface DebugAction {
   run(): string;
 }
 
-const CLOSE_RECT: Rect = { x: 40, y: 620, w: 872, h: 70 };
+const CLOSE_RECT: Rect = { x: 40, y: 666, w: 872, h: 70 };
 
 function actionRect(index: number, count: number): Rect {
-  const gap = 12;
+  const gap = 14;
   const columns = 2;
   const rows = Math.ceil(count / columns);
   const w = (872 - gap * (columns - 1)) / columns;
   const h = (520 - gap * (rows - 1)) / Math.max(1, rows);
   const column = index % columns;
   const row = Math.floor(index / columns);
-  return { x: 40 + column * (w + gap), y: 100 + row * (h + gap), w, h };
+  return { x: 40 + column * (w + gap), y: 90 + row * (h + gap), w, h };
 }
 
 /**
@@ -115,7 +115,7 @@ export class DebugMenu extends UiPanel {
     ctx.textBaseline = "middle";
     ctx.fillStyle = "#7fc4e8";
     ctx.font = "bold 34px monospace";
-    ctx.fillText(t("debugMenu.title"), width / 2, 50);
+    ctx.fillText(t("debugMenu.title"), width / 2, 38);
 
     this.actions.forEach((action, i) => drawButton(ctx, actionRect(i, this.actions.length), action.label(), { hovered: hovered.has(i), accent: "#7fc4e8" }));
     drawButton(ctx, CLOSE_RECT, t("inv.close"), { hovered: hovered.has("close") });
@@ -123,7 +123,7 @@ export class DebugMenu extends UiPanel {
     if (this.statusUntil) {
       ctx.font = "20px monospace";
       ctx.fillStyle = "#9fe39f";
-      ctx.fillText(this.statusMessage, width / 2, 604);
+      wrapText(ctx, this.statusMessage, width / 2, 638, width - 80, 22, 1);
     }
   }
 }

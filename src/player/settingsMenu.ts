@@ -2,8 +2,7 @@ import * as THREE from "three";
 import { isDebugMenuEnabled, setDebugMenuEnabled } from "../debug/debugLog";
 import { getLanguage, onLanguageChange, setLanguage, t } from "../i18n";
 import { generatePseudoSuggestion, PSEUDO_ADJECTIVE_COUNT, PSEUDO_NOUN_COUNT } from "../shared/pseudoGenerator";
-import { drawButton, drawPanelBackground, inRect, UiPanel, type PressButton, type Rect } from "../ui/uiPanel";
-import { setPseudo } from "../world/playerIdentity";
+import { drawButton, drawPanelBackground, inRect, UiPanel, wrapText, type PressButton, type Rect } from "../ui/uiPanel";
 import type { Hand } from "./hand";
 import type { Sfx } from "./sfx";
 
@@ -38,6 +37,7 @@ export interface SettingsMenuActions {
   toggleVignette(): boolean;
   /** Pseudo actuel (null si jamais choisi — pas encore soumis de score). */
   currentPseudo(): string | null;
+  setPseudo(pseudo: string): Promise<string | null>;
   /** Retour à l'écran qui a ouvert les paramètres (toujours le menu principal, voir mainMenu.ts). */
   back(): void;
 }
@@ -158,7 +158,7 @@ export class SettingsMenu extends UiPanel {
       case "confirm": {
         const pseudo = this.pendingPseudo();
         this.mode = "list";
-        setPseudo(pseudo)
+        this.actions.setPseudo(pseudo)
           .then((confirmed) => this.showStatus(confirmed ? t("settings.pseudoSet", { pseudo: confirmed }) : t("settings.pseudoFailed")))
           .catch(() => this.showStatus(t("settings.pseudoFailed")));
         break;
@@ -217,7 +217,7 @@ export class SettingsMenu extends UiPanel {
     if (this.statusUntil) {
       ctx.font = "20px monospace";
       ctx.fillStyle = "#9fe39f";
-      ctx.fillText(this.statusMessage, width / 2, 700);
+      wrapText(ctx, this.statusMessage, width / 2, 694, width - 100, 24, 2);
     }
   }
 }

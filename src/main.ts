@@ -248,6 +248,7 @@ let currentSession: RunSessionInfo | null = null;
  * menaces/vitals/corruption suspendus, seul le menu principal est interactif.
  */
 let menuLimbo = false;
+let menuRoomNeedsPlacement = true;
 /** Run mise en pause en entrant dans le niveau 0 fictif depuis l'inventaire (null au démarrage
  * ou après un game over déjà clôturé — rien à reprendre) : voir `openMainMenu`/`continueRun`. */
 let pausedRun: SaveData | null = null;
@@ -301,7 +302,7 @@ const endRunScreen = new EndRunScreen(
     loadingGate.start();
     buildMenuRoom();
   },
-  () => loreJournal.serverProfile?.pseudo ?? null,
+  () => loreJournal.currentPseudo,
 );
 
 const journal = new Journal(camera, player.body, loreJournal, sfx);
@@ -313,7 +314,8 @@ const settingsMenu = new SettingsMenu(camera, player.body, sfx, {
     setVignette(!comfortVignette.enabled);
     return comfortVignette.enabled;
   },
-  currentPseudo: () => loreJournal.serverProfile?.pseudo ?? null,
+  currentPseudo: () => loreJournal.currentPseudo,
+  setPseudo: (pseudo) => loreJournal.setPseudo(pseudo),
   // Ouverts depuis l'inventaire en jeu (aperçu léger, sans figer le joueur), "retour" referme
   // simplement le panneau ; ouverts depuis le menu principal (niveau 0 fictif, joueur déjà figé),
   // "retour" y réaffiche le menu — jamais de rechargement, on ne quitte pas le niveau 0 fictif.
@@ -771,6 +773,7 @@ function resumeFromSave(save: SaveData, keepSession = false): void {
  */
 function buildMenuRoom(): void {
   menuLimbo = true;
+  menuRoomNeedsPlacement = true;
   levelManager.restartRun(MENU_ROOM_SEED, 0);
   take = 1;
   respawn();
@@ -821,6 +824,15 @@ if (DEBUG_ENABLED) {
     },
     descend: () => goDeeper(),
     toggleInventory: () => inventoryMenu.toggle(),
+    openMenu: (name: "main" | "inventory" | "settings" | "journal" | "debug" | "end") => {
+      closeAllMenus();
+      if (name === "main") mainMenu.open();
+      else if (name === "inventory") inventoryMenu.open();
+      else if (name === "settings") settingsMenu.open();
+      else if (name === "journal") journal.openFloating();
+      else if (name === "debug") debugMenu.open();
+      else endRunScreen.showGameOver(levelManager.depth, "health");
+    },
     head: () => ({ x: player.headWorld.x, z: player.headWorld.z }),
     exit: () => levelManager.exitPosition,
     spawn: (kind: string) => {
@@ -961,6 +973,10 @@ renderer.setAnimationLoop((timestamp) => {
 
   perfStats.begin("joueur");
   player.update(deltaSeconds, input);
+  if (menuLimbo && menuRoomNeedsPlacement && (!renderer.xr.isPresenting || player.heightCalibrated)) {
+    mainMenu.reposition();
+    menuRoomNeedsPlacement = false;
+  }
   playerNoiseTimer -= deltaSeconds;
   if (playerNoiseTimer <= 0 && player.movementNoise > 0) {
     emitNoise(player.headWorld, player.movementNoise);

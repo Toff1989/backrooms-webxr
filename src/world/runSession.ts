@@ -17,6 +17,8 @@ export interface LeaderboardEntry {
   endedAt: number;
 }
 
+const pendingLevelReports = new WeakMap<RunSessionInfo, Promise<void>>();
+
 /** Démarre une run côté serveur (rattachée à l'identité de l'appareil) : seed + token signé. */
 export async function startRun(): Promise<RunSessionInfo> {
   if (!(await ensureIdentity())) throw new Error("Serveur injoignable : pas d'identité");
@@ -25,10 +27,14 @@ export async function startRun(): Promise<RunSessionInfo> {
 
 /** Signale un passage de level pour la validation anti-triche serveur — best-effort, ne bloque jamais le jeu local. */
 export function reportLevel(session: RunSessionInfo, depth: number): void {
-  apiCall("POST", "/run/level", { runId: session.runId, token: session.token, depth }).catch(() => {});
+  const previous = pendingLevelReports.get(session) ?? Promise.resolve();
+  const report = previous.catch(() => {}).then(() => apiCall("POST", "/run/level", { runId: session.runId, token: session.token, depth })).then(() => undefined);
+  pendingLevelReports.set(session, report);
+  void report.catch(() => {});
 }
 
 /** Clôture la run ("STOP REC") avec le pseudo choisi ; renvoie le classement mis à jour. */
 export async function endRun(session: RunSessionInfo, pseudo: string): Promise<{ leaderboard: LeaderboardEntry[] }> {
+  await pendingLevelReports.get(session)?.catch(() => {});
   return apiCall("POST", "/run/end", { runId: session.runId, token: session.token, pseudo });
 }

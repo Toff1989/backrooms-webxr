@@ -356,7 +356,12 @@ export class Journal extends UiPanel {
       });
       button("pair:cancel", { x: page.x + 40, y: page.y + KEYPAD_TOP + 4 * (keyH + 10), w: keyW * 3 + 24, h: 56 }, t("pair.cancel"));
     }
-    if (this.status) this.note(ctx, page, t(this.status.key), 530, this.status.good ? "#2f6b2f" : "#9a2f22");
+    if (this.status) {
+      ctx.fillStyle = this.status.good ? "#2f6b2f" : "#9a2f22";
+      ctx.font = "20px monospace";
+      ctx.textAlign = "left";
+      wrapText(ctx, t(this.status.key), page.x + 34, page.y + 530, page.w - 68, 24, 2);
+    }
   }
 }
 

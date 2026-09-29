@@ -7,7 +7,7 @@ import type { Hand } from "./hand";
 import type { Sfx } from "./sfx";
 
 const WIDTH = 0.56;
-const HEIGHT = 0.38;
+const HEIGHT = 0.43;
 const PX_PER_M = 1830;
 const DISTANCE = 0.75;
 const LEADERBOARD_ROWS = 7;
@@ -20,8 +20,8 @@ const BUTTONS: Record<ButtonId, Rect> = {
   adjective: { x: 60, y: 330, w: 420, h: 70 },
   noun: { x: 545, y: 330, w: 420, h: 70 },
   submit: { x: 212, y: 440, w: 600, h: 84 },
-  restart: { x: 212, y: 580, w: 320, h: 76 },
-  mainMenu: { x: 550, y: 580, w: 320, h: 76 },
+  restart: { x: 212, y: 660, w: 320, h: 76 },
+  mainMenu: { x: 550, y: 660, w: 320, h: 76 },
 };
 
 /**
@@ -199,13 +199,13 @@ export class EndRunScreen extends UiPanel {
       const reasonKey = this.gameOverReason === "caught" ? "end.caught" : this.gameOverReason === "victory" ? "end.victory" : "end.healthEmpty";
       ctx.font = "24px monospace";
       ctx.fillStyle = this.gameOverReason === "victory" ? "#9fe39f" : "#e06a5a";
-      ctx.fillText(t(reasonKey), width / 2, 150);
+      wrapText(ctx, t(reasonKey), width / 2, 150, width - 120, 30, 2);
     }
 
     if (this.phase === "review") {
       ctx.font = "22px monospace";
       ctx.fillStyle = "#a79d86";
-      ctx.fillText(t("end.prompt"), width / 2, this.gameOverReason ? 200 : 180);
+      wrapText(ctx, t("end.prompt"), width / 2, this.gameOverReason ? 200 : 180, width - 120, 28, 2);
       ctx.font = "bold 40px monospace";
       ctx.fillStyle = "#ffe89a";
       ctx.fillText(this.currentPseudo(), width / 2, 260);
@@ -227,13 +227,13 @@ export class EndRunScreen extends UiPanel {
     } else {
       ctx.font = "bold 26px monospace";
       ctx.fillStyle = "#9fe39f";
-      ctx.fillText(t("end.sent", { pseudo: this.submittedPseudo }), width / 2, 170);
+      wrapText(ctx, t("end.sent", { pseudo: this.submittedPseudo }), width / 2, 170, width - 180, 32, 2);
       ctx.textAlign = "left";
       ctx.font = "24px monospace";
       this.leaderboard.slice(0, LEADERBOARD_ROWS).forEach((entry, index) => {
         const y = 222 + index * 46;
         ctx.fillStyle = index === 0 ? "#ffe89a" : "#e2d8bf";
-        ctx.fillText(`${String(index + 1).padStart(2, "0")}. ${entry.pseudo}`, 120, y);
+        ctx.fillText(ellipsize(ctx, `${String(index + 1).padStart(2, "0")}. ${entry.pseudo}`, width - 360), 120, y);
         ctx.fillStyle = "#a79d86";
         ctx.textAlign = "right";
         ctx.fillText(t("end.levelShort", { n: entry.depth }), width - 120, y);
@@ -248,4 +248,11 @@ export class EndRunScreen extends UiPanel {
       drawButton(ctx, BUTTONS.mainMenu, t("end.mainMenu"), { hovered: hovered.has("mainMenu") });
     }
   }
+}
+
+function ellipsize(ctx: CanvasRenderingContext2D, text: string, maxWidth: number): string {
+  if (ctx.measureText(text).width <= maxWidth) return text;
+  let cut = text;
+  while (cut.length > 1 && ctx.measureText(`${cut}...`).width > maxWidth) cut = cut.slice(0, -1);
+  return `${cut.trimEnd()}...`;
 }
