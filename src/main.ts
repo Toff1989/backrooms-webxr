@@ -802,7 +802,7 @@ renderer.setAnimationLoop((timestamp) => {
   if (levelUpdate.corruptionDelta > 0) vitals.addMadness(levelUpdate.corruptionDelta * 8);
   if (levelUpdate.wallTrapJustPopped) vitals.addMadness(12);
   if (blackoutEvents.reachedPlayer) vitals.addMadness(8);
-  vitals.update(deltaSeconds, flashlight.shining && player.movementIntensity < 0.1);
+  if (vitals.update(deltaSeconds, flashlight.shining && player.movementIntensity < 0.1)) triggerGameOver("health");
   corruption.update(deltaSeconds);
 
   hud.status = {
