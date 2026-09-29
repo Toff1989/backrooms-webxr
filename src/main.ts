@@ -952,8 +952,16 @@ if (DEBUG_ENABLED) {
       mainMenu.close();
       achievementsMenu.open();
     },
-    openSettings: () => settingsMenu.open(),
+    openSettings: () => {
+      mainMenu.close();
+      settingsMenu.open();
+    },
     openMainMenu: () => mainMenu.open(),
+    closeMenus: () => {
+      mainMenu.close();
+      settingsMenu.close();
+      achievementsMenu.close();
+    },
     achievementsUnlocked: () => achievements.unlockedCount,
     achievements,
     renderer,
