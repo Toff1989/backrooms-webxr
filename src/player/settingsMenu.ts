@@ -2,7 +2,7 @@ import * as THREE from "three";
 import { isDebugMenuEnabled, setDebugMenuEnabled } from "../debug/debugLog";
 import { getLanguage, onLanguageChange, setLanguage, t } from "../i18n";
 import { generatePseudoSuggestion, PSEUDO_ADJECTIVE_COUNT, PSEUDO_NOUN_COUNT } from "../shared/pseudoGenerator";
-import { drawButton, drawPanelBackground, inRect, UiPanel, type PressButton, type Rect } from "../ui/uiPanel";
+import { drawButton, drawPanelBackground, inRect, UiPanel, wrapText, type PressButton, type Rect } from "../ui/uiPanel";
 import { setPseudo } from "../world/playerIdentity";
 import type { Hand } from "./hand";
 import type { Sfx } from "./sfx";
@@ -12,9 +12,10 @@ const HEIGHT = 0.5;
 const PX_PER_M = 1600;
 const DISTANCE = 0.7;
 
-type ListButtonId = "lang" | "vignette" | "height" | "pseudo" | "debug" | "back";
+type ListButtonId = "lang" | "vignette" | "height" | "pseudo" | "debug" | "reset" | "back";
 type PseudoButtonId = "adjective" | "noun" | "confirm" | "cancel";
-type ButtonId = ListButtonId | PseudoButtonId;
+type ResetButtonId = "confirm" | "cancel";
+type ButtonId = ListButtonId | PseudoButtonId | ResetButtonId;
 
 const LIST_BUTTONS: Record<ListButtonId, Rect> = {
   lang: { x: 100, y: 170, w: 600, h: 70 },
@@ -22,12 +23,18 @@ const LIST_BUTTONS: Record<ListButtonId, Rect> = {
   height: { x: 100, y: 334, w: 600, h: 70 },
   pseudo: { x: 100, y: 416, w: 600, h: 70 },
   debug: { x: 100, y: 498, w: 600, h: 70 },
-  back: { x: 100, y: 610, w: 600, h: 70 },
+  reset: { x: 100, y: 580, w: 600, h: 70 },
+  back: { x: 100, y: 662, w: 600, h: 70 },
 };
 
 const PSEUDO_BUTTONS: Record<PseudoButtonId, Rect> = {
   adjective: { x: 60, y: 290, w: 340, h: 68 },
   noun: { x: 420, y: 290, w: 340, h: 68 },
+  confirm: { x: 100, y: 420, w: 600, h: 76 },
+  cancel: { x: 100, y: 520, w: 600, h: 68 },
+};
+
+const RESET_BUTTONS: Record<ResetButtonId, Rect> = {
   confirm: { x: 100, y: 420, w: 600, h: 76 },
   cancel: { x: 100, y: 520, w: 600, h: 68 },
 };
@@ -38,6 +45,12 @@ export interface SettingsMenuActions {
   toggleVignette(): boolean;
   /** Pseudo actuel (null si jamais choisi — pas encore soumis de score). */
   currentPseudo(): string | null;
+  /**
+   * Recommencer à zéro (archives, sauvegarde en cours, succès une fois ajoutés) — pas
+   * l'identité/le pseudo/le code de cassette. Renvoie faux si le serveur était injoignable
+   * (l'état local est quand même remis à zéro par l'appelant, voir main.ts).
+   */
+  resetProgress(): Promise<boolean>;
   /** Retour à l'écran qui a ouvert les paramètres (toujours le menu principal, voir mainMenu.ts). */
   back(): void;
 }
@@ -53,7 +66,7 @@ export class SettingsMenu extends UiPanel {
   private statusMessage = "";
   private statusUntil = 0;
   private time = 0;
-  private mode: "list" | "pseudo" = "list";
+  private mode: "list" | "pseudo" | "resetConfirm" = "list";
   private adjectiveIndex = 0;
   private nounIndex = 0;
   private suffix = 0;
@@ -109,6 +122,7 @@ export class SettingsMenu extends UiPanel {
     if (!id) return true;
     this.sfx.play("click", 0.4);
     if (this.mode === "pseudo") this.pressPseudoButton(id as PseudoButtonId);
+    else if (this.mode === "resetConfirm") this.pressResetButton(id as ResetButtonId);
     else this.pressListButton(id as ListButtonId);
     this.invalidate();
     return true;
@@ -136,6 +150,9 @@ export class SettingsMenu extends UiPanel {
       case "debug":
         setDebugMenuEnabled(!isDebugMenuEnabled());
         this.showStatus(isDebugMenuEnabled() ? t("settings.debugOnStatus") : t("settings.debugOffStatus"));
+        break;
+      case "reset":
+        this.mode = "resetConfirm";
         break;
       case "back":
         this.close();
@@ -166,6 +183,18 @@ export class SettingsMenu extends UiPanel {
     }
   }
 
+  private pressResetButton(id: ResetButtonId): void {
+    if (id === "cancel") {
+      this.mode = "list";
+      return;
+    }
+    this.mode = "list";
+    this.actions
+      .resetProgress()
+      .then((ok) => this.showStatus(ok ? t("settings.resetDone") : t("settings.resetOffline")))
+      .catch(() => this.showStatus(t("settings.resetOffline")));
+  }
+
   private pendingPseudo(): string {
     return generatePseudoSuggestion(this.adjectiveIndex, this.nounIndex, this.suffix);
   }
@@ -176,7 +205,7 @@ export class SettingsMenu extends UiPanel {
   }
 
   private buttonAt(px: number, py: number): ButtonId | null {
-    const buttons: Record<string, Rect> = this.mode === "pseudo" ? PSEUDO_BUTTONS : LIST_BUTTONS;
+    const buttons: Record<string, Rect> = this.mode === "pseudo" ? PSEUDO_BUTTONS : this.mode === "resetConfirm" ? RESET_BUTTONS : LIST_BUTTONS;
     for (const [id, rect] of Object.entries(buttons)) if (inRect(rect, px, py)) return id as ButtonId;
     return null;
   }
@@ -190,7 +219,7 @@ export class SettingsMenu extends UiPanel {
     ctx.textBaseline = "middle";
     ctx.fillStyle = "#ff6b5a";
     ctx.font = "bold 38px monospace";
-    ctx.fillText(t(this.mode === "pseudo" ? "settings.pseudoTitle" : "settings.title"), width / 2, 90);
+    ctx.fillText(t(this.mode === "pseudo" ? "settings.pseudoTitle" : this.mode === "resetConfirm" ? "settings.resetTitle" : "settings.title"), width / 2, 90);
 
     if (this.mode === "pseudo") {
       ctx.font = "bold 36px monospace";
@@ -203,6 +232,15 @@ export class SettingsMenu extends UiPanel {
       return;
     }
 
+    if (this.mode === "resetConfirm") {
+      ctx.font = "22px monospace";
+      ctx.fillStyle = "#e2d8bf";
+      wrapText(ctx, t("settings.resetWarning"), 60, 230, width - 120, 30, 4);
+      drawButton(ctx, RESET_BUTTONS.confirm, t("settings.resetConfirm"), { hovered: hovered.has("confirm"), accent: "#e06a5a" });
+      drawButton(ctx, RESET_BUTTONS.cancel, t("settings.back"), { hovered: hovered.has("cancel") });
+      return;
+    }
+
     drawButton(ctx, LIST_BUTTONS.lang, t("inv.lang"), { hovered: hovered.has("lang") });
     drawButton(ctx, LIST_BUTTONS.vignette, this.actions.vignetteEnabled() ? t("inv.vignetteOn") : t("inv.vignetteOff"), { hovered: hovered.has("vignette") });
     drawButton(ctx, LIST_BUTTONS.height, t("inv.height"), { hovered: hovered.has("height") });
@@ -212,6 +250,7 @@ export class SettingsMenu extends UiPanel {
       hovered: hovered.has("debug"),
       accent: "#7fc4e8",
     });
+    drawButton(ctx, LIST_BUTTONS.reset, t("settings.reset"), { hovered: hovered.has("reset"), accent: "#e06a5a" });
     drawButton(ctx, LIST_BUTTONS.back, t("settings.back"), { hovered: hovered.has("back") });
 
     if (this.statusUntil) {

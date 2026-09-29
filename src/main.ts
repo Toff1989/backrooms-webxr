@@ -40,6 +40,7 @@ import { InteractionSystem } from "./world/interactions";
 import { emitNoise, onNoise } from "./world/noise";
 import { ObjectAudio } from "./world/objectAudio";
 import { LevelManager, SPAWN_LOCAL_POSITION } from "./world/levelManager";
+import { resetProgress } from "./world/playerIdentity";
 import { COLLECTIBLE_KINDS, generateCollectibleLore, getCollectibleRarity, type CollectibleKind } from "./shared/collectibles";
 import { PROP_HALF_EXTENTS, type PropKind } from "./shared/props";
 import { loreFormat } from "./shared/lore";
@@ -314,6 +315,14 @@ const settingsMenu = new SettingsMenu(camera, player.body, sfx, {
     return comfortVignette.enabled;
   },
   currentPseudo: () => loreJournal.serverProfile?.pseudo ?? null,
+  // Efface toujours l'état local (même hors ligne) ; l'appel serveur (archives, sauvegarde) est
+  // best-effort, comme le reste de la synchro — voir `resetProgress` dans playerIdentity.ts.
+  resetProgress: async () => {
+    pausedRun = null;
+    saveManager.clear();
+    loreJournal.reset();
+    return resetProgress();
+  },
   // Ouverts depuis l'inventaire en jeu (aperçu léger, sans figer le joueur), "retour" referme
   // simplement le panneau ; ouverts depuis le menu principal (niveau 0 fictif, joueur déjà figé),
   // "retour" y réaffiche le menu — jamais de rechargement, on ne quitte pas le niveau 0 fictif.
