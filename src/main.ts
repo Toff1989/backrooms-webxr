@@ -43,6 +43,7 @@ import { COLLECTIBLE_KINDS, generateCollectibleLore, getCollectibleRarity, type 
 import { PROP_HALF_EXTENTS, type PropKind } from "./shared/props";
 import { loreFormat } from "./shared/lore";
 import { LoreJournal } from "./world/loreJournal";
+import { SaveManager, type SaveData } from "./world/saveManager";
 import { configureLoreServices, updateLoreObjects } from "./world/lorePage";
 import { Poltergeist } from "./world/poltergeist";
 import { spawnCollectibleModel } from "./world/collectibleLoader";
@@ -121,6 +122,8 @@ const grabbables = new GrabbableRegistry(scene, physics);
 /** Bandes perdues : progression indépendante de l'inventaire, gardée d'une run à l'autre (et côté serveur). */
 const loreJournal = new LoreJournal();
 await loreJournal.load();
+/** Sauvegarde de la partie en cours (seed, profondeur, inventaire, vitals, position) : locale, synchronisée entre appareils jumelés (voir saveManager.ts). */
+const saveManager = new SaveManager();
 
 /**
  * Étape 7 : la vraie seed de run vient du serveur (`POST /run/start`), mais le premier
@@ -242,10 +245,14 @@ const inventoryMenu = new InventoryMenu(
       collectionStore.remove(entry.id);
       grabSystem.takeIntoHand(hand, entry, () => collectionStore.add(entry));
     },
-    stopRec: () => endRunScreen.show(levelManager.depth),
+    stopRec: () => {
+      saveManager.clear();
+      endRunScreen.show(levelManager.depth);
+    },
     openJournal: () => journal.openFloating(),
     openSettings: () => settingsMenu.open(),
     openMainMenu: () => {
+      autosave();
       player.paused = true;
       mainMenu.open();
     },
@@ -337,6 +344,7 @@ const mainMenu = new MainMenu(camera, sfx, {
   },
   newGame: () => {
     mainMenu.close();
+    saveManager.clear();
     beginNewRun(true);
   },
   openSettings: () => {
@@ -581,6 +589,7 @@ function goDeeper(): void {
   vhsOverlay.blueScreen(1.4, [t("blue.level", { n: levelManager.depth })]);
   corruption.add(1);
   if (currentSession) reportLevel(currentSession, levelManager.depth);
+  autosave();
 }
 
 let gameOver = false;
@@ -601,6 +610,7 @@ function triggerGameOver(reason: "health" | "caught"): void {
   closeAllMenus();
   grabSystem.loseHeld();
   cadreur.reset(levelManager.depth);
+  saveManager.clear();
   endRunScreen.showGameOver(levelManager.depth, reason);
   log("run", { action: "game-over", reason, depth: levelManager.depth });
 }
@@ -637,12 +647,80 @@ function restartWorld(seed: string, resume = true): void {
   log("run", { action: "start", seed });
 }
 
-// Le monde charge toujours en arrière-plan dès l'ouverture (session serveur, premier niveau) ;
-// le menu principal garde juste le joueur en pause devant le temps de choisir (voir mainMenu.ts).
+/** Ce qu'une sauvegarde doit garder pour retrouver exactement la même partie (voir saveManager.ts). */
+function snapshot(): SaveData {
+  return {
+    seed: levelManager.seed,
+    depth: levelManager.depth,
+    take,
+    health: vitals.health,
+    madness: vitals.madness,
+    flashlightBattery: flashlight.battery,
+    position: { x: player.headWorld.x, z: player.headWorld.z },
+    inventory: collectionStore.getAll().slice(),
+  };
+}
+
+/**
+ * Sauvegarde silencieuse (changement de level, menu principal ouvert en jeu, minuteur, page
+ * masquée) : jamais pendant un game over (la run est de toute façon effacée juste après, voir
+ * `triggerGameOver`) ni avant que le choix reprendre/nouvelle partie du démarrage soit tranché
+ * (sinon une sauvegarde à peine restaurée s'écraserait elle-même à mi-chemin).
+ */
+let saveReady = false;
+function autosave(): void {
+  if (!saveReady || gameOver) return;
+  saveManager.save(snapshot());
+}
+
+/**
+ * Reprend une partie sauvegardée : même seed (le level se reconstruit à l'identique), même
+ * profondeur, inventaire/santé/folie/batterie/position restaurés. Pas de suivi anti-triche côté
+ * serveur pour la suite de cette run (`/run/level` exige une progression séquentielle depuis la
+ * profondeur 0 d'une run fraîchement créée, incompatible avec une reprise à une profondeur
+ * quelconque) — `currentSession` reste `null` ; un "STOP REC"/game over ultérieur ne pourra pas
+ * envoyer de score, comme hors ligne. Les bandes perdues restent suivies localement (elles se
+ * resynchroniseront au prochain profil serveur avec suivi).
+ */
+function resumeFromSave(save: SaveData): void {
+  gameOver = false;
+  currentSession = null;
+  vitals.health = save.health;
+  vitals.madness = save.madness;
+  flashlight.battery = save.flashlightBattery;
+  grabSystem.loseHeld();
+  collectionStore.clear();
+  // add() sans index pose l'objet en tête (comme un ramassage) : on repart de la fin pour
+  // reconstruire le même ordre que la sauvegarde plutôt que de l'inverser.
+  for (const entry of [...save.inventory].reverse()) collectionStore.add(entry);
+  levelManager.restartRun(save.seed, save.depth);
+  take = save.take;
+  hud.resetClock();
+  respawn();
+  player.teleport(new THREE.Vector3(save.position.x, 0, save.position.z));
+  log("run", { action: "resume", seed: save.seed, depth: save.depth });
+}
+
+// Le monde charge toujours en arrière-plan dès l'ouverture (session serveur ou reprise d'une
+// sauvegarde, premier niveau) ; le menu principal garde juste le joueur en pause devant le temps
+// de choisir (voir mainMenu.ts). "Continuer" ne fait alors que dépiler le menu : le monde voulu
+// est déjà prêt derrière, qu'il s'agisse d'une run neuve ou d'une reprise.
 player.paused = true;
 mainMenu.open();
-beginNewRun(false, false);
+void saveManager.load().then((save) => {
+  if (save) resumeFromSave(save);
+  else beginNewRun(false, false);
+  saveReady = true;
+});
 void loreJournal.sync();
+
+// Sauvegarde périodique (filet de sécurité) et à la mise en arrière-plan de la page (casque
+// retiré, onglet changé) — plus fiable que `beforeunload` pour un travail asynchrone (IndexedDB).
+const AUTOSAVE_INTERVAL_SECONDS = 20;
+let autosaveTimer = AUTOSAVE_INTERVAL_SECONDS;
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "hidden") autosave();
+});
 
 // Mode debug : commandes pour les bancs de test automatisés (session XR émulée) — déplacer le
 // joueur d'un coup (streaming de chunks dans le pire cas), descendre, ouvrir l'inventaire.
@@ -808,6 +886,11 @@ renderer.setAnimationLoop((timestamp) => {
   endRunScreen.update(hands);
   settingsMenu.update(deltaSeconds);
   debugMenu.update(deltaSeconds);
+  autosaveTimer -= deltaSeconds;
+  if (autosaveTimer <= 0) {
+    autosaveTimer = AUTOSAVE_INTERVAL_SECONDS;
+    autosave();
+  }
   grabSystem.update(elapsedSeconds, pointer);
   perfStats.end("joueur");
 

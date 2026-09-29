@@ -8,6 +8,7 @@ import fastifyStatic from "@fastify/static";
 import { registerDebugLogRoutes } from "./routes/debugLog.js";
 import { registerPlayerRoutes } from "./routes/player.js";
 import { registerLeaderboardRoute, registerRunRoutes } from "./routes/run.js";
+import { registerSaveRoutes } from "./routes/save.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env["PORT"] ?? 8787);
@@ -32,6 +33,7 @@ app.register(
     registerRunRoutes(api);
     registerLeaderboardRoute(api);
     registerPlayerRoutes(api);
+    registerSaveRoutes(api);
     registerDebugLogRoutes(api);
   },
   { prefix: "/api" },

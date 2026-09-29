@@ -2,6 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { LORE_FRAGMENT_COUNT } from "../../../src/shared/lore.js";
 import { findRun } from "../db.js";
 import { completePairing, pendingPairing, pollPairing, startPairing } from "../pairing.js";
+import { mergeSaves } from "../saves.js";
 import {
   authenticate,
   bestRuns,
@@ -65,7 +66,10 @@ export function registerPlayerRoutes(app: FastifyInstance): void {
     const target = code ? findPlayerByRecoveryCode(code) : null;
     if (!target) return reply.code(404).send({ error: "code inconnu" });
     const current = authenticate(request);
-    if (current) mergePlayers(current.id, target.id);
+    if (current) {
+      mergePlayers(current.id, target.id);
+      mergeSaves(current.id, target.id);
+    }
     return issueDevice(target);
   });
 
@@ -90,7 +94,10 @@ export function registerPlayerRoutes(app: FastifyInstance): void {
     if (typeof code !== "string" || !PAIR_CODE_PATTERN.test(code)) return reply.code(400).send({ error: "code invalide" });
     const pending = pendingPairing(code);
     if (!pending) return reply.code(404).send({ error: "code inconnu ou expiré" });
-    if (pending.fromPlayerId) mergePlayers(pending.fromPlayerId, player.id);
+    if (pending.fromPlayerId) {
+      mergePlayers(pending.fromPlayerId, player.id);
+      mergeSaves(pending.fromPlayerId, player.id);
+    }
     completePairing(code, issueDevice(player));
     return { ok: true };
   });

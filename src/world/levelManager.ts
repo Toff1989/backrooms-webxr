@@ -150,15 +150,21 @@ export class LevelManager {
   }
 
   /**
-   * Repart sur une nouvelle run à la profondeur 0 : soit la seed serveur authentique
-   * vient d'arriver (remplace la seed locale temporaire du tout premier rendu), soit le
-   * joueur a fait "STOP REC" et enchaîne une nouvelle run (étape 7).
+   * Repart sur une run : soit la seed serveur authentique vient d'arriver (remplace la seed
+   * locale temporaire du tout premier rendu), soit le joueur a fait "STOP REC" et enchaîne une
+   * nouvelle run (étape 7), soit une sauvegarde reprend directement à sa profondeur (`depth`) —
+   * la seed seule suffit à reconstruire un level identique, voir `createLevelProfile`.
    */
-  restartRun(runSeed: string): THREE.Vector3 {
+  restartRun(runSeed: string, depth = 0): THREE.Vector3 {
     this.runSeed = runSeed;
-    this.depth = 0;
+    this.depth = depth;
     this.rebuild();
     return SPAWN_LOCAL_POSITION.clone();
+  }
+
+  /** Seed de la run courante (fait partie de ce qu'une sauvegarde doit garder). */
+  get seed(): string {
+    return this.runSeed;
   }
 
   /** Porte de sortie, façade tournée vers le spawn (d'où arrive le couloir garanti). */
