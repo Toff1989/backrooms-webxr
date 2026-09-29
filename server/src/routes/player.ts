@@ -33,8 +33,8 @@ interface PseudoBody {
 
 /**
  * Identité anonyme (voir `players.ts`) : inscription automatique au premier lancement, profil
- * (code de cassette, bandes lues, meilleures runs), récupération par code de cassette, jumelage
- * façon télé, et déblocage des bandes perdues validé contre la run en cours.
+ * (code de cassette, archives lues, meilleures runs), récupération par code de cassette,
+ * jumelage façon télé, et synchronisation des archives perdues (indépendante de toute run).
  */
 export function registerPlayerRoutes(app: FastifyInstance): void {
   app.post<{ Body: RegisterBody }>("/player/register", strict(10), async (request) => {

@@ -63,7 +63,7 @@ interface Miniature {
 
 export interface InventoryMenuActions {
   takeOut(hand: Hand, entry: CollectionEntry): void;
-  /** Ouvre le journal des bandes perdues (il flotte devant le joueur). */
+  /** Ouvre le journal des archives perdues (il flotte devant le joueur). */
   openJournal(): void;
   /** Ouvre le menu Paramètres (langue, confort, hauteur, mode debug). */
   openSettings(): void;

@@ -46,14 +46,14 @@ export function playLoreTape(fragment: number): void {
   services?.playTape(fragment);
 }
 
-/** Bande perdue posée dans le monde : un objet saisissable, lu quand on le prend en main. */
+/** Archive perdue posée dans le monde : un objet saisissable, lu quand on le prend en main. */
 export interface LoreObject {
   model: THREE.Object3D;
   template: THREE.Object3D;
   mass: number;
   /** Hauteur (m) du centre de l'objet posé au sol. */
   restHeight: number;
-  /** Première saisie : la bande est lue (photo développée, cassette lancée). */
+  /** Première saisie : l'archive est lue (photo développée, cassette lancée). */
   onRead(): void;
   dispose(): void;
 }
@@ -222,7 +222,7 @@ async function createCassette(fragment: number): Promise<LoreObject> {
   };
 }
 
-/** Objet de la bande perdue `fragment`, selon sa forme (feuille, polaroid, cassette). */
+/** Objet de l'archive perdue `fragment`, selon sa forme (feuille, polaroid, cassette). */
 export async function createLoreObject(fragment: number): Promise<LoreObject> {
   const format = loreFormat(fragment);
   if (format === "audio") return createCassette(fragment);

@@ -4,13 +4,13 @@ import type { LevelProfile } from "./levelProfile.js";
 import { coordinateHash01, stringSeedToInt } from "./rng.js";
 
 /**
- * Bandes perdues : un récit en fragments numérotés, lus dans l'ordre d'une run à l'autre. Le
+ * Archives perdues : un récit en fragments numérotés, lus dans l'ordre d'une run à l'autre. Le
  * texte vit dans les traductions (`src/i18n`) ; le serveur n'a besoin que du nombre.
  */
 export const LORE_FRAGMENT_COUNT = 16;
 
 /**
- * Forme d'une bande : note manuscrite, fiche de montage (bobine, plan, time-code),
+ * Forme d'une archive : note manuscrite, fiche de montage (bobine, plan, time-code),
  * photo polaroid (développée au ramassage), ou cassette audio (grésillement + transcription).
  */
 export type LoreFormat = "journal" | "fiche" | "polaroid" | "audio";
@@ -21,7 +21,7 @@ export interface LoreFragmentMeta {
   reel?: number;
   shot?: string;
   timecode?: string;
-  /** Le plan en entier, sans coupe (dernière bande). */
+  /** Le plan en entier, sans coupe (dernière archive). */
   full?: boolean;
 }
 
@@ -62,7 +62,7 @@ export interface LorePageLocation {
 }
 
 /**
- * Cellule où repose la page de bande perdue du level : fonction pure de la seed. Hors de la
+ * Cellule où repose la page d'archive perdue du level : fonction pure de la seed. Hors de la
  * ligne droite vers la sortie (il faut s'écarter du chemin pour la trouver), à bonne distance
  * du spawn, jamais dans le dégagement de la sortie. La cellule est laissée libre de tout
  * pilier/meuble et ses quatre bords sont ouverts (voir `chunkLayout.ts`).

@@ -17,7 +17,7 @@ interface Subtitle {
 }
 
 /**
- * Lecteur des cassettes audio des bandes perdues. Pas de voix enregistrée : le souffle d'une
+ * Lecteur des cassettes audio des archives perdues. Pas de voix enregistrée : le souffle d'une
  * vieille bande magnétique (bruit filtré, pleurage lent) pendant que la transcription défile en
  * sous-titres dans le viseur du caméscope — le locuteur d'abord, puis chaque réplique.
  */

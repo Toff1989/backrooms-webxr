@@ -23,7 +23,7 @@ export const SORT_MODES: CollectionSortMode[] = ["recent", "rarity", "depth", "n
 
 /**
  * Inventaire de la run : ce que le joueur a rangé pendant la partie en cours. Il est vidé à
- * chaque début de partie (`clear`) ; les bandes perdues ont leur propre journal, indépendant
+ * chaque début de partie (`clear`) ; les archives perdues ont leur propre journal, indépendant
  * (voir `loreJournal.ts`). Un objet sorti de
  * l'inventaire (en main, puis posé/jeté dans le monde) n'en fait plus partie tant qu'il n'y
  * est pas remis : laissé au sol quand on change de level, il est perdu.

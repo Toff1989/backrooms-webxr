@@ -43,11 +43,11 @@ const KEYPAD_TOP = 172;
 const KEYPAD = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "⌫", "0", "OK"] as const;
 
 /**
- * Journal des bandes perdues : un carnet qu'on ouvre depuis le menu d'inventaire (bouton
+ * Journal des archives perdues : un carnet qu'on ouvre depuis le menu d'inventaire (bouton
  * JOURNAL), qui flotte alors devant soi. L'autre main tourne les pages au pointeur (gâchette).
- * - Onglet BANDES : l'index des 16 bandes (lues ou encore perdues), et la bande choisie écrite
- *   à la main sur la page de droite.
- * - Onglet ENREGISTREMENT : le code de cassette (retrouver ses bandes et scores ailleurs), les
+ * - Onglet ARCHIVES : l'index des 16 archives (lues ou encore perdues), et l'archive choisie
+ *   écrite à la main sur la page de droite.
+ * - Onglet ENREGISTREMENT : le code de cassette (retrouver ses archives et scores ailleurs), les
  *   meilleures runs, et le jumelage façon télé (afficher un code / confirmer celui d'un autre).
  */
 export class Journal extends UiPanel {
@@ -97,7 +97,7 @@ export class Journal extends UiPanel {
   private show(): void {
     log("journal", { action: "open" });
     this.group.visible = true;
-    // Ouvert sur la dernière bande lue (la plus récente), sinon sur la première à trouver.
+    // Ouvert sur la dernière archive lue (la plus récente), sinon sur la première à trouver.
     this.selected = Math.max(0, Math.min(this.lore.count, LORE_FRAGMENT_COUNT) - 1);
     this.status = null;
     this.sfx.play("take", 0.35);

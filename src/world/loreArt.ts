@@ -3,7 +3,7 @@ import { loreFragment, t } from "../i18n";
 import { LORE_FRAGMENT_COUNT, LORE_FRAGMENTS, loreFormat } from "../shared/lore";
 
 /**
- * Dessin des bandes perdues sur canvas, commun aux objets du monde (feuille, polaroid) et au
+ * Dessin des archives perdues sur canvas, commun aux objets du monde (feuille, polaroid) et au
  * journal : note manuscrite sur papier de cahier, fiche de montage tapée à la machine, polaroid
  * (photo développée + légende au dos), transcription d'une cassette.
  */
@@ -103,7 +103,7 @@ export function drawAgedPaper(ctx: CanvasRenderingContext2D, x: number, y: numbe
   ctx.restore();
 }
 
-/** En-tête commun : titre de la bande tapé à la machine et numéro sur le total. */
+/** En-tête commun : titre de l'archive tapé à la machine et numéro sur le total. */
 function drawHeader(ctx: CanvasRenderingContext2D, x: number, y: number, width: number, fragment: number): void {
   ctx.textBaseline = "alphabetic";
   ctx.textAlign = "left";
@@ -134,7 +134,7 @@ export function drawLoreText(ctx: CanvasRenderingContext2D, x: number, y: number
   ctx.restore();
 }
 
-/** Première ligne d'une bande (pour l'index du journal), sans le locuteur d'une cassette. */
+/** Première ligne d'une archive (pour l'index du journal), sans le locuteur d'une cassette. */
 export function loreExcerpt(fragment: number): string {
   const lines = (loreFragment(fragment) ?? "").split("\n");
   return (lines[0]?.startsWith("[") ? lines[1] : lines[0]) ?? "";
@@ -331,7 +331,7 @@ export function drawTranscript(ctx: CanvasRenderingContext2D, x: number, y: numb
 }
 
 /**
- * Une bande entière sur une page (journal) : papier, puis le contenu selon sa forme. Le polaroid
+ * Une archive entière sur une page (journal) : papier, puis le contenu selon sa forme. Le polaroid
  * est posé de travers sur la page, sa légende recopiée dessous.
  */
 export function drawLoreFragment(ctx: CanvasRenderingContext2D, x: number, y: number, width: number, height: number, fragment: number): void {

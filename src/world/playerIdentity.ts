@@ -98,7 +98,7 @@ export function ensureIdentity(): Promise<Identity | null> {
 }
 
 /**
- * Profil serveur (code de cassette, bandes lues, meilleures runs). Appareil inconnu du serveur
+ * Profil serveur (code de cassette, archives lues, meilleures runs). Appareil inconnu du serveur
  * (base réinitialisée) : on oublie l'identité locale et on se réinscrit.
  */
 export async function fetchProfile(): Promise<PlayerProfile | null> {

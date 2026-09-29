@@ -20,12 +20,12 @@ export class LoreJournal {
     this.raiseTo(stored ?? 0);
   }
 
-  /** Nombre de bandes lues (fragments 0..count-1). */
+  /** Nombre d'archives lues (fragments 0..count-1). */
   get count(): number {
     return this.unlocked;
   }
 
-  /** Prochaine bande à trouver, ou null si le récit est complet. */
+  /** Prochaine archive à trouver, ou null si le récit est complet. */
   get nextFragment(): number | null {
     return this.unlocked < LORE_FRAGMENT_COUNT ? this.unlocked : null;
   }

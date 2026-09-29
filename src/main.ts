@@ -142,7 +142,7 @@ camera.add(audioListener);
 
 const collectionStore = new CollectionStore();
 const grabbables = new GrabbableRegistry(scene, physics);
-/** Bandes perdues : progression indépendante de l'inventaire, gardée d'une run à l'autre (et côté serveur). */
+/** Archives perdues : progression indépendante de l'inventaire, gardée d'une run à l'autre (et côté serveur). */
 const loreJournal = new LoreJournal();
 await loreJournal.load();
 /** Sauvegarde de la partie en cours (seed, profondeur, inventaire, vitals, position) : locale, synchronisée entre appareils jumelés (voir saveManager.ts). */
@@ -196,7 +196,7 @@ function setVignette(enabled: boolean): void {
 }
 const hud = new CamcorderHud(camera);
 const vitals = new PlayerVitals();
-/** Bandes perdues : cassettes lues dans le viseur, polaroids photographiés derrière le joueur. */
+/** Archives perdues : cassettes lues dans le viseur, polaroids photographiés derrière le joueur. */
 const tapePlayer = new TapePlayer(audioListener, hud);
 const capturePhoto = createPhotoCapture(renderer, scene, camera, physics);
 const captureObject = createObjectCapture(renderer, scene, camera);
@@ -390,7 +390,7 @@ for (const panel of [inventoryMenu, endRunScreen, journal, mainMenu, settingsMen
 }
 
 /**
- * Bande perdue saisie : lue selon sa forme (photo qui se développe, cassette qui se lance), elle
+ * Archive perdue saisie : lue selon sa forme (photo qui se développe, cassette qui se lance), elle
  * entre au journal (et au serveur si la run y est enregistrée).
  */
 function readLorePage(page: LorePageData, hand: Hand): void {
@@ -705,7 +705,7 @@ function autosave(): void {
  * serveur pour la suite de cette run (`/run/level` exige une progression séquentielle depuis la
  * profondeur 0 d'une run fraîchement créée, incompatible avec une reprise à une profondeur
  * quelconque) — `currentSession` reste `null` ; un "STOP REC"/game over ultérieur ne pourra pas
- * envoyer de score, comme hors ligne. Les bandes perdues restent suivies localement (elles se
+ * envoyer de score, comme hors ligne. Les archives perdues restent suivies localement (elles se
  * resynchroniseront au prochain profil serveur avec suivi).
  */
 function resumeFromSave(save: SaveData): void {

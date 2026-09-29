@@ -51,7 +51,7 @@ export interface GrabHooks {
   /** Index de la case d'inventaire visée/touchée au lâcher (rangement à cet endroit), sinon null. */
   inventorySlotAt?(hand: Hand): number | null;
   store(item: CollectionEntry, slotIndex?: number | null): void;
-  /** Objet saisi (au contact, à distance ou sorti du sac) : une page de bande perdue est lue. */
+  /** Objet saisi (au contact, à distance ou sorti du sac) : une page d'archive perdue est lue. */
   onGrab?(grabbable: Grabbable): void;
   /** Gâchette pressée en tenant un objet : l'utiliser (allumer, remonter, pulvériser...). */
   onUse?(hand: Hand, grabbable: Grabbable): void;
@@ -726,7 +726,7 @@ export class GrabSystem {
     this.releasing.set(grabbable, this.time + RELEASE_GRACE_SECONDS);
   }
 
-  /** Range l'objet tenu : objet de collection dans le sac, page de bande perdue au journal. */
+  /** Range l'objet tenu : objet de collection dans le sac, page d'archive perdue au journal. */
   private storeHeld(hand: Hand, slotIndex: number | null): void {
     const state = this.held.get(hand);
     const { item, lorePage } = state?.grabbable ?? {};

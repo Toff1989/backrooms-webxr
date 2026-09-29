@@ -92,7 +92,7 @@ export interface GrabbableInit {
   mass: number;
   /** Données d'inventaire : présent uniquement pour les objets de collection (rangeables). */
   item: CollectionEntry | null;
-  /** Page de bande perdue (voir `lorePage.ts`) : saisissable et lisible, jamais rangée dans le sac. */
+  /** Page d'archive perdue (voir `lorePage.ts`) : saisissable et lisible, jamais rangée dans le sac. */
   lorePage?: LorePageData | null;
   /** Boîte de collision au lieu de l'enveloppe convexe (meubles massifs et anguleux). */
   boxCollider?: boolean;
@@ -106,11 +106,11 @@ export interface GrabbableInit {
   batteryId?: string;
 }
 
-/** Page de bande perdue posée dans le monde : identifiant unique par level, fragment de récit porté. */
+/** Page d'archive perdue posée dans le monde : identifiant unique par level, fragment de récit porté. */
 export interface LorePageData {
   id: string;
   fragment: number;
-  /** Prise en main : la bande est lue selon sa forme (polaroid développé, cassette lancée). */
+  /** Prise en main : l'archive est lue selon sa forme (polaroid développé, cassette lancée). */
   onRead(): void;
 }
 
@@ -125,7 +125,7 @@ export class Grabbable {
   readonly mass: number;
   readonly item: CollectionEntry | null;
   readonly lorePage: LorePageData | null;
-  /** Type de meuble ou d'objet de collection (null : page de bande perdue). */
+  /** Type de meuble ou d'objet de collection (null : page d'archive perdue). */
   readonly kind: string | null;
   readonly batteryId: string | null;
   /** Centre de la boîte englobante, en espace local du corps (échelle comprise). */

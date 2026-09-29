@@ -60,11 +60,11 @@ export function tList(key: ListKey): readonly string[] {
   return DICTIONARIES[current][key] as string[];
 }
 
-/** Fragment n (0-based) du récit des bandes perdues, ou null au-delà du dernier. */
+/** Fragment n (0-based) du récit des archives perdues, ou null au-delà du dernier. */
 export function loreFragment(index: number): string | null {
   return DICTIONARIES[current]["lore.fragments"][index] ?? null;
 }
 
 if (fr["lore.fragments"].length !== LORE_FRAGMENT_COUNT || en["lore.fragments"].length !== LORE_FRAGMENT_COUNT) {
-  throw new Error(`Bandes perdues : ${LORE_FRAGMENT_COUNT} fragments attendus dans chaque langue`);
+  throw new Error(`Archives perdues : ${LORE_FRAGMENT_COUNT} fragments attendus dans chaque langue`);
 }

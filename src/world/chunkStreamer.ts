@@ -93,7 +93,7 @@ export class ChunkStreamer {
   private readonly frustum = new THREE.Frustum();
   private readonly frustumMatrix = new THREE.Matrix4();
   /**
-   * Bande perdue du level, préparée dès le changement de level (voir `prepareLorePage`) : son
+   * Archive perdue du level, préparée dès le changement de level (voir `prepareLorePage`) : son
    * dessin (papier vieilli, texte : ~10 ms sur PC) ne tombe plus pendant la partie, quand son
    * chunk se charge.
    */
@@ -106,7 +106,7 @@ export class ChunkStreamer {
     private readonly grabbables: GrabbableRegistry,
     /** Vrai si l'objet est déjà rangé dans l'inventaire (ne pas le refaire apparaître). */
     private readonly isItemStored: (id: string) => boolean,
-    /** Bande perdue portée par la page de ce level (null : récit complet, pas de page). */
+    /** Archive perdue portée par la page de ce level (null : récit complet, pas de page). */
     private readonly lorePageFragment: () => number | null,
     profile: LevelProfile,
   ) {
@@ -382,14 +382,14 @@ export class ChunkStreamer {
   }
 
   /**
-   * Bande perdue du level (une seule dans le monde, même si son chunk se recharge) : note,
-   * fiche, polaroid ou cassette selon la bande attendue.
+   * Archive perdue du level (une seule dans le monde, même si son chunk se recharge) : note,
+   * fiche, polaroid ou cassette selon l'archive attendue.
    */
   private spawnLorePage(key: string, chunk: LoadedChunk, location: NonNullable<ChunkLayout["lorePage"]>): void {
     const id = `${this.profile.seed}:lore`;
     const fragment = this.lorePageFragment();
     if (this.loaded.get(key) !== chunk || fragment === null || this.grabbables.isItemAlive(id)) return;
-    // Objet préparé au changement de level, s'il porte bien cette bande (consommé : si le chunk se
+    // Objet préparé au changement de level, s'il porte bien cette archive (consommé : si le chunk se
     // recharge plus tard, la page est redessinée).
     const prepared = this.preparedLore?.fragment === fragment ? this.preparedLore.lore : null;
     if (prepared) this.preparedLore = null;
@@ -416,7 +416,7 @@ export class ChunkStreamer {
       .catch(() => {});
   }
 
-  /** Dessine d'avance la bande perdue attendue dans ce level (voir `preparedLore`). */
+  /** Dessine d'avance l'archive perdue attendue dans ce level (voir `preparedLore`). */
   private prepareLorePage(): void {
     this.discardPreparedLore();
     const fragment = this.lorePageFragment();

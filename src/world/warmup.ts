@@ -172,7 +172,7 @@ export class Warmup {
 
 /**
  * Matériaux créés à la volée par les objets (écrans, cadrans, flamme, halo, aérosol, masques de
- * jumelles, bandes perdues) : un représentant de chaque combinaison suffit, le programme compilé
+ * jumelles, archives perdues) : un représentant de chaque combinaison suffit, le programme compilé
  * est partagé par tous les matériaux de mêmes caractéristiques.
  */
 function representativeObjects(): THREE.Object3D[] {
@@ -200,7 +200,7 @@ function representativeObjects(): THREE.Object3D[] {
     // Flamme du briquet, halo de l'ampoule, nuage d'aérosol.
     new THREE.Sprite(new THREE.SpriteMaterial({ map: texture, blending: THREE.AdditiveBlending, depthWrite: false, transparent: true })),
     new THREE.Points(point, new THREE.PointsMaterial({ color: 0xffffff, size: 0.03, transparent: true, opacity: 0.5, depthWrite: false })),
-    // Bandes perdues (lorePage.ts) : faces imprimées, dos, tranche.
+    // Archives perdues (lorePage.ts) : faces imprimées, dos, tranche.
     mesh(vhs(new THREE.MeshStandardMaterial({ map: texture, emissiveMap: texture, emissive: 0xffffff, roughness: 0.9 }))),
     mesh(vhs(new THREE.MeshStandardMaterial({ map: texture, roughness: 0.95 }))),
     mesh(vhs(new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.95 }))),

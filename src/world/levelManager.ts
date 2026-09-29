@@ -50,7 +50,7 @@ export class LevelManager {
   private runSeed: string;
   /** Part du brouillage de la balise annulée (bonus boussole). */
   beaconSteadiness = 0;
-  /** Bande de la page de ce level une fois lue : elle ne change plus jusqu'au level suivant. */
+  /** Archive de la page de ce level une fois lue : elle ne change plus jusqu'au level suivant. */
   private pinnedLoreFragment: number | null = null;
   private lightField: LightFieldParams;
   private readonly floorCeiling: FloorCeiling;
@@ -61,7 +61,7 @@ export class LevelManager {
     private readonly physics: PhysicsWorld,
     grabbables: GrabbableRegistry,
     isItemStored: (id: string) => boolean,
-    /** Prochaine bande perdue à trouver (voir `LoreJournal`), null si le récit est complet. */
+    /** Prochaine archive perdue à trouver (voir `LoreJournal`), null si le récit est complet. */
     nextLoreFragment: () => number | null,
     initialRunSeed: string,
   ) {
@@ -112,7 +112,7 @@ export class LevelManager {
 
   /**
    * La page du level vient d'être lue : si son chunk se recharge, elle réapparaît avec la même
-   * bande (et non la suivante, qui attend le level d'après).
+   * archive (et non la suivante, qui attend le level d'après).
    */
   pinLorePage(fragment: number): void {
     this.pinnedLoreFragment = fragment;

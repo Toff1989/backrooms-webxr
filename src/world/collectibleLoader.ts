@@ -89,7 +89,7 @@ const COLLECTIBLE_URLS: Record<CollectibleKind, string> = {
 
 /**
  * Modèles réutilisés hors du pool de collection normal (retirés de `CollectibleKind`, voir
- * `shared/collectibles.ts`) : la cassette pour la bande perdue "audio" (`world/lorePage.ts`),
+ * `shared/collectibles.ts`) : la cassette pour l'archive perdue "audio" (`world/lorePage.ts`),
  * et la caméra vidéo pour la tête du Cadreur (`world/cadreurModel.ts`) — seuls appelants restants.
  */
 export type SpecialModelKind = "cassette" | "cadreurHead";

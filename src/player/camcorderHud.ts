@@ -118,7 +118,7 @@ export class CamcorderHud {
   }
 
   /**
-   * Message bref dans le viseur (bande ajoutée au journal, sous-titre d'une cassette), à la
+   * Message bref dans le viseur (archive ajoutée au journal, sous-titre d'une cassette), à la
    * place de la ligne de mesures ; coupé sur deux lignes s'il est long.
    */
   showNotice(text: string, seconds = 4, color = "#e8c34a"): void {

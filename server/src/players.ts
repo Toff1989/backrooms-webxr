@@ -7,7 +7,7 @@ import { db } from "./db.js";
  * Identité anonyme des joueurs, sans compte : chaque appareil reçoit un secret aléatoire (on
  * n'en garde que l'empreinte SHA-256) qui le rattache à un joueur. Un joueur peut avoir
  * plusieurs appareils (jumelage façon télé, ou code de cassette) ; ses runs et sa progression
- * des bandes perdues lui sont rattachées.
+ * des archives perdues lui sont rattachées.
  *
  * Le code de cassette (récupération) est gardé en clair : c'est un code de sauvegarde de jeu,
  * affiché au joueur sur chacun de ses appareils, comme les mots de passe des vieilles consoles.
@@ -115,7 +115,7 @@ export function issueDevice(player: Player): Credentials {
 
 /**
  * Nouveau joueur. `legacyId` : ancien identifiant local (avant les identités serveur) — repris
- * s'il est libre, pour garder les runs déjà jouées ; `legacyLoreCount` : bandes déjà lues sur
+ * s'il est libre, pour garder les runs déjà jouées ; `legacyLoreCount` : archives déjà lues sur
  * cet appareil, importées une fois (récit solo, sans enjeu de classement).
  */
 export const registerPlayer = db.transaction((legacyId: unknown, legacyLoreCount: unknown): Credentials => {
@@ -151,7 +151,7 @@ export function loreCount(playerId: string): number {
 /**
  * Uniformisé avec la sauvegarde (local d'abord, synchro par identité — voir saveManager.ts côté
  * client) : plus de validation liée à une run active, juste "le plus avancé des deux fait foi",
- * comme pour l'inventaire/la seed via /save. `count` : nombre de bandes connues localement.
+ * comme pour l'inventaire/la seed via /save. `count` : nombre d'archives connues localement.
  */
 export const raiseLoreCount = db.transaction((playerId: string, count: number): number => {
   const now = Date.now();
@@ -171,8 +171,8 @@ export function setPseudo(playerId: string, pseudo: string): void {
 
 /**
  * Fusionne un joueur dans un autre (jumelage ou code de cassette saisi sur un appareil qui avait
- * déjà sa propre identité) : runs, bandes lues et appareils passent au joueur cible, qui garde
- * son code de cassette. Les bandes forment toujours un préfixe 0..n-1 : l'union en est un aussi.
+ * déjà sa propre identité) : runs, archives lues et appareils passent au joueur cible, qui garde
+ * son code de cassette. Les archives forment toujours un préfixe 0..n-1 : l'union en est un aussi.
  */
 export const mergePlayers = db.transaction((fromId: string, intoId: string): void => {
   if (fromId === intoId) return;

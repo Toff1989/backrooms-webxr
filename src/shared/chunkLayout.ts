@@ -80,7 +80,7 @@ export interface ChunkLayout {
   collectiblePlacements: CollectiblePlacement[];
   /** Piles pour la lampe torche : ramassées au passage (id stable pour ne pas réapparaître). */
   batteryPlacements: Array<{ id: string; x: number; z: number; rotationY: number }>;
-  /** Page de bande perdue du level, si elle repose dans ce chunk (une par level, voir `lore.ts`). */
+  /** Page d'archive perdue du level, si elle repose dans ce chunk (une par level, voir `lore.ts`). */
   lorePage: LorePageLocation | null;
 }
 
@@ -133,7 +133,7 @@ export function generateChunkLayout(
   const seedInt = epoch === 0 ? baseSeedInt : (baseSeedInt + epoch * 0x9e3779b1) | 0;
   const exitLocation = getExitLocation(profile);
   const guaranteedPathEdges = computeGuaranteedPathEdges(exitLocation);
-  // Cellule de la page de bande perdue : ses quatre bords restent ouverts (jamais emmurée).
+  // Cellule de la page d'archive perdue : ses quatre bords restent ouverts (jamais emmurée).
   const lorePageLocation = getLorePageLocation(profile);
   const { cellX: loreCellX, cellZ: loreCellZ } = lorePageLocation;
   guaranteedPathEdges.add(edgeKey(loreCellX, loreCellZ, "north"));
