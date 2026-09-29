@@ -27,7 +27,6 @@
   "inv.lang": "LANGUAGE: ENGLISH",
   "inv.langStatus": "Language: English.",
   "inv.confirm": "CONFIRM?",
-  "inv.stop": "■ STOP REC",
   "inv.close": "CLOSE",
   "inv.footer": "Y: open/close · trigger: click · grip: take an item",
   "perks.line": "Collection bonus — torch +{battery}% · dissipation +{decay}% · sprint +{stamina}%{compass}",

@@ -33,22 +33,20 @@ const REACH_RADIUS = 0.08;
 const MENU_DISTANCE = 0.6;
 const MENU_DROP = 0.14;
 const MENU_TILT = THREE.MathUtils.degToRad(14);
-const STOP_CONFIRM_SECONDS = 3;
 
-type ButtonId = "prev" | "next" | "sort" | "stop" | "close" | "journal" | "settings" | "mainMenu" | "debug";
+type ButtonId = "prev" | "next" | "sort" | "close" | "journal" | "settings" | "mainMenu" | "debug";
 
 /**
- * Rangée 1 : opérations sur l'inventaire lui-même (page, tri, fin de prise, fermer). Rangée 2 :
- * navigation vers les autres menus (journal, paramètres, menu principal, debug si activé) —
- * langue/vignette/hauteur et les actions de test ont déménagé dans des menus dédiés
- * (`settingsMenu.ts`, `debugMenu.ts`) pour alléger ce panneau à son seul rôle d'inventaire.
+ * Rangée 1 : opérations sur l'inventaire lui-même (page, tri, fermer). Rangée 2 : navigation vers
+ * les autres menus (journal, paramètres, menu principal, debug si activé) — langue/vignette/
+ * hauteur, les actions de test et "STOP REC" (déplacé dans le menu principal, voir mainMenu.ts)
+ * ont déménagé ailleurs pour alléger ce panneau à son seul rôle d'inventaire.
  */
 const BUTTONS: Record<ButtonId, Rect> = {
   prev: { x: 40, y: 556, w: 70, h: 64 },
   next: { x: 120, y: 556, w: 70, h: 64 },
-  sort: { x: 200, y: 556, w: 190, h: 64 },
-  stop: { x: 400, y: 556, w: 320, h: 64 },
-  close: { x: 730, y: 556, w: 254, h: 64 },
+  sort: { x: 200, y: 556, w: 300, h: 64 },
+  close: { x: 520, y: 556, w: 464, h: 64 },
   journal: { x: 40, y: 632, w: 230, h: 60 },
   settings: { x: 280, y: 632, w: 230, h: 60 },
   mainMenu: { x: 520, y: 632, w: 230, h: 60 },
@@ -65,7 +63,6 @@ interface Miniature {
 
 export interface InventoryMenuActions {
   takeOut(hand: Hand, entry: CollectionEntry): void;
-  stopRec(): void;
   /** Ouvre le journal des bandes perdues (il flotte devant le joueur). */
   openJournal(): void;
   /** Ouvre le menu Paramètres (langue, confort, hauteur, mode debug). */
@@ -81,14 +78,13 @@ export interface InventoryMenuActions {
  * Menu d'inventaire (Y pour ouvrir/fermer) : chaque objet rangé apparaît en miniature 3D qui
  * tourne dans sa case ; viser une case (ou y tendre la main) + grip/gâchette le sort à taille
  * réelle dans la main. Relâcher un objet tenu sur le menu (ou A/X) le range. Le menu suit le
- * joueur (attaché à son corps) et regroupe aussi les actions système (hauteur, STOP REC).
+ * joueur (attaché à son corps) et donne accès aux autres menus (journal, paramètres, principal).
  */
 export class InventoryMenu extends UiPanel {
   private page = 0;
   private readonly hoverSlot = new Map<Hand, number | null>();
   private readonly hoverButton = new Map<Hand, ButtonId | null>();
   private readonly miniatures = new Map<number, Miniature>();
-  private stopArmedUntil = 0;
   /** Objet sélectionné pour être déplacé (index global dans l'inventaire), ou null. */
   private picked: number | null = null;
   private sortIndex = 0;
@@ -130,7 +126,6 @@ export class InventoryMenu extends UiPanel {
       this.hasInitialPlacement = true;
     }
     this.group.visible = true;
-    this.stopArmedUntil = 0;
     this.rebuildMiniatures();
     this.invalidate();
     this.sfx.play("click", 0.35);
@@ -145,10 +140,6 @@ export class InventoryMenu extends UiPanel {
   update(deltaSeconds: number, hands: Hand[], isPointerOnMenu: (hand: Hand) => boolean): void {
     this.time += deltaSeconds;
     if (!this.visible) return;
-    if (this.stopArmedUntil && this.time > this.stopArmedUntil) {
-      this.stopArmedUntil = 0;
-      this.invalidate();
-    }
     if (this.statusUntil && this.time > this.statusUntil) {
       this.statusUntil = 0;
       this.invalidate();
@@ -220,15 +211,6 @@ export class InventoryMenu extends UiPanel {
         this.showStatus(t("inv.sortStatus", { mode: t(`sort.${mode}`) }));
         break;
       }
-      case "stop":
-        if (this.stopArmedUntil) {
-          this.stopArmedUntil = 0;
-          this.close();
-          this.actions.stopRec();
-          return;
-        }
-        this.stopArmedUntil = this.time + STOP_CONFIRM_SECONDS;
-        break;
       case "journal":
         this.close();
         this.actions.openJournal();
@@ -477,10 +459,6 @@ export class InventoryMenu extends UiPanel {
     drawButton(ctx, BUTTONS.prev, "◀", { hovered: hoveredButtons.has("prev"), disabled: this.pageCount < 2 });
     drawButton(ctx, BUTTONS.next, "▶", { hovered: hoveredButtons.has("next"), disabled: this.pageCount < 2 });
     drawButton(ctx, BUTTONS.sort, t("inv.sort"), { hovered: hoveredButtons.has("sort") });
-    drawButton(ctx, BUTTONS.stop, this.stopArmedUntil ? t("inv.confirm") : t("inv.stop"), {
-      hovered: hoveredButtons.has("stop"),
-      accent: "#ff6b5a",
-    });
     drawButton(ctx, BUTTONS.close, t("inv.close"), { hovered: hoveredButtons.has("close") });
     drawButton(ctx, BUTTONS.journal, t("inv.journal"), { hovered: hoveredButtons.has("journal"), accent: "#e8c34a" });
     drawButton(ctx, BUTTONS.settings, t("inv.settings"), { hovered: hoveredButtons.has("settings") });

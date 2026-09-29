@@ -14,7 +14,15 @@ import type { Sfx } from "./sfx";
 // le centre minuscule du canevas.
 const SIZE = 2.2;
 const PX_PER_M = 400;
-const DEPTH = -0.9;
+const FULLSCREEN_DEPTH = -0.9;
+/** Mode "panneau" (ouvert en jeu depuis l'inventaire, sans tout masquer) : ramené à une taille
+ * comparable aux autres panneaux (inventaire ~0,64 m de large), posé devant soi comme eux. */
+const PANEL_SCALE = 0.64 / SIZE;
+const PANEL_DISTANCE = 0.6;
+const PANEL_DROP = 0.05;
+const QUIT_CONFIRM_SECONDS = 3;
+
+export type MainMenuMode = "fullscreen" | "panel";
 
 type ButtonId = "continue" | "newGame" | "settings" | "quit";
 
@@ -36,43 +44,88 @@ export interface MainMenuActions {
   continueRun(): void;
   newGame(): void;
   openSettings(): void;
+  /** "Quitter" : termine la run en cours (ex-STOP REC de l'inventaire) — pas de fermeture d'onglet/session possible depuis un navigateur. */
   quit(): void;
 }
 
 /**
  * Menu principal : le jeu charge toujours en arrière-plan (voir `main.ts`, `beginNewRun` au
- * chargement) — ce panneau plein champ, collé à la caméra, cache ce chargement en attendant que
- * le joueur choisisse (Continuer / Nouvelle partie / Paramètres / Quitter). Accessible au
- * lancement, et depuis l'inventaire en jeu ("Menu principal") sans mettre fin à la run en cours
- * (elle reste reprise par "Continuer").
+ * chargement) — en mode plein champ (démarrage, retour après fin de run), ce panneau cache ce
+ * chargement en attendant que le joueur choisisse (Continuer / Nouvelle partie / Paramètres /
+ * Quitter). Ouvert depuis l'inventaire en jeu, il prend plutôt la forme d'un panneau classique
+ * (comme l'inventaire/le journal) qui ne masque pas tout — voir `open(mode)`.
  */
 export class MainMenu extends UiPanel {
   private readonly hovered = new Map<Hand, ButtonId | null>();
+  private mode: MainMenuMode = "fullscreen";
+  private quitArmedUntil = 0;
+  private time = 0;
 
   constructor(
-    camera: THREE.Camera,
+    private readonly camera: THREE.Camera,
+    private readonly worldParent: THREE.Object3D,
     private readonly sfx: Sfx,
     private readonly actions: MainMenuActions,
   ) {
     super(SIZE, SIZE, PX_PER_M);
     this.group.name = "main-menu";
-    this.group.position.set(0, 0, DEPTH);
-    camera.add(this.group);
-    // Au-dessus du HUD caméscope (renderOrder 997/998, lui aussi collé à la caméra) : sans ça,
-    // "REC"/les jauges continuent de transpercer un menu censé tout masquer. depthTest désactivé
-    // pour la même raison que le HUD et l'overlay VHS (mêmes réglages, mesh très proche de l'œil).
-    this.mesh.renderOrder = 999;
-    (this.mesh.material as THREE.MeshBasicMaterial).depthTest = false;
     onLanguageChange(() => this.invalidate());
   }
 
-  open(): void {
+  /**
+   * `mode` "fullscreen" : collé à la caméra, masque tout (démarrage, retour après fin de run).
+   * `mode` "panel" : panneau classique posé devant soi, comme l'inventaire (ouverture en jeu).
+   */
+  open(mode: MainMenuMode = "fullscreen"): void {
+    this.mode = mode;
+    const material = this.mesh.material as THREE.MeshBasicMaterial;
+    if (mode === "fullscreen") {
+      this.camera.add(this.group);
+      this.group.scale.setScalar(1);
+      this.group.position.set(0, 0, FULLSCREEN_DEPTH);
+      this.group.rotation.set(0, 0, 0);
+      // Au-dessus du HUD caméscope (renderOrder 997/998, lui aussi collé à la caméra) : sans ça,
+      // "REC"/les jauges continuent de transpercer un menu censé tout masquer. depthTest désactivé
+      // pour la même raison que le HUD et l'overlay VHS (mêmes réglages, mesh très proche de l'œil).
+      this.mesh.renderOrder = 999;
+      material.depthTest = false;
+    } else {
+      this.worldParent.add(this.group);
+      this.group.scale.setScalar(PANEL_SCALE);
+      this.mesh.renderOrder = 10;
+      material.depthTest = true;
+      this.placeInFrontOfHead();
+    }
+    this.quitArmedUntil = 0;
     this.group.visible = true;
     this.invalidate();
   }
 
+  /** Rouvre dans le même mode que la dernière fois (retour depuis Paramètres, par ex.). */
+  reopenSameMode(): void {
+    this.open(this.mode);
+  }
+
   close(): void {
     this.group.visible = false;
+  }
+
+  update(deltaSeconds: number): void {
+    this.time += deltaSeconds;
+    if (this.quitArmedUntil && this.time > this.quitArmedUntil) {
+      this.quitArmedUntil = 0;
+      this.invalidate();
+    }
+  }
+
+  private placeInFrontOfHead(): void {
+    const head = this.camera.position;
+    const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(this.camera.quaternion);
+    forward.y = 0;
+    if (forward.lengthSq() < 1e-6) forward.set(0, 0, -1);
+    forward.normalize();
+    this.group.position.set(head.x + forward.x * PANEL_DISTANCE, head.y - PANEL_DROP, head.z + forward.z * PANEL_DISTANCE);
+    this.group.rotation.set(0, Math.atan2(-forward.x, -forward.z), 0);
   }
 
   onHover(hand: Hand, px: number | null, py: number | null): void {
@@ -91,7 +144,14 @@ export class MainMenu extends UiPanel {
     if (id === "continue") this.actions.continueRun();
     else if (id === "newGame") this.actions.newGame();
     else if (id === "settings") this.actions.openSettings();
-    else if (id === "quit") this.actions.quit();
+    else if (id === "quit") {
+      // Termine la run en cours (score/pseudo, voir endRunScreen) : une confirmation évite un
+      // appui accidentel qui couperait la partie en cours.
+      if (this.quitArmedUntil) {
+        this.quitArmedUntil = 0;
+        this.actions.quit();
+      } else this.quitArmedUntil = this.time + QUIT_CONFIRM_SECONDS;
+    }
     this.invalidate();
     return true;
   }
@@ -104,8 +164,8 @@ export class MainMenu extends UiPanel {
   protected draw(ctx: CanvasRenderingContext2D): void {
     const width = this.canvas.width;
     const height = this.canvas.height;
-    // Fond plein, bord à bord (pas le cadre arrondi avec marge de drawPanelBackground) : ce
-    // panneau doit masquer entièrement la scène derrière, comme l'écran bleu VHS.
+    // Fond plein, bord à bord (pas le cadre arrondi avec marge de drawPanelBackground) : en mode
+    // plein champ, ce panneau doit masquer entièrement la scène derrière, comme l'écran bleu VHS.
     ctx.clearRect(0, 0, width, height);
     ctx.fillStyle = "#0c0a07";
     ctx.fillRect(0, 0, width, height);
@@ -120,6 +180,6 @@ export class MainMenu extends UiPanel {
     drawButton(ctx, BUTTONS.continue, t("menu.continue"), { hovered: hovered.has("continue"), accent: "#9fe39f" });
     drawButton(ctx, BUTTONS.newGame, t("menu.newGame"), { hovered: hovered.has("newGame") });
     drawButton(ctx, BUTTONS.settings, t("menu.settings"), { hovered: hovered.has("settings") });
-    drawButton(ctx, BUTTONS.quit, t("menu.quit"), { hovered: hovered.has("quit"), accent: "#e06a5a" });
+    drawButton(ctx, BUTTONS.quit, this.quitArmedUntil ? t("inv.confirm") : t("menu.quit"), { hovered: hovered.has("quit"), accent: "#e06a5a" });
   }
 }

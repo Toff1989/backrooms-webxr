@@ -58,6 +58,29 @@ installDebugLog();
 const appRoot = document.getElementById("app");
 if (!appRoot) throw new Error("#app introuvable dans index.html");
 const loadingScreen = document.getElementById("loading-screen");
+/**
+ * L'écran de chargement ne disparaît qu'une fois quelques dizaines de frames consécutives
+ * rendues sans à-coup (compilation de shaders, warmup physique/audio encore en cours sinon) —
+ * pas juste dès que le premier rendu a eu lieu, qui révélait un tout début de jeu saccadé.
+ * Filet de sécurité : disparaît quand même après `LOADING_TIMEOUT_SECONDS` si le FPS ne se
+ * stabilise jamais (appareil très faible), pour ne pas coincer le joueur derrière l'écran.
+ */
+const LOADING_STABLE_FRAMES = 30;
+const LOADING_MAX_FRAME_MS = 33;
+const LOADING_TIMEOUT_SECONDS = 8;
+let loadingStableStreak = 0;
+let loadingScreenHidden = false;
+// Horloge réelle (performance.now()), pas le delta simulé/plafonné du jeu (Math.min(..., 0.1)) :
+// sur un appareil vraiment lent, le delta plafonné ferait paraître le filet de sécurité bien
+// plus long qu'annoncé en temps réel — à l'inverse de ce qu'on veut d'un garde-fou.
+const loadingStartedAt = performance.now();
+function updateLoadingScreen(deltaSeconds: number): void {
+  if (loadingScreenHidden) return;
+  loadingStableStreak = deltaSeconds * 1000 <= LOADING_MAX_FRAME_MS ? loadingStableStreak + 1 : 0;
+  if (loadingStableStreak < LOADING_STABLE_FRAMES && performance.now() - loadingStartedAt < LOADING_TIMEOUT_SECONDS * 1000) return;
+  loadingScreenHidden = true;
+  loadingScreen?.classList.add("is-hidden");
+}
 const visualTestParams = new URLSearchParams(window.location.search);
 const visualTest = visualTestParams.get("visualTest");
 const visualTestObject = visualTestParams.get("object");
@@ -245,16 +268,12 @@ const inventoryMenu = new InventoryMenu(
       collectionStore.remove(entry.id);
       grabSystem.takeIntoHand(hand, entry, () => collectionStore.add(entry));
     },
-    stopRec: () => {
-      saveManager.clear();
-      endRunScreen.show(levelManager.depth);
-    },
     openJournal: () => journal.openFloating(),
     openSettings: () => settingsMenu.open(),
     openMainMenu: () => {
       autosave();
       player.paused = true;
-      mainMenu.open();
+      mainMenu.open("panel");
     },
     isDebugEnabled: () => isDebugMenuEnabled(),
     openDebugMenu: () => debugMenu.open(),
@@ -274,7 +293,7 @@ const endRunScreen = new EndRunScreen(
   () => {
     beginNewRun(true, false);
     player.paused = true;
-    mainMenu.open();
+    mainMenu.open("fullscreen");
   },
 );
 
@@ -288,10 +307,11 @@ const settingsMenu = new SettingsMenu(camera, player.body, sfx, {
     return comfortVignette.enabled;
   },
   // Les paramètres sont une sous-page du menu principal (voir settingsMenu.ts) : "retour" y
-  // ramène toujours, qu'on y soit entré depuis lui ou depuis l'inventaire en jeu.
+  // ramène toujours, qu'on y soit entré depuis lui ou depuis l'inventaire en jeu — dans le même
+  // mode plein écran/panneau qu'à l'ouverture (reopenSameMode), pas systématiquement plein champ.
   back: () => {
     player.paused = true;
-    mainMenu.open();
+    mainMenu.reopenSameMode();
   },
 });
 
@@ -337,7 +357,7 @@ const debugMenu = new DebugMenu(camera, player.body, sfx, [
   },
 ]);
 
-const mainMenu = new MainMenu(camera, sfx, {
+const mainMenu = new MainMenu(camera, player.body, sfx, {
   continueRun: () => {
     mainMenu.close();
     player.paused = false;
@@ -351,10 +371,12 @@ const mainMenu = new MainMenu(camera, sfx, {
     mainMenu.close();
     settingsMenu.open();
   },
+  // Ex-STOP REC de l'inventaire : termine la run en cours (score/pseudo). Pas de fermeture
+  // d'onglet/navigateur possible depuis le script d'une page web — "Quitter" quitte la partie.
   quit: () => {
-    const session = renderer.xr.getSession();
-    if (session) void session.end();
-    window.close();
+    mainMenu.close();
+    saveManager.clear();
+    endRunScreen.show(levelManager.depth);
   },
 });
 installAccountPanel(loreJournal);
@@ -706,7 +728,7 @@ function resumeFromSave(save: SaveData): void {
 // de choisir (voir mainMenu.ts). "Continuer" ne fait alors que dépiler le menu : le monde voulu
 // est déjà prêt derrière, qu'il s'agisse d'une run neuve ou d'une reprise.
 player.paused = true;
-mainMenu.open();
+mainMenu.open("fullscreen");
 void saveManager.load().then((save) => {
   if (save) resumeFromSave(save);
   else beginNewRun(false, false);
@@ -885,6 +907,7 @@ renderer.setAnimationLoop((timestamp) => {
   inventoryMenu.update(deltaSeconds, hands, (hand) => pointer.frame(hand).target === inventoryMenu);
   endRunScreen.update(hands);
   settingsMenu.update(deltaSeconds);
+  mainMenu.update(deltaSeconds);
   debugMenu.update(deltaSeconds);
   autosaveTimer -= deltaSeconds;
   if (autosaveTimer <= 0) {
@@ -988,7 +1011,7 @@ renderer.setAnimationLoop((timestamp) => {
   perfStats.begin("rendu");
   perfStats.beginGpu();
   renderer.render(scene, camera);
-  loadingScreen?.classList.add("is-hidden");
+  updateLoadingScreen(deltaSeconds);
   perfStats.endGpu();
   perfStats.end("rendu");
   perfStats.endFrame(deltaSeconds);
