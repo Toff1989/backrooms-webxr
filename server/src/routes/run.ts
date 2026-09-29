@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { FastifyInstance } from "fastify";
 import { createRun, endRun as endRunRow, findRun, getLeaderboard, latestCheckpointTime, recordLevel } from "../db.js";
-import { authenticate } from "../players.js";
+import { authenticate, setPseudo } from "../players.js";
 import { signRunToken, verifyRunToken } from "../token.js";
 import { sanitizePseudo } from "../wordFilter.js";
 import { computeMinPlausibleMillis } from "../validation.js";
@@ -62,7 +62,16 @@ export function registerRunRoutes(app: FastifyInstance): void {
     const run = findRun(runId);
     if (!run || run.status !== "active") return reply.code(404).send({ error: "run introuvable ou déjà close" });
 
-    const cleanPseudo = sanitizePseudo(pseudo);
+    // Le pseudo se choisit une fois (première fin de run/victoire) puis se reprend pour toutes
+    // les suivantes — modifiable ensuite dans les paramètres (/player/pseudo), pas à chaque run.
+    const player = authenticate(request);
+    let cleanPseudo: string;
+    if (player?.pseudo) {
+      cleanPseudo = player.pseudo;
+    } else {
+      cleanPseudo = sanitizePseudo(pseudo);
+      if (player) setPseudo(player.id, cleanPseudo);
+    }
     endRunRow(runId, cleanPseudo);
 
     return { pseudo: cleanPseudo, depth: run.depth, leaderboard: getLeaderboard(LEADERBOARD_SIZE) };

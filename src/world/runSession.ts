@@ -32,9 +32,3 @@ export function reportLevel(session: RunSessionInfo, depth: number): void {
 export async function endRun(session: RunSessionInfo, pseudo: string): Promise<{ leaderboard: LeaderboardEntry[] }> {
   return apiCall("POST", "/run/end", { runId: session.runId, token: session.token, pseudo });
 }
-
-/** Bande perdue lue pendant la run : enregistrée côté serveur. Renvoie le nombre de bandes connues. */
-export async function unlockLore(session: RunSessionInfo, fragment: number): Promise<number> {
-  const result = await apiCall<{ loreCount: number }>("POST", "/lore/unlock", { runId: session.runId, token: session.token, fragment });
-  return result.loreCount;
-}

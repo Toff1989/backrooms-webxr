@@ -15,6 +15,8 @@ export interface Identity {
 export interface PlayerProfile {
   playerId: string;
   recoveryCode: string;
+  /** Choisi une fois à la première fin de run/victoire (voir endRunScreen.ts), modifiable ensuite dans les paramètres. */
+  pseudo: string | null;
   loreCount: number;
   bestRuns: Array<{ pseudo: string; depth: number; endedAt: number }>;
 }
@@ -113,6 +115,33 @@ export async function fetchProfile(): Promise<PlayerProfile | null> {
       await adopt(null);
       if (await ensureIdentity()) return apiCall<PlayerProfile>("GET", "/player/me").catch(() => null);
     }
+    return null;
+  }
+}
+
+/** Choisit/change le pseudo persistant (paramètres, ou première fin de run — voir endRunScreen.ts). */
+export async function setPseudo(pseudo: string): Promise<string | null> {
+  if (!(await ensureIdentity())) return null;
+  try {
+    const result = await apiCall<{ pseudo: string }>("POST", "/player/pseudo", { pseudo });
+    return result.pseudo;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Progression des archives (voir loreJournal.ts) : uniformisée avec la sauvegarde (locale
+ * d'abord, synchronisée par identité — voir saveManager.ts) — plus besoin d'une run active pour
+ * compter, juste le nombre d'archives connues localement, best-effort. Renvoie le nombre côté
+ * serveur (le plus avancé des deux), ou null hors ligne.
+ */
+export async function syncLoreCount(count: number): Promise<number | null> {
+  if (!(await ensureIdentity())) return null;
+  try {
+    const result = await apiCall<{ loreCount: number }>("POST", "/lore/sync", { count });
+    return result.loreCount;
+  } catch {
     return null;
   }
 }

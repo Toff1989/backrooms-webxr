@@ -295,6 +295,7 @@ const endRunScreen = new EndRunScreen(
     player.paused = true;
     mainMenu.open("fullscreen");
   },
+  () => loreJournal.serverProfile?.pseudo ?? null,
 );
 
 const journal = new Journal(camera, player.body, loreJournal, sfx);
@@ -306,6 +307,7 @@ const settingsMenu = new SettingsMenu(camera, player.body, sfx, {
     setVignette(!comfortVignette.enabled);
     return comfortVignette.enabled;
   },
+  currentPseudo: () => loreJournal.serverProfile?.pseudo ?? null,
   // Les paramètres sont une sous-page du menu principal (voir settingsMenu.ts) : "retour" y
   // ramène toujours, qu'on y soit entré depuis lui ou depuis l'inventaire en jeu — dans le même
   // mode plein écran/panneau qu'à l'ouverture (reopenSameMode), pas systématiquement plein champ.
@@ -395,10 +397,12 @@ function readLorePage(page: LorePageData, hand: Hand): void {
   const { fragment } = page;
   page.onRead();
   levelManager.pinLorePage(fragment);
-  if (!loreJournal.read(fragment, currentSession)) return;
+  if (!loreJournal.read(fragment)) return;
   hud.showNotice(t("lore.new", { n: fragment + 1 }));
   hand.pulse(0.5, 120);
   log("lore", { action: "read", fragment, format: loreFormat(fragment), depth: levelManager.depth });
+  // Condition de victoire : toutes les archives réunies.
+  if (loreJournal.nextFragment === null) triggerGameOver("victory");
 }
 
 grabSystem = new GrabSystem(physics, grabbables, hands, sfx, {
@@ -625,7 +629,7 @@ function closeAllMenus(): void {
   if (mainMenu.visible) mainMenu.close();
 }
 
-function triggerGameOver(reason: "health" | "caught"): void {
+function triggerGameOver(reason: "health" | "caught" | "victory"): void {
   if (gameOver) return;
   gameOver = true;
   player.paused = true;
@@ -634,7 +638,7 @@ function triggerGameOver(reason: "health" | "caught"): void {
   cadreur.reset(levelManager.depth);
   saveManager.clear();
   endRunScreen.showGameOver(levelManager.depth, reason);
-  log("run", { action: "game-over", reason, depth: levelManager.depth });
+  log("run", { action: reason === "victory" ? "victory" : "game-over", reason, depth: levelManager.depth });
 }
 
 /**

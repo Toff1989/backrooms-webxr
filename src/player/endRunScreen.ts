@@ -14,7 +14,7 @@ const LEADERBOARD_ROWS = 7;
 
 type Phase = "review" | "submitting" | "result" | "error";
 type ButtonId = "adjective" | "noun" | "submit" | "restart" | "mainMenu";
-export type GameOverReason = "health" | "caught";
+export type GameOverReason = "health" | "caught" | "victory";
 
 const BUTTONS: Record<ButtonId, Rect> = {
   adjective: { x: 60, y: 330, w: 420, h: 70 },
@@ -42,6 +42,9 @@ export class EndRunScreen extends UiPanel {
   private suffix = 0;
   private leaderboard: LeaderboardEntry[] = [];
   private errorMessage = "";
+  /** Pseudo réellement envoyé (repère fixe déjà connu, ou choisi cette fois) — affiché après
+   * envoi ; distinct de `currentPseudo()` qui n'a de sens que pendant la phase "review". */
+  private submittedPseudo = "";
   /** Non-null quand cet écran a été ouvert par un game over (affiche la raison au-dessus du reste). */
   private gameOverReason: GameOverReason | null = null;
   private readonly hovered = new Map<Hand, ButtonId | null>();
@@ -53,6 +56,9 @@ export class EndRunScreen extends UiPanel {
     private readonly onConfirmPseudo: (pseudo: string) => Promise<{ leaderboard: LeaderboardEntry[] }>,
     private readonly onStartNewRun: () => void,
     private readonly onGoToMainMenu: () => void,
+    /** Pseudo déjà choisi lors d'une fin de run précédente (ou null la première fois) : on
+     * saute alors directement à l'envoi, sans repasser par le choix d'adjectif/nom. */
+    private readonly getKnownPseudo: () => string | null,
   ) {
     super(WIDTH, HEIGHT, PX_PER_M);
     this.group.name = "end-run-screen";
@@ -74,10 +80,6 @@ export class EndRunScreen extends UiPanel {
 
   private open(depthReached: number): void {
     this.depthReached = depthReached;
-    this.adjectiveIndex = Math.floor(Math.random() * PSEUDO_ADJECTIVE_COUNT);
-    this.nounIndex = Math.floor(Math.random() * PSEUDO_NOUN_COUNT);
-    this.suffix = Math.floor(Math.random() * 10000);
-    this.phase = "review";
     this.errorMessage = "";
     // Toujours repositionné devant la tête au moment de l'appel (pas une seule fois pour toute
     // la session) : sans ça, le panneau reste où il a été placé la première fois — potentiellement
@@ -85,7 +87,16 @@ export class EndRunScreen extends UiPanel {
     // qu'il suffit de se retourner pour le voir.
     this.place();
     this.group.visible = true;
-    this.invalidate();
+    const known = this.getKnownPseudo();
+    if (known) {
+      this.confirmPseudo(known);
+    } else {
+      this.adjectiveIndex = Math.floor(Math.random() * PSEUDO_ADJECTIVE_COUNT);
+      this.nounIndex = Math.floor(Math.random() * PSEUDO_NOUN_COUNT);
+      this.suffix = Math.floor(Math.random() * 10000);
+      this.phase = "review";
+      this.invalidate();
+    }
   }
 
   private place(): void {
@@ -141,9 +152,14 @@ export class EndRunScreen extends UiPanel {
 
   private submit(): void {
     if (this.phase !== "review") return;
+    this.confirmPseudo(this.currentPseudo());
+  }
+
+  private confirmPseudo(pseudo: string): void {
+    this.submittedPseudo = pseudo;
     this.phase = "submitting";
     this.invalidate();
-    this.onConfirmPseudo(this.currentPseudo())
+    this.onConfirmPseudo(pseudo)
       .then(({ leaderboard }) => {
         this.leaderboard = leaderboard;
         this.phase = "result";
@@ -180,9 +196,10 @@ export class EndRunScreen extends UiPanel {
     ctx.font = "30px monospace";
     ctx.fillText(t("end.depth", { depth: this.depthReached }), width / 2, 116);
     if (this.gameOverReason) {
+      const reasonKey = this.gameOverReason === "caught" ? "end.caught" : this.gameOverReason === "victory" ? "end.victory" : "end.healthEmpty";
       ctx.font = "24px monospace";
-      ctx.fillStyle = "#e06a5a";
-      ctx.fillText(t(this.gameOverReason === "caught" ? "end.caught" : "end.healthEmpty"), width / 2, 150);
+      ctx.fillStyle = this.gameOverReason === "victory" ? "#9fe39f" : "#e06a5a";
+      ctx.fillText(t(reasonKey), width / 2, 150);
     }
 
     if (this.phase === "review") {
@@ -210,7 +227,7 @@ export class EndRunScreen extends UiPanel {
     } else {
       ctx.font = "bold 26px monospace";
       ctx.fillStyle = "#9fe39f";
-      ctx.fillText(t("end.sent", { pseudo: this.currentPseudo() }), width / 2, 170);
+      ctx.fillText(t("end.sent", { pseudo: this.submittedPseudo }), width / 2, 170);
       ctx.textAlign = "left";
       ctx.font = "24px monospace";
       this.leaderboard.slice(0, LEADERBOARD_ROWS).forEach((entry, index) => {

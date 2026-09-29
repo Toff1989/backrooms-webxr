@@ -37,10 +37,19 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_runs_player ON runs (player_id, status, depth DESC);
   CREATE INDEX IF NOT EXISTS idx_lore_run ON lore_unlocks (run_id);
 `);
+// Pseudo persistant du joueur (choisi une fois à sa première fin de run/victoire, modifiable
+// ensuite dans les paramètres) : pas de système de migration formel dans ce projet, donc un
+// ALTER TABLE au démarrage pour les bases déjà créées avant l'ajout de cette colonne.
+try {
+  db.exec(`ALTER TABLE players ADD COLUMN pseudo TEXT`);
+} catch {
+  // Colonne déjà présente.
+}
 
 export interface Player {
   id: string;
   recoveryCode: string;
+  pseudo: string | null;
 }
 
 export interface Credentials {
@@ -73,19 +82,21 @@ export function normalizeRecoveryCode(input: unknown): string | null {
 const insertPlayer = db.prepare<{ id: string; code: string; createdAt: number }>(
   `INSERT INTO players (id, recovery_code, created_at) VALUES (@id, @code, @createdAt)`,
 );
-const playerById = db.prepare<{ id: string }, { id: string; recovery_code: string }>(`SELECT id, recovery_code FROM players WHERE id = @id`);
-const playerByCode = db.prepare<{ code: string }, { id: string; recovery_code: string }>(`SELECT id, recovery_code FROM players WHERE recovery_code = @code`);
+const playerById = db.prepare<{ id: string }, { id: string; recovery_code: string; pseudo: string | null }>(
+  `SELECT id, recovery_code, pseudo FROM players WHERE id = @id`,
+);
+const playerByCode = db.prepare<{ code: string }, { id: string; recovery_code: string; pseudo: string | null }>(
+  `SELECT id, recovery_code, pseudo FROM players WHERE recovery_code = @code`,
+);
 const codeTaken = db.prepare<{ code: string }, { n: number }>(`SELECT COUNT(*) AS n FROM players WHERE recovery_code = @code`);
 const insertDevice = db.prepare<{ hash: string; playerId: string; createdAt: number }>(
   `INSERT INTO player_devices (secret_hash, player_id, created_at) VALUES (@hash, @playerId, @createdAt)`,
 );
-const playerByDevice = db.prepare<{ hash: string }, { id: string; recovery_code: string }>(
-  `SELECT p.id, p.recovery_code FROM player_devices d JOIN players p ON p.id = d.player_id WHERE d.secret_hash = @hash`,
+const playerByDevice = db.prepare<{ hash: string }, { id: string; recovery_code: string; pseudo: string | null }>(
+  `SELECT p.id, p.recovery_code, p.pseudo FROM player_devices d JOIN players p ON p.id = d.player_id WHERE d.secret_hash = @hash`,
 );
+const updatePseudoStmt = db.prepare<{ id: string; pseudo: string }>(`UPDATE players SET pseudo = @pseudo WHERE id = @id`);
 const loreCountStmt = db.prepare<{ playerId: string }, { n: number }>(`SELECT COUNT(*) AS n FROM lore_unlocks WHERE player_id = @playerId`);
-const loreAtLevelStmt = db.prepare<{ runId: string; depth: number }, { n: number }>(
-  `SELECT COUNT(*) AS n FROM lore_unlocks WHERE run_id = @runId AND depth = @depth`,
-);
 const insertUnlock = db.prepare<{ playerId: string; fragment: number; runId: string | null; depth: number | null; at: number }>(
   `INSERT OR IGNORE INTO lore_unlocks (player_id, fragment, run_id, depth, unlocked_at) VALUES (@playerId, @fragment, @runId, @depth, @at)`,
 );
@@ -93,7 +104,7 @@ const bestRunsStmt = db.prepare<{ playerId: string; limit: number }, { pseudo: s
   `SELECT pseudo, depth, ended_at FROM runs WHERE player_id = @playerId AND status = 'ended' AND pseudo IS NOT NULL ORDER BY depth DESC, ended_at ASC LIMIT @limit`,
 );
 
-const toPlayer = (row: { id: string; recovery_code: string }): Player => ({ id: row.id, recoveryCode: row.recovery_code });
+const toPlayer = (row: { id: string; recovery_code: string; pseudo: string | null }): Player => ({ id: row.id, recoveryCode: row.recovery_code, pseudo: row.pseudo });
 
 /** Nouvel appareil pour ce joueur : renvoie le secret (le seul moment où il existe en clair). */
 export function issueDevice(player: Player): Credentials {
@@ -115,7 +126,7 @@ export const registerPlayer = db.transaction((legacyId: unknown, legacyLoreCount
   insertPlayer.run({ id, code, createdAt: now });
   const imported = typeof legacyLoreCount === "number" && Number.isInteger(legacyLoreCount) ? Math.max(0, Math.min(LORE_FRAGMENT_COUNT, legacyLoreCount)) : 0;
   for (let fragment = 0; fragment < imported; fragment++) insertUnlock.run({ playerId: id, fragment, runId: null, depth: null, at: now });
-  return issueDevice({ id, recoveryCode: code });
+  return issueDevice({ id, recoveryCode: code, pseudo: null });
 });
 
 /** Joueur authentifié par l'en-tête `Authorization: Bearer <secret de l'appareil>`, ou null. */
@@ -137,20 +148,25 @@ export function loreCount(playerId: string): number {
   return loreCountStmt.get({ playerId })!.n;
 }
 
-/** Une bande a-t-elle déjà été débloquée à ce level de cette run ? (une seule page par level) */
-export function loreUnlockedAtLevel(runId: string, depth: number): boolean {
-  return loreAtLevelStmt.get({ runId, depth })!.n > 0;
-}
-
-/** Enregistre les bandes jusqu'à `fragment` inclus (comble l'écart des bandes lues hors ligne). */
-export const unlockLoreUpTo = db.transaction((playerId: string, fragment: number, runId: string, depth: number): number => {
+/**
+ * Uniformisé avec la sauvegarde (local d'abord, synchro par identité — voir saveManager.ts côté
+ * client) : plus de validation liée à une run active, juste "le plus avancé des deux fait foi",
+ * comme pour l'inventaire/la seed via /save. `count` : nombre de bandes connues localement.
+ */
+export const raiseLoreCount = db.transaction((playerId: string, count: number): number => {
   const now = Date.now();
-  for (let index = loreCount(playerId); index <= fragment; index++) insertUnlock.run({ playerId, fragment: index, runId, depth, at: now });
+  const target = Math.max(0, Math.min(LORE_FRAGMENT_COUNT, count));
+  for (let index = loreCount(playerId); index < target; index++) insertUnlock.run({ playerId, fragment: index, runId: null, depth: null, at: now });
   return loreCount(playerId);
 });
 
 export function bestRuns(playerId: string, limit = 5): Array<{ pseudo: string; depth: number; endedAt: number }> {
   return bestRunsStmt.all({ playerId, limit }).map((row) => ({ pseudo: row.pseudo, depth: row.depth, endedAt: row.ended_at }));
+}
+
+/** Choisi une fois (première fin de run/victoire), modifiable ensuite dans les paramètres. */
+export function setPseudo(playerId: string, pseudo: string): void {
+  updatePseudoStmt.run({ id: playerId, pseudo });
 }
 
 /**
@@ -160,6 +176,11 @@ export function bestRuns(playerId: string, limit = 5): Array<{ pseudo: string; d
  */
 export const mergePlayers = db.transaction((fromId: string, intoId: string): void => {
   if (fromId === intoId) return;
+  // Le pseudo cible garde la priorité (déjà utilisé sur ses runs) ; sinon reprend celui de la
+  // source, s'il en avait un.
+  const into = playerById.get({ id: intoId });
+  const from = playerById.get({ id: fromId });
+  if (into && !into.pseudo && from?.pseudo) updatePseudoStmt.run({ id: intoId, pseudo: from.pseudo });
   db.prepare(`UPDATE runs SET player_id = ? WHERE player_id = ?`).run(intoId, fromId);
   db.prepare(
     `INSERT OR IGNORE INTO lore_unlocks (player_id, fragment, run_id, depth, unlocked_at)

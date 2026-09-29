@@ -1,13 +1,13 @@
 import { get, set } from "idb-keyval";
 import { LORE_FRAGMENT_COUNT } from "../shared/lore";
-import { fetchProfile, LORE_PROGRESS_KEY, type PlayerProfile } from "./playerIdentity";
-import { unlockLore, type RunSessionInfo } from "./runSession";
+import { fetchProfile, LORE_PROGRESS_KEY, syncLoreCount, type PlayerProfile } from "./playerIdentity";
 
 /**
- * Journal des bandes perdues : combien de fragments du récit le joueur a lus (toujours les
- * premiers, dans l'ordre). Indépendant de l'inventaire (vidé à chaque run) : gardé sur
- * l'appareil (IndexedDB) et côté serveur, rattaché à l'identité du joueur — on le retrouve sur
- * un autre appareil jumelé. Le plus avancé des deux fait foi.
+ * Journal des archives perdues : combien de fragments du récit le joueur a lus (toujours les
+ * premiers, dans l'ordre). Permanent, contrairement à l'inventaire/la sauvegarde de run (voir
+ * saveManager.ts) qui eux repartent de zéro à chaque nouvelle partie — mais uniformisé avec le
+ * même principe local d'abord (IndexedDB), synchronisé par identité en arrière-plan, sans
+ * dépendre d'une run active. Le plus avancé des deux (local/serveur) fait foi.
  */
 export class LoreJournal {
   private unlocked = 0;
@@ -40,17 +40,18 @@ export class LoreJournal {
   }
 
   /**
-   * Page ramassée : si c'est la bande attendue, elle entre au journal (et part au serveur si la
-   * run y est enregistrée). Renvoie vrai pour une nouvelle bande, faux si elle était déjà lue.
+   * Page ramassée : si c'est l'archive attendue, elle entre au journal et part au serveur en
+   * arrière-plan (best effort, indépendant de toute run active). Renvoie vrai pour une nouvelle
+   * archive, faux si elle était déjà lue.
    */
-  read(fragment: number, session: RunSessionInfo | null): boolean {
+  read(fragment: number): boolean {
     if (fragment !== this.unlocked || fragment >= LORE_FRAGMENT_COUNT) return false;
     this.raiseTo(fragment + 1);
-    if (session) {
-      unlockLore(session, fragment)
-        .then((serverCount) => this.raiseTo(serverCount))
-        .catch(() => {});
-    }
+    syncLoreCount(this.unlocked)
+      .then((serverCount) => {
+        if (serverCount !== null) this.raiseTo(serverCount);
+      })
+      .catch(() => {});
     return true;
   }
 
