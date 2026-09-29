@@ -330,7 +330,7 @@ const debugMenu = new DebugMenu(camera, player.body, sfx, [
   },
 ]);
 
-const mainMenu = new MainMenu(camera, player.body, sfx, {
+const mainMenu = new MainMenu(camera, sfx, {
   continueRun: () => {
     mainMenu.close();
     player.paused = false;
