@@ -160,6 +160,18 @@ export const raiseLoreCount = db.transaction((playerId: string, count: number): 
   return loreCount(playerId);
 });
 
+const deleteLoreStmt = db.prepare<{ playerId: string }>(`DELETE FROM lore_unlocks WHERE player_id = @playerId`);
+
+/**
+ * Réinitialisation depuis les paramètres ("recommencer à zéro") : uniquement les archives —
+ * pas l'identité/le pseudo/le code de cassette (compte, pas progression), pas l'historique du
+ * classement (`runs`, un tableau des scores plutôt qu'une progression à effacer). La sauvegarde
+ * en cours et les succès (une fois ajoutés) sont remis à zéro par leurs modules respectifs.
+ */
+export function resetLore(playerId: string): void {
+  deleteLoreStmt.run({ playerId });
+}
+
 export function bestRuns(playerId: string, limit = 5): Array<{ pseudo: string; depth: number; endedAt: number }> {
   return bestRunsStmt.all({ playerId, limit }).map((row) => ({ pseudo: row.pseudo, depth: row.depth, endedAt: row.ended_at }));
 }

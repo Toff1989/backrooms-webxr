@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import { log } from "../debug/debugLog";
 import { loreFragment } from "../i18n";
-import type { CamcorderHud } from "./camcorderHud";
+import type { TapeSignalModal } from "./tapeSignalModal";
 
 /** Volume du souffle de bande (relatif au volume général du jeu). */
 const HISS_VOLUME = 0.09;
@@ -18,8 +18,9 @@ interface Subtitle {
 
 /**
  * Lecteur des cassettes audio des archives perdues. Pas de voix enregistrée : le souffle d'une
- * vieille bande magnétique (bruit filtré, pleurage lent) pendant que la transcription défile en
- * sous-titres dans le viseur du caméscope — le locuteur d'abord, puis chaque réplique.
+ * vieille bande magnétique (bruit filtré, pleurage lent) pendant que la transcription défile
+ * dans un modal dédié (voir tapeSignalModal.ts, avec son animation de signal capté) — le
+ * locuteur d'abord, puis chaque réplique.
  */
 export class TapePlayer {
   private readonly context: AudioContext;
@@ -33,7 +34,7 @@ export class TapePlayer {
 
   constructor(
     private readonly listener: THREE.AudioListener,
-    private readonly hud: CamcorderHud,
+    private readonly signalModal: TapeSignalModal,
   ) {
     this.context = listener.context;
   }
@@ -55,10 +56,12 @@ export class TapePlayer {
     this.fragment = fragment;
     this.timer = 2;
     log("lore", { action: "tape", fragment });
+    this.signalModal.show();
     this.startHiss();
   }
 
   update(deltaSeconds: number): void {
+    this.signalModal.update(deltaSeconds);
     if (this.fragment === null) return;
     this.timer -= deltaSeconds;
     if (this.timer > 0) return;
@@ -67,7 +70,7 @@ export class TapePlayer {
       this.stop();
       return;
     }
-    this.hud.showNotice(next.text, next.seconds + 0.2, next.color);
+    this.signalModal.setLine(next.text, next.color);
     this.timer = next.seconds;
   }
 
@@ -75,6 +78,7 @@ export class TapePlayer {
     if (this.fragment === null) return;
     this.fragment = null;
     this.queue = [];
+    this.signalModal.hide();
     const now = this.context.currentTime;
     const { source, wow, gain } = this;
     if (gain && source && wow) {

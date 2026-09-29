@@ -103,6 +103,10 @@ export function createMeshCanvas(mesh: THREE.Mesh, width: number, height: number
   const material = options.unlit ? new THREE.MeshBasicMaterial({ toneMapped: false }) : base ? base.clone() : new THREE.MeshBasicMaterial({ toneMapped: false });
   material.map = texture;
   material.color.set(0xffffff);
+  // Une surface peinte (écran de télé, artwork du cadre photo...) n'a de sens que de face : le
+  // matériau d'origine (souvent recto-verso, cadre photo compris) laissait voir l'image "à
+  // l'envers" en regardant par l'arrière de l'objet, à travers un dos pourtant opaque.
+  material.side = THREE.FrontSide;
   if (options.transparent !== undefined) {
     material.transparent = options.transparent;
     if (!options.transparent) {

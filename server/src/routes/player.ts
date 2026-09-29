@@ -1,8 +1,9 @@
 import type { FastifyInstance } from "fastify";
 import { LORE_FRAGMENT_COUNT } from "../../../src/shared/lore.js";
+import { mergeAchievements, resetAchievements, syncAchievements } from "../achievements.js";
 import { completePairing, pendingPairing, pollPairing, startPairing } from "../pairing.js";
-import { mergeSaves } from "../saves.js";
-import { authenticate, bestRuns, findPlayerByRecoveryCode, issueDevice, loreCount, mergePlayers, normalizeRecoveryCode, raiseLoreCount, registerPlayer, setPseudo } from "../players.js";
+import { deleteSave, mergeSaves } from "../saves.js";
+import { authenticate, bestRuns, findPlayerByRecoveryCode, issueDevice, loreCount, mergePlayers, normalizeRecoveryCode, raiseLoreCount, registerPlayer, resetLore, setPseudo } from "../players.js";
 import { sanitizePseudo } from "../wordFilter.js";
 
 const PAIR_CODE_PATTERN = /^\d{6}$/;
@@ -29,6 +30,30 @@ interface LoreSyncBody {
 }
 interface PseudoBody {
   pseudo?: unknown;
+}
+interface AchievementsSyncBody {
+  stats?: unknown;
+  unlockedIds?: unknown;
+}
+
+const MAX_STAT_KEYS = 64;
+const MAX_UNLOCKED_IDS = 128;
+const MAX_STAT_VALUE = 10_000_000;
+/** Identifiants de succès/statistiques : définis côté client (voir achievementDefs.ts), jamais
+ * interprétés ici — juste bornés en forme pour écarter un corps de requête absurde. */
+const STAT_KEY_PATTERN = /^[a-z0-9_-]{1,64}$/i;
+
+function isPlausibleStats(data: unknown): data is Record<string, number> {
+  if (!data || typeof data !== "object" || Array.isArray(data)) return false;
+  const entries = Object.entries(data as Record<string, unknown>);
+  if (entries.length > MAX_STAT_KEYS) return false;
+  return entries.every(
+    ([key, value]) => STAT_KEY_PATTERN.test(key) && typeof value === "number" && Number.isInteger(value) && value >= 0 && value <= MAX_STAT_VALUE,
+  );
+}
+
+function isPlausibleIds(data: unknown): data is string[] {
+  return Array.isArray(data) && data.length <= MAX_UNLOCKED_IDS && data.every((id) => typeof id === "string" && STAT_KEY_PATTERN.test(id));
 }
 
 /**
@@ -74,6 +99,7 @@ export function registerPlayerRoutes(app: FastifyInstance): void {
     if (current) {
       mergePlayers(current.id, target.id);
       mergeSaves(current.id, target.id);
+      mergeAchievements(current.id, target.id);
     }
     return issueDevice(target);
   });
@@ -102,6 +128,7 @@ export function registerPlayerRoutes(app: FastifyInstance): void {
     if (pending.fromPlayerId) {
       mergePlayers(pending.fromPlayerId, player.id);
       mergeSaves(pending.fromPlayerId, player.id);
+      mergeAchievements(pending.fromPlayerId, player.id);
     }
     completePairing(code, issueDevice(player));
     return { ok: true };
@@ -119,5 +146,35 @@ export function registerPlayerRoutes(app: FastifyInstance): void {
       return reply.code(400).send({ error: "requête invalide" });
     }
     return { loreCount: raiseLoreCount(player.id, count) };
+  });
+
+  /**
+   * Réinitialisation complète de la progression (paramètres, "recommencer à zéro") : efface les
+   * archives lues, la sauvegarde en cours et les succès/statistiques côté serveur — pas
+   * l'identité/le pseudo/le code de cassette (compte, pas progression), pas l'historique du
+   * classement (`runs`). Le client efface en plus son état local (voir `resetProgress` côté client).
+   */
+  app.post("/player/reset-progress", strict(5), async (request, reply) => {
+    const player = authenticate(request);
+    if (!player) return reply.code(401).send({ error: "appareil inconnu" });
+    resetLore(player.id);
+    deleteSave(player.id);
+    resetAchievements(player.id);
+    return { ok: true };
+  });
+
+  /**
+   * Synchronisation des succès (voir `achievements.ts`) : aucune logique de condition ici, le
+   * client évalue ses succès localement à partir de statistiques cumulées et pousse le résultat
+   * — "le plus avancé des deux fait foi" par statistique (comme /lore/sync), succès jamais
+   * reverrouillé. Un appel avec des objets vides sert juste à relire l'état canonique (utile
+   * après un jumelage, si un autre appareil a progressé plus loin).
+   */
+  app.post<{ Body: AchievementsSyncBody }>("/achievements/sync", async (request, reply) => {
+    const player = authenticate(request);
+    if (!player) return reply.code(401).send({ error: "appareil inconnu" });
+    const { stats, unlockedIds } = request.body ?? {};
+    if (!isPlausibleStats(stats) || !isPlausibleIds(unlockedIds)) return reply.code(400).send({ error: "requête invalide" });
+    return syncAchievements(player.id, stats, unlockedIds);
   });
 }

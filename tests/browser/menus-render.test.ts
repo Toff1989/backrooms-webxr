@@ -173,7 +173,7 @@ interface Group {
 }
 
 function mainMenuGroup(): Group {
-  const menu = () => new MainMenu(camera, parent, sfx, { continueRun() {}, newGame() {}, openGuide() {}, openDevices() {}, openScores() {}, openSettings() {}, quit() {} }) as AnyPanel;
+  const menu = () => new MainMenu(camera, parent, sfx, { continueRun() {}, newGame() {}, openGuide() {}, openDevices() {}, openScores() {}, openSettings() {}, openAchievements() {}, quit() {} }) as AnyPanel;
   let panel: AnyPanel;
   return {
     panel: "mainMenu",
@@ -297,6 +297,7 @@ function settingsGroup(): Group {
       { name: "statut-pseudo-enregistre", setup: status("settings.pseudoSet", { pseudo: MAX_PSEUDO }) },
       { name: "statut-pseudo-echec", setup: status("settings.pseudoFailed") },
       { name: "choix-pseudo", setup: pseudoMode(0, 0, 42) },
+      { name: "confirmer-reinitialisation", setup: () => ((panel["mode"] = "resetConfirm"), (panel["statusUntil"] = 0)) },
       { name: "survol-pseudo", setup: list(() => panel["hovered"].set(fakeHand, "pseudo")) },
     ],
     sweeps: [{ name: "choix-pseudo-toutes-combinaisons", variants: pseudoVariants }],

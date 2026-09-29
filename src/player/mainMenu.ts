@@ -5,12 +5,12 @@ import type { Hand } from "./hand";
 import type { Sfx } from "./sfx";
 
 const WIDTH = 0.6;
-const HEIGHT = 0.66;
+const HEIGHT = 0.74;
 const PX_PER_M = 1500;
 const DISTANCE = 0.75;
 const QUIT_CONFIRM_SECONDS = 3;
 
-type ButtonId = "continue" | "newGame" | "guide" | "devices" | "scores" | "settings" | "quit";
+type ButtonId = "continue" | "newGame" | "guide" | "devices" | "scores" | "settings" | "achievements" | "quit";
 
 const CANVAS_W = WIDTH * PX_PER_M;
 const BUTTON_W = 700;
@@ -23,7 +23,8 @@ const BUTTONS: Record<ButtonId, Rect> = {
   devices: { x: BUTTON_X, y: 500, w: BUTTON_W, h: BUTTON_H },
   scores: { x: BUTTON_X, y: 600, w: BUTTON_W, h: BUTTON_H },
   settings: { x: BUTTON_X, y: 700, w: BUTTON_W, h: BUTTON_H },
-  quit: { x: BUTTON_X, y: 800, w: BUTTON_W, h: BUTTON_H },
+  achievements: { x: BUTTON_X, y: 800, w: BUTTON_W, h: BUTTON_H },
+  quit: { x: BUTTON_X, y: 900, w: BUTTON_W, h: BUTTON_H },
 };
 
 export interface MainMenuActions {
@@ -33,6 +34,7 @@ export interface MainMenuActions {
   openDevices(): void;
   openScores(): void;
   openSettings(): void;
+  openAchievements(): void;
   /** "Quitter" : termine la run en cours (ex-STOP REC de l'inventaire), si une run est en pause. */
   quit(): void;
 }
@@ -107,6 +109,7 @@ export class MainMenu extends UiPanel {
     else if (id === "devices") this.actions.openDevices();
     else if (id === "scores") this.actions.openScores();
     else if (id === "settings") this.actions.openSettings();
+    else if (id === "achievements") this.actions.openAchievements();
     else if (id === "quit") {
       // Termine la run en cours (score/pseudo, voir endRunScreen) : une confirmation évite un
       // appui accidentel qui couperait la partie en cours.
@@ -141,6 +144,7 @@ export class MainMenu extends UiPanel {
     drawButton(ctx, BUTTONS.devices, t("menu.devices"), { hovered: hovered.has("devices"), accent: "#e8c34a" });
     drawButton(ctx, BUTTONS.scores, t("menu.scores"), { hovered: hovered.has("scores"), accent: "#9fe39f" });
     drawButton(ctx, BUTTONS.settings, t("menu.settings"), { hovered: hovered.has("settings") });
+    drawButton(ctx, BUTTONS.achievements, t("menu.achievements"), { hovered: hovered.has("achievements") });
     drawButton(ctx, BUTTONS.quit, this.quitArmedUntil ? t("inv.confirm") : t("menu.quit"), { hovered: hovered.has("quit"), accent: "#e06a5a" });
   }
 }
