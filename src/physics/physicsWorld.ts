@@ -37,6 +37,8 @@ export const CollisionGroups = {
   querySight: interaction(Groups.PLAYER, Groups.STATIC | Groups.DYNAMIC | Groups.HELD),
   /** Ligne de vue à travers le labyrinthe : murs et piliers seulement (les meubles ne cachent pas). */
   queryWalls: interaction(Groups.PLAYER, Groups.STATIC),
+  /** Ce qui barre la route d'un personnage à pied (le Cadreur) : murs et piliers, mais aussi meubles et objets posés. */
+  queryObstacles: interaction(Groups.PLAYER, Groups.STATIC | Groups.DYNAMIC),
   /** Corps du Cadreur : aucune interaction physique (ses déplacements testent les murs via `queryWalls`). */
   cadreur: interaction(Groups.CADREUR, 0),
 } as const;

@@ -29,7 +29,12 @@ import { MainMenu } from "../../src/player/mainMenu";
 import { ScoresMenu } from "../../src/player/scoresMenu";
 import { SettingsMenu } from "../../src/player/settingsMenu";
 import { COLLECTIBLE_KINDS, generateCollectibleLore, getCollectibleRarity } from "../../src/shared/collectibles";
-import { LORE_FRAGMENT_COUNT } from "../../src/shared/lore";
+import { LORE_FRAGMENT_COUNT, loreFormat } from "../../src/shared/lore";
+import { loreFragment } from "../../src/i18n";
+import { ACHIEVEMENTS } from "../../src/world/achievementDefs";
+import { NoticeModal } from "../../src/player/noticeModal";
+import { TapeSignalModal } from "../../src/player/tapeSignalModal";
+import { VhsOverlay } from "../../src/player/vhsOverlay";
 import { PROP_HALF_EXTENTS } from "../../src/shared/props";
 import { PSEUDO_ADJECTIVE_COUNT, PSEUDO_NOUN_COUNT, generatePseudoSuggestion } from "../../src/shared/pseudoGenerator";
 import { uiDiagnostics, type Rect, type UiPanel } from "../../src/ui/uiPanel";
@@ -160,6 +165,8 @@ const runs = (pseudo: string, count = 7) => Array.from({ length: count }, (_, i)
 // ---------------------------------------------------------------------------------------------
 interface Scenario {
   name: string;
+  /** Panneau à dessiner si différent de celui du groupe (groupe "modaux" : plusieurs canvas). */
+  panel?: AnyPanel;
   setup(): void;
   /** Score de "pire cas" (plus grand = plus intéressant à capturer) : seul le meilleur d'un balayage est capturé. */
   score?: number;
@@ -518,6 +525,60 @@ function journalGroup(): Group {
   };
 }
 
+/** Modals collés à la caméra (notification, cassette) et texte OSD de l'écran bleu : pas des UiPanel, mais même dessin canvas. */
+function modalsGroup(): Group {
+  const notice = new NoticeModal(camera, sfx) as unknown as Record<string, any>;
+  const tape = new TapeSignalModal(camera) as unknown as Record<string, any>;
+  const overlay = new VhsOverlay(camera) as unknown as Record<string, any>;
+  let osdLines: string[] = [];
+  const adapter = (canvas: HTMLCanvasElement, ctx: CanvasRenderingContext2D, draw: () => void) => ({ canvas, ctx, draw, group: null }) as unknown as AnyPanel;
+  const noticePanel = adapter(notice["canvas"], notice["ctx"], () => notice["redraw"]());
+  const tapePanel = adapter(tape["canvas"], tape["ctx"], () => tape["redraw"]());
+  const osdPanel = adapter(overlay["osdCanvas"], overlay["osdCanvas"].getContext("2d"), () => overlay["drawOsd"](osdLines));
+  const osd = (name: string, lines: () => string[]): Scenario => ({ name: `bleu-${name}`, setup: () => (osdLines = lines()), panel: osdPanel } as Scenario);
+  const noticeScenario = (name: string, kind: "achievement" | "lore", title: () => string, subtitle: () => string): Scenario => ({
+    name: `notification-${name}`,
+    setup: () => {
+      notice["kind"] = kind;
+      notice["title"] = title();
+      notice["subtitle"] = subtitle();
+    },
+    panel: noticePanel,
+  } as Scenario);
+  const tapeLine = (name: string, text: () => string): Scenario => ({
+    name: `cassette-${name}`,
+    setup: () => {
+      tape["line"] = text();
+      tape["lineColor"] = "#f4f1e8";
+    },
+    panel: tapePanel,
+  } as Scenario);
+  const achievementSweep: Scenario[] = ACHIEVEMENTS.map((def) => ({ name: `succes-${def.id}`, score: t(def.titleKey).length, setup: () => ((notice["kind"] = "achievement"), (notice["title"] = t(def.titleKey)), (notice["subtitle"] = "")), panel: noticePanel }) as Scenario);
+  const lines: Scenario[] = [];
+  for (let i = 0; i < LORE_FRAGMENT_COUNT; i++) {
+    if (loreFormat(i) !== "audio") continue;
+    (loreFragment(i) ?? "").split(String.fromCharCode(10)).forEach((line, n) => lines.push({ ...tapeLine(`archive${i + 1}-${n}`, () => line), score: line.length }));
+  }
+  return {
+    panel: "modaux",
+    make: () => noticePanel,
+    scenarios: [
+      osd("chargement", () => [t("blue.loading")]),
+      osd("niveau", () => [t("blue.level", { n: 128 })]),
+      osd("sauvegarde", () => [t("blue.saved"), t("blue.closeTab")]),
+      osd("coupez", () => [t("blue.cut")]),
+      osd("prise", () => [t("blue.take", { n: 128 })]),
+      noticeScenario("archive", "lore", () => t("lore.title", { n: 16 }), () => t("lore.format.audio")),
+      noticeScenario("succes-court", "achievement", () => t(ACHIEVEMENTS[0]!.titleKey), () => ""),
+      tapeLine("vide", () => ""),
+    ],
+    sweeps: [
+      { name: "succes-tous", variants: achievementSweep },
+      { name: "cassette-toutes-repliques", variants: lines },
+    ],
+  };
+}
+
 // ---------------------------------------------------------------------------------------------
 // Exécution.
 // ---------------------------------------------------------------------------------------------
@@ -532,7 +593,8 @@ const shots: Shot[] = [];
 const issues: Issue[] = [];
 const stats = { renders: 0 };
 
-function render(group: Group, panel: AnyPanel, scenario: Scenario, lang: Language): { issues: Issue[]; png: string } {
+function render(group: Group, groupPanel: AnyPanel, scenario: Scenario, lang: Language): { issues: Issue[]; png: string } {
+  const panel = scenario.panel ?? groupPanel;
   scenario.setup();
   drawn = [];
   buttons = [];
@@ -571,7 +633,7 @@ async function main(): Promise<void> {
     return { font: ctx.font, emPerChar: ctx.measureText("MMMMMMMMMM").width / 1000, narrow: ctx.measureText("iiiiiiiiii").width / 1000 };
   })();
 
-  const groups = [mainMenuGroup(), guideGroup(), deviceGroup(), scoresGroup(), settingsGroup(), inventoryGroup(), journalGroup(), endRunGroup(), debugGroup()];
+  const groups = [mainMenuGroup(), guideGroup(), deviceGroup(), scoresGroup(), settingsGroup(), inventoryGroup(), journalGroup(), endRunGroup(), debugGroup(), modalsGroup()];
   for (const lang of ["fr", "en"] as const) {
     setLanguage(lang);
     for (const group of groups) {

@@ -16,6 +16,7 @@
     "test:visual:menus": "node scripts/render-menus.mjs",
     "test:visual:game": "node scripts/render-game-interactions-windows.mjs --interactions",
     "test:visual:object": "node scripts/render-game-interactions-windows.mjs",
+    "play": "node scripts/start.mjs",
     "debug": "node scripts/debug-local.mjs"
   },
   "dependencies": {

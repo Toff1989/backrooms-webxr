@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { wrapLines } from "../world/loreArt";
 import { getVhsNoiseTexture, vhsNoiseFrame } from "../world/vhsNoiseTexture";
 
 const VERTEX_SHADER = /* glsl */ `
@@ -167,9 +168,33 @@ export class VhsOverlay {
     ctx.font = "bold 44px monospace";
     ctx.textAlign = "left";
     ctx.fillText("\u25B6 PLAY", 20, 60);
+    // Le texte est à la ligne et sa taille s'adapte : le premier libellé est le titre (grand), les
+    // suivants des précisions (plus petits) ; le bloc tient toujours dans la zone visible, sous le "PLAY".
+    const maxWidth = 460;
+    const top = 110;
+    const bottom = 470;
+    let title = 56;
+    let laidOut: Array<{ text: string; size: number }> = [];
+    for (;; title -= 2) {
+      laidOut = [];
+      lines.forEach((line, index) => {
+        const size = index === 0 ? title : Math.max(20, Math.round(title * 0.6));
+        ctx.font = `bold ${size}px monospace`;
+        for (const part of wrapLines(ctx, line, maxWidth)) laidOut.push({ text: part, size });
+      });
+      const height = laidOut.reduce((sum, item) => sum + Math.round(item.size * 1.25), 0);
+      const widest = Math.max(...laidOut.map((item) => (ctx.font = `bold ${item.size}px monospace`, ctx.measureText(item.text).width)));
+      if ((height <= bottom - top && widest <= maxWidth) || title <= 24) break;
+    }
+    const total = laidOut.reduce((sum, item) => sum + Math.round(item.size * 1.25), 0);
+    let y = Math.max(top, (top + bottom) / 2 - total / 2);
     ctx.textAlign = "center";
-    ctx.font = "bold 60px monospace";
-    lines.forEach((line, index) => ctx.fillText(line, 256, 250 + index * 80));
+    for (const item of laidOut) {
+      const lineHeight = Math.round(item.size * 1.25);
+      ctx.font = `bold ${item.size}px monospace`;
+      ctx.fillText(item.text, 256, y + lineHeight / 2);
+      y += lineHeight;
+    }
     this.osdTexture.needsUpdate = true;
   }
 

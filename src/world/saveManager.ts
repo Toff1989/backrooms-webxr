@@ -13,6 +13,12 @@ export interface SaveData {
   flashlightBattery: number;
   position: { x: number; z: number };
   inventory: CollectionEntry[];
+  /**
+   * Session de run côté serveur (id + token signé) : conservée avec la sauvegarde pour que la run
+   * reprise après un rechargement puisse toujours envoyer son score à la fin. Absente des
+   * sauvegardes antérieures et des runs jouées hors ligne.
+   */
+  session?: { runId: string; token: string; seed: string };
 }
 
 interface StoredSave extends SaveData {

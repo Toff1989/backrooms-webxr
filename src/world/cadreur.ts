@@ -155,6 +155,8 @@ export class Cadreur {
     );
     this.controller = physics.world.createCharacterController(0.02);
     this.controller.setSlideEnabled(true);
+    // Enjambe les petits objets posés au sol (canette, jouet...) ; les meubles, eux, le bloquent.
+    this.controller.enableAutostep(0.2, 0.05, true);
     queueWarmup(() => (this.motorBuffer = createTapeMotorBuffer(listener.context)));
     queueWarmup(() => (this.caughtBuffer = createCaughtBuffer(listener.context)));
     queueWarmup(() => (this.zoomBuffer = createZoomBuffer(listener.context)));
@@ -466,7 +468,7 @@ export class Cadreur {
       length,
       true,
       undefined,
-      CollisionGroups.queryWalls,
+      CollisionGroups.queryObstacles,
     );
     return hit === null;
   }
@@ -531,7 +533,7 @@ export class Cadreur {
     const current = this.collider.translation();
     const wantedX = targetX - current.x;
     const wantedZ = targetZ - current.z;
-    this.controller.computeColliderMovement(this.collider, { x: wantedX, y: 0, z: wantedZ }, RAPIER.QueryFilterFlags.EXCLUDE_SENSORS, CollisionGroups.queryWalls);
+    this.controller.computeColliderMovement(this.collider, { x: wantedX, y: 0, z: wantedZ }, RAPIER.QueryFilterFlags.EXCLUDE_SENSORS, CollisionGroups.queryObstacles);
     const moved = this.controller.computedMovement();
     this.position.set(current.x + moved.x, 0, current.z + moved.z);
     this.body.setNextKinematicTranslation({ x: this.position.x, y: BODY_CENTER_Y, z: this.position.z });

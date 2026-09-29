@@ -1,14 +1,16 @@
 import * as THREE from "three";
 import { t, type TranslationKey } from "../i18n";
+import { fitFont } from "../ui/uiPanel";
 import type { Sfx } from "./sfx";
 
 export type NoticeKind = "achievement" | "lore";
 
-const WIDTH_METERS = 0.46;
-const HEIGHT_METERS = 0.17;
+// Compact et sous le bandeau du HUD caméscope (qui occupe le haut du champ, voir camcorderHud.ts).
+const WIDTH_METERS = 0.32;
+const HEIGHT_METERS = 0.118;
 const CANVAS_W = 920;
 const CANVAS_H = Math.round((CANVAS_W * HEIGHT_METERS) / WIDTH_METERS);
-const POSITION = new THREE.Vector3(0, 0.08, -0.55);
+const POSITION = new THREE.Vector3(0, 0.02, -0.55);
 
 /** Pop-in élastique bref, tenu, puis fondu — jamais un simple "apparaît/disparaît". */
 const POP_SECONDS = 0.22;
@@ -123,15 +125,16 @@ export class NoticeModal {
     ctx.fillText(style.icon, 84, height / 2);
 
     ctx.textAlign = "left";
-    ctx.font = "bold 26px monospace";
     ctx.fillStyle = style.accent;
+    fitFont(ctx, t(style.labelKey), width - 160 - 36, 26, 16, "bold ");
     ctx.fillText(t(style.labelKey), 160, height * 0.32);
-    ctx.font = "bold 34px monospace";
+    const textWidth = width - 160 - 36;
     ctx.fillStyle = "#f4f1e8";
+    fitFont(ctx, this.title, textWidth, 34, 20, "bold ");
     ctx.fillText(this.title, 160, height * 0.62);
     if (this.subtitle) {
-      ctx.font = "22px monospace";
       ctx.fillStyle = "#c9c0aa";
+      fitFont(ctx, this.subtitle, textWidth, 22, 16);
       ctx.fillText(this.subtitle, 160, height * 0.86);
     }
 

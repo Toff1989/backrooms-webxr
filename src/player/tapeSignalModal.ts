@@ -1,13 +1,14 @@
 import * as THREE from "three";
 import { t } from "../i18n";
+import { wrapLines } from "../world/loreArt";
 
-const WIDTH_METERS = 0.5;
-const HEIGHT_METERS = 0.22;
+const WIDTH_METERS = 0.36;
+const HEIGHT_METERS = 0.187;
 const CANVAS_W = 1000;
 const CANVAS_H = Math.round((CANVAS_W * HEIGHT_METERS) / WIDTH_METERS);
 // Assez bas pour ne jamais chevaucher le bandeau de notification (noticeModal.ts, transitoire,
 // posé plus haut) : une archive au format audio déclenche les deux en même temps.
-const POSITION = new THREE.Vector3(0, -0.16, -0.55);
+const POSITION = new THREE.Vector3(0, -0.15, -0.55);
 const BAR_COUNT = 28;
 
 /**
@@ -96,8 +97,8 @@ export class TapeSignalModal {
     ctx.fillStyle = "#7fc4e8";
     ctx.fillText(t("notice.tapeTitle"), width / 2, 56);
 
-    const barsTop = 90;
-    const barsHeight = 90;
+    const barsTop = 88;
+    const barsHeight = 80;
     const barWidth = (width - 80) / BAR_COUNT;
     for (let i = 0; i < BAR_COUNT; i++) {
       const h = barsHeight * this.bars[i]!;
@@ -106,9 +107,15 @@ export class TapeSignalModal {
     }
 
     if (this.line) {
-      ctx.font = "26px monospace";
+      // Réplique à la ligne, centrée dans la zone sous les barres : une réplique longue ne dépasse plus du cadre.
+      const lineHeight = 44;
+      ctx.font = "bold 34px monospace";
       ctx.fillStyle = this.lineColor;
-      ctx.fillText(this.line, width / 2, height - 44);
+      const lines = wrapLines(ctx, this.line, width - 100).slice(0, 5);
+      const top = 190;
+      const zoneHeight = height - 20 - top;
+      const first = top + zoneHeight / 2 - ((lines.length - 1) * lineHeight) / 2;
+      lines.forEach((text, index) => ctx.fillText(text, width / 2, first + index * lineHeight));
     }
 
     this.texture.needsUpdate = true;

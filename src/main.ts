@@ -867,6 +867,7 @@ function snapshot(): SaveData {
     flashlightBattery: flashlight.battery,
     position: { x: player.headWorld.x, z: player.headWorld.z },
     inventory: collectionStore.getAll().slice(),
+    ...(currentSession ? { session: { runId: currentSession.runId, token: currentSession.token, seed: currentSession.seed } } : {}),
   };
 }
 
@@ -884,16 +885,17 @@ function autosave(): void {
  * Reprend une partie sauvegardée : même seed (le level se reconstruit à l'identique), même
  * profondeur, inventaire/santé/folie/batterie/position restaurés. Quitte le niveau 0 fictif.
  * `keepSession` : vrai pour une run mise en pause (session serveur toujours valide, aucun level
- * signalé pendant le passage par le menu) ; faux pour une sauvegarde relue au démarrage — pas de
- * suivi anti-triche pour la suite de cette run (`/run/level` exige une progression séquentielle
- * depuis la profondeur 0 d'une run fraîchement créée, incompatible avec une reprise à une
- * profondeur quelconque) ; un "Quitter"/game over ultérieur ne pourra pas envoyer de score, comme
- * hors ligne. Les archives perdues restent suivies localement dans tous les cas.
+ * signalé pendant le passage par le menu) ; faux pour une sauvegarde relue au démarrage : la
+ * session serveur est alors restaurée depuis la sauvegarde (`save.session`), ce qui permet
+ * d'envoyer le score en fin de run ; sans elle (ancienne sauvegarde, run hors ligne), l'envoi du
+ * score n'est pas possible, comme hors ligne. Les archives perdues restent suivies localement dans tous les cas.
  */
 function resumeFromSave(save: SaveData, keepSession = false): void {
   gameOver = false;
   if (!keepSession) {
-    currentSession = null;
+    // Session serveur rangée dans la sauvegarde : sans elle, la fin de la run reprise ne pourrait
+    // pas envoyer de score (et l'écran de fin affichait à tort "serveur injoignable").
+    currentSession = save.session ?? null;
     resetRunAchievementState();
   }
   vitals.health = save.health;
