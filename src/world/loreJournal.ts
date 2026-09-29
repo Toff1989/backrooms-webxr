@@ -70,6 +70,17 @@ export class LoreJournal {
     return true;
   }
 
+  /**
+   * Remise à zéro locale (paramètres, "recommencer à zéro") : l'appel serveur qui efface
+   * réellement les archives (voir `resetProgress` dans playerIdentity.ts) est fait à part, par
+   * l'appelant — ce module ne fait ici que refléter localement le résultat.
+   */
+  reset(): void {
+    this.unlocked = 0;
+    void set(LORE_PROGRESS_KEY, 0).catch(() => {});
+    this.emit();
+  }
+
   /** Relit le profil serveur (au démarrage, à l'ouverture du journal, après un jumelage). */
   async sync(): Promise<PlayerProfile | null> {
     const profile = await fetchProfile();

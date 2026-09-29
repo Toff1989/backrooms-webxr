@@ -146,6 +146,22 @@ export async function syncLoreCount(count: number): Promise<number | null> {
   }
 }
 
+/**
+ * Réinitialisation complète de la progression (paramètres) : efface les archives lues et la
+ * sauvegarde en cours côté serveur (voir `resetLore`/`deleteSave`) — pas l'identité/le pseudo/le
+ * code de cassette. Renvoie faux hors ligne (rien à effacer côté serveur dans ce cas ; l'appelant
+ * efface quand même son état local, voir `LoreJournal.reset`/`SaveManager.clear`).
+ */
+export async function resetProgress(): Promise<boolean> {
+  if (!(await ensureIdentity())) return false;
+  try {
+    await apiCall("POST", "/player/reset-progress", {});
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /** Récupère un enregistrement par son code de cassette (saisie libre, tirets facultatifs). */
 export async function restoreFromCode(code: string): Promise<boolean> {
   try {

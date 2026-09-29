@@ -10,7 +10,7 @@ const PX_PER_M = 1500;
 const DISTANCE = 0.75;
 const QUIT_CONFIRM_SECONDS = 3;
 
-type ButtonId = "continue" | "newGame" | "settings" | "quit";
+type ButtonId = "continue" | "newGame" | "settings" | "achievements" | "quit";
 
 const CANVAS_W = WIDTH * PX_PER_M;
 const BUTTON_W = 700;
@@ -20,13 +20,15 @@ const BUTTONS: Record<ButtonId, Rect> = {
   continue: { x: BUTTON_X, y: 260, w: BUTTON_W, h: BUTTON_H },
   newGame: { x: BUTTON_X, y: 370, w: BUTTON_W, h: BUTTON_H },
   settings: { x: BUTTON_X, y: 480, w: BUTTON_W, h: BUTTON_H },
-  quit: { x: BUTTON_X, y: 590, w: BUTTON_W, h: BUTTON_H },
+  achievements: { x: BUTTON_X, y: 590, w: BUTTON_W, h: BUTTON_H },
+  quit: { x: BUTTON_X, y: 700, w: BUTTON_W, h: BUTTON_H },
 };
 
 export interface MainMenuActions {
   continueRun(): void;
   newGame(): void;
   openSettings(): void;
+  openAchievements(): void;
   /** "Quitter" : termine la run en cours (ex-STOP REC de l'inventaire), si une run est en pause. */
   quit(): void;
 }
@@ -98,6 +100,7 @@ export class MainMenu extends UiPanel {
     if (id === "continue") this.actions.continueRun();
     else if (id === "newGame") this.actions.newGame();
     else if (id === "settings") this.actions.openSettings();
+    else if (id === "achievements") this.actions.openAchievements();
     else if (id === "quit") {
       // Termine la run en cours (score/pseudo, voir endRunScreen) : une confirmation évite un
       // appui accidentel qui couperait la partie en cours.
@@ -129,6 +132,7 @@ export class MainMenu extends UiPanel {
     drawButton(ctx, BUTTONS.continue, t("menu.continue"), { hovered: hovered.has("continue"), accent: "#9fe39f" });
     drawButton(ctx, BUTTONS.newGame, t("menu.newGame"), { hovered: hovered.has("newGame") });
     drawButton(ctx, BUTTONS.settings, t("menu.settings"), { hovered: hovered.has("settings") });
+    drawButton(ctx, BUTTONS.achievements, t("menu.achievements"), { hovered: hovered.has("achievements") });
     drawButton(ctx, BUTTONS.quit, this.quitArmedUntil ? t("inv.confirm") : t("menu.quit"), { hovered: hovered.has("quit"), accent: "#e06a5a" });
   }
 }

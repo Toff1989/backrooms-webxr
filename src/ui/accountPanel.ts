@@ -1,4 +1,5 @@
 import { onLanguageChange, t } from "../i18n";
+import type { AchievementTracker } from "../world/achievements";
 import type { LoreJournal } from "../world/loreJournal";
 import { confirmPairing, currentIdentity, onIdentityChange, restoreFromCode, startPairing, type PairingRequest } from "../world/playerIdentity";
 
@@ -7,7 +8,7 @@ import { confirmPairing, currentIdentity, onIdentityChange, restoreFromCode, sta
  * navigateur est disponible) : code de cassette de cet appareil, récupération d'un
  * enregistrement par son code, et jumelage façon télé (les deux sens).
  */
-export function installAccountPanel(lore: LoreJournal): void {
+export function installAccountPanel(lore: LoreJournal, achievements: AchievementTracker): void {
   const code = document.querySelector<HTMLElement>("#account-code");
   const status = document.querySelector<HTMLElement>("#account-status");
   const restoreInput = document.querySelector<HTMLInputElement>("#restore-input");
@@ -33,7 +34,9 @@ export function installAccountPanel(lore: LoreJournal): void {
       say(ok ? t("account.restored") : t("account.restoreFailed"), ok);
       if (ok) {
         restoreInput.value = "";
+        achievements.raise("recoveryCodeRestored", 1);
         await lore.sync();
+        await achievements.sync();
       }
     });
   });
@@ -45,7 +48,11 @@ export function installAccountPanel(lore: LoreJournal): void {
       pairing = null;
       pairCode.textContent = "";
       say(success ? t("pair.success") : t("pair.failed"), success);
-      if (success) void lore.sync();
+      if (success) {
+        achievements.raise("secondDevicePaired", 1);
+        void lore.sync();
+        void achievements.sync();
+      }
     }).then((request) => {
       pairing = request;
       if (request) pairCode.textContent = t("account.pairCode", { code: `${request.code.slice(0, 3)} ${request.code.slice(3)}` });
@@ -62,7 +69,9 @@ export function installAccountPanel(lore: LoreJournal): void {
       say(ok ? t("pair.confirmed") : t("pair.badCode"), ok);
       if (ok) {
         pairInput.value = "";
+        achievements.raise("secondDevicePaired", 1);
         void lore.sync();
+        void achievements.sync();
       }
     });
   });

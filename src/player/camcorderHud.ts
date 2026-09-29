@@ -69,9 +69,6 @@ export class CamcorderHud {
   private readonly gauges = new Map<GaugeId, GaugeDisplay>();
   private elapsedSeconds = 0;
   private timeSinceRedraw = Infinity;
-  private notice = "";
-  private noticeColor = "#e8c34a";
-  private noticeUntil = 0;
   /** Contenu du dernier dessin (voir `redraw`). */
   private lastSignature = "";
 
@@ -117,22 +114,6 @@ export class CamcorderHud {
     });
   }
 
-  /**
-   * Message bref dans le viseur (archive ajoutée au journal, sous-titre d'une cassette), à la
-   * place de la ligne de mesures ; coupé sur deux lignes s'il est long.
-   */
-  showNotice(text: string, seconds = 4, color = "#e8c34a"): void {
-    this.notice = text;
-    this.noticeColor = color;
-    this.noticeUntil = this.elapsedSeconds + seconds;
-    this.timeSinceRedraw = Infinity;
-  }
-
-  clearNotice(): void {
-    this.noticeUntil = 0;
-    this.timeSinceRedraw = Infinity;
-  }
-
   /** Temps d'enregistrement de la run (s), celui du compteur REC. */
   get recordingSeconds(): number {
     return this.elapsedSeconds;
@@ -141,7 +122,6 @@ export class CamcorderHud {
   /** Remet le compteur REC à zéro (nouvelle run). */
   resetClock(): void {
     this.elapsedSeconds = 0;
-    this.noticeUntil = 0;
     this.timeSinceRedraw = Infinity;
   }
 
@@ -198,11 +178,10 @@ export class CamcorderHud {
     const bars = Math.round(this.status.signal * 5);
     const signalText = `${t("hud.signal")} ${"▮".repeat(bars)}${"▯".repeat(5 - bars)}`;
     const flags = [this.status.crouching ? t("hud.crouch") : "", this.status.sprinting ? t("hud.sprint") : "", this.status.flashlight ? t("hud.flashlight") : ""].filter(Boolean).join("  ");
-    const notice = this.elapsedSeconds < this.noticeUntil ? `${this.noticeColor}${this.notice}` : "";
-    const debug = notice ? "" : (this.status.debug ?? "");
+    const debug = this.status.debug ?? "";
     // Rien n'a changé depuis le dernier dessin : ni redessin, ni envoi de la texture au GPU
     // (1024 × 220 px, mipmaps comprises) — le cas le plus courant entre deux secondes du compteur.
-    const signature = `${blink}|${clock}|${battery}|${energyLevel.toFixed(3)}|${healthLevel.toFixed(3)}|${madnessLevel.toFixed(3)}|${depth}|${bag}|${signalText}|${flags}|${notice}|${debug}`;
+    const signature = `${blink}|${clock}|${battery}|${energyLevel.toFixed(3)}|${healthLevel.toFixed(3)}|${madnessLevel.toFixed(3)}|${depth}|${bag}|${signalText}|${flags}|${debug}`;
     if (signature === this.lastSignature) return;
     this.lastSignature = signature;
 
@@ -235,11 +214,7 @@ export class CamcorderHud {
     this.text(signalText, SIGNAL_X, 120, "left", bars >= 4 ? "#9fe39f" : "#f4f1e8");
     if (flags) this.text(flags, CANVAS_WIDTH - 20, flagsOnOwnRow ? 148 : 120, "right", "#b9e0ff");
 
-    if (notice) {
-      ctx.font = "bold 27px monospace";
-      const lines = wrapTwoLines(ctx, this.notice, CANVAS_WIDTH - 60);
-      lines.forEach((line, index) => this.text(line, CANVAS_WIDTH / 2, lines.length === 1 ? 185 : 168 + index * 34, "center", this.noticeColor));
-    } else if (debug) {
+    if (debug) {
       ctx.font = "bold 21px monospace";
       this.text(debug, 20, 185, "left", "#9dff9d");
     }
@@ -268,15 +243,4 @@ function drawVerticalBar(ctx: CanvasRenderingContext2D, x: number, label: string
   ctx.lineWidth = 2;
   ctx.strokeStyle = "rgba(244, 241, 232, 0.8)";
   ctx.strokeRect(x - width / 2 - 1, top - 1, width + 2, height + 2);
-}
-
-/** Coupe un texte en deux lignes au plus (la seconde tronquée si besoin). */
-function wrapTwoLines(ctx: CanvasRenderingContext2D, text: string, maxWidth: number): string[] {
-  if (ctx.measureText(text).width <= maxWidth) return [text];
-  const words = text.split(" ");
-  let first = "";
-  while (words.length > 0 && ctx.measureText(first ? `${first} ${words[0]}` : words[0]!).width <= maxWidth) first = first ? `${first} ${words.shift()}` : words.shift()!;
-  let second = words.join(" ");
-  while (second.length > 1 && ctx.measureText(second).width > maxWidth) second = `${second.slice(0, -2)}…`;
-  return [first, second];
 }

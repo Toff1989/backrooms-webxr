@@ -4,9 +4,9 @@ import paper01Url from "../assets/audio/cc0/paper_01.ogg?url";
 import paper02Url from "../assets/audio/cc0/paper_02.ogg?url";
 import slam01Url from "../assets/audio/cc0/slam_01.ogg?url";
 import switch01Url from "../assets/audio/cc0/switch_01.ogg?url";
-import { bandpass, createSamples, fadeEdges, highpass, lowpass, normalize, queueWarmup, toBuffer } from "../assets/audio/synth";
+import { bandpass, createSamples, fadeEdges, highpass, lowpass, normalize, queueWarmup, reverb, toBuffer } from "../assets/audio/synth";
 
-const SOUND_NAMES = ["store", "take", "grab", "click", "denied", "battery"] as const;
+const SOUND_NAMES = ["store", "take", "grab", "click", "denied", "battery", "discovery", "unlock"] as const;
 type SoundName = (typeof SOUND_NAMES)[number];
 const EXTERNAL_SOUNDS: Partial<Record<SoundName, string>> = {
   store: paper01Url,
@@ -20,7 +20,9 @@ const EXTERNAL_SOUNDS: Partial<Record<SoundName, string>> = {
  * Sons d'interaction générés procéduralement (pas de fichier audio), volontairement
  * diégétiques et sourds plutôt que des bips : froissement de sac (rangement / sortie),
  * contact mat (saisie), déclic mécanique (lampe, menu), cognement étouffé (refus),
- * pile glissée dans la lampe.
+ * pile glissée dans la lampe, confirmation de mise au point (archive trouvée), petit
+ * arpège (succès débloqué) — ces deux derniers restent feutrés (passe-bas + réverbe),
+ * pas des bips d'interface qui casseraient l'ambiance found-footage.
  */
 export class Sfx {
   private readonly buffers = new Map<SoundName, AudioBuffer>();
@@ -138,6 +140,34 @@ function createBuffer(context: BaseAudioContext, name: SoundName): AudioBuffer {
         }
       }
       highpass(data, sampleRate, 700);
+      break;
+    }
+    case "discovery": {
+      // Confirmation de mise au point du caméscope : deux notes brèves, la seconde plus aiguë.
+      data = createSamples(sampleRate, 0.42);
+      for (const [at, freq, seconds] of [[0, 920, 0.09], [0.14, 1380, 0.12]] as const) {
+        const start = Math.floor(at * sampleRate);
+        for (let i = 0; start + i < data.length && i < seconds * sampleRate; i++) {
+          const t = i / sampleRate;
+          data[start + i] = data[start + i]! + Math.sin(2 * Math.PI * freq * t) * Math.exp(-t / 0.05);
+        }
+      }
+      lowpass(data, sampleRate, 3200);
+      reverb(data, sampleRate, 0.25, 0.6);
+      break;
+    }
+    case "unlock": {
+      // Petit arpège ascendant, feutré : la découverte d'un succès, sans virer au jingle.
+      data = createSamples(sampleRate, 0.85);
+      for (const [at, freq] of [[0, 523], [0.11, 659], [0.22, 784]] as const) {
+        const start = Math.floor(at * sampleRate);
+        for (let i = 0; start + i < data.length && i < 0.45 * sampleRate; i++) {
+          const t = i / sampleRate;
+          data[start + i] = data[start + i]! + Math.sin(2 * Math.PI * freq * t) * Math.exp(-t / 0.3) * 0.8;
+        }
+      }
+      lowpass(data, sampleRate, 2600);
+      reverb(data, sampleRate, 0.35, 0.9);
       break;
     }
   }
