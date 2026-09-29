@@ -86,6 +86,9 @@ const FRAGMENT_SHADER = /* glsl */ `
   }
 `;
 
+/** Durée de la coupure neige qui referme l'écran bleu tenu en chargement (voir `hideLoading`). */
+const HIDE_TAIL_SECONDS = 0.4;
+
 /**
  * Scanlines + vrai bruit VHS (vidéo de grain TV, pas un hash procédural) sur un quad
  * fixé à la tête (pas de post-processing EffectComposer en WebXR). Effet constant,
@@ -98,6 +101,9 @@ export class VhsOverlay {
   private readonly osdTexture: THREE.CanvasTexture;
   private tracking = 0;
   private snowSeconds = 0;
+  /** "off" : écran normal. "hold" : écran bleu tenu indéfiniment (voir `showLoading`/`loadingGate.ts`).
+   * "timed" : écran bleu à durée fixe, coupure neige sur la fin (voir `showCard`/`hideLoading`). */
+  private blueMode: "off" | "hold" | "timed" = "off";
   private blueSeconds = 0;
   private blueDuration = 1;
 
@@ -152,8 +158,7 @@ export class VhsOverlay {
     this.snowSeconds = Math.max(this.snowSeconds, seconds);
   }
 
-  /** Écran bleu du magnétoscope avec texte OSD (lignes centrées sous "▶ PLAY"). */
-  blueScreen(seconds: number, lines: string[]): void {
+  private drawOsd(lines: string[]): void {
     const ctx = this.osdCanvas.getContext("2d");
     if (!ctx) return;
     ctx.clearRect(0, 0, 512, 512);
@@ -166,6 +171,30 @@ export class VhsOverlay {
     ctx.font = "bold 60px monospace";
     lines.forEach((line, index) => ctx.fillText(line, 256, 250 + index * 80));
     this.osdTexture.needsUpdate = true;
+  }
+
+  /**
+   * Écran bleu du magnétoscope tenu indéfiniment (fenêtre de chargement unique, voir
+   * `loadingGate.ts`) : reste plein jusqu'à `hideLoading`, quelle que soit la durée du
+   * travail de fond (démarrage, changement de level, aller-retour vers le menu principal).
+   */
+  showLoading(lines: string[]): void {
+    this.drawOsd(lines);
+    this.blueMode = "hold";
+  }
+
+  /** Referme l'écran de chargement tenu par `showLoading` (coupure neige brève, comme `showCard`). */
+  hideLoading(): void {
+    if (this.blueMode !== "hold") return;
+    this.blueMode = "timed";
+    this.blueSeconds = HIDE_TAIL_SECONDS;
+    this.blueDuration = HIDE_TAIL_SECONDS;
+  }
+
+  /** Écran bleu à durée fixe avec texte OSD (carton "NIV {n}" entre deux levels, par exemple). */
+  showCard(seconds: number, lines: string[]): void {
+    this.drawOsd(lines);
+    this.blueMode = "timed";
     this.blueSeconds = seconds;
     this.blueDuration = seconds;
   }
@@ -176,11 +205,20 @@ export class VhsOverlay {
     if (corruption > 0.75 && Math.random() < deltaSeconds * 0.08) this.signalLoss(0.15 + Math.random() * 0.2);
     this.tracking = THREE.MathUtils.damp(this.tracking, 0, 2.5, deltaSeconds);
     this.snowSeconds = Math.max(0, this.snowSeconds - deltaSeconds);
-    this.blueSeconds = Math.max(0, this.blueSeconds - deltaSeconds);
-    // Bleu plein pendant l'essentiel de la durée, coupure franche sur la fin (neige brève).
-    const blueProgress = 1 - this.blueSeconds / this.blueDuration;
-    this.material.uniforms["uBlue"]!.value = this.blueSeconds > 0 ? (blueProgress < 0.85 ? 1 : 0) : 0;
-    this.material.uniforms["uSnow"]!.value = this.snowSeconds > 0 || (this.blueSeconds > 0 && blueProgress >= 0.85) ? 1 : 0;
+    let blue = 0;
+    let snowFromBlue = 0;
+    if (this.blueMode === "hold") {
+      blue = 1;
+    } else if (this.blueMode === "timed") {
+      this.blueSeconds = Math.max(0, this.blueSeconds - deltaSeconds);
+      // Bleu plein pendant l'essentiel de la durée, coupure franche sur la fin (neige brève).
+      const blueProgress = 1 - this.blueSeconds / this.blueDuration;
+      blue = this.blueSeconds > 0 ? (blueProgress < 0.85 ? 1 : 0) : 0;
+      snowFromBlue = this.blueSeconds > 0 && blueProgress >= 0.85 ? 1 : 0;
+      if (this.blueSeconds <= 0) this.blueMode = "off";
+    }
+    this.material.uniforms["uBlue"]!.value = blue;
+    this.material.uniforms["uSnow"]!.value = this.snowSeconds > 0 || snowFromBlue ? 1 : 0;
     this.material.uniforms["uTime"]!.value = elapsedSeconds;
     this.material.uniforms["uNoiseFrame"]!.value = vhsNoiseFrame(elapsedSeconds);
     this.material.uniforms["uCorruption"]!.value = corruption;

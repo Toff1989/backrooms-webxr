@@ -13,6 +13,7 @@
   "hud.healthShort": "H",
   "hud.madnessShort": "M",
   "blue.level": "LVL {n}",
+  "blue.loading": "LOADING",
   "rarity.common": "Common",
   "rarity.rare": "Rare",
   "rarity.legendary": "Legendary",

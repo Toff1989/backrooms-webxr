@@ -15,6 +15,7 @@ import { triggerHapticPulse } from "./player/haptics";
 import { DebugMenu } from "./player/debugMenu";
 import { InventoryMenu } from "./player/inventoryMenu";
 import { Journal } from "./player/journal";
+import { LoadingGate } from "./player/loadingGate";
 import { MainMenu } from "./player/mainMenu";
 import { SettingsMenu } from "./player/settingsMenu";
 import { PerfStats, setPerf } from "./player/perfStats";
@@ -57,30 +58,13 @@ installDebugLog();
 
 const appRoot = document.getElementById("app");
 if (!appRoot) throw new Error("#app introuvable dans index.html");
-const loadingScreen = document.getElementById("loading-screen");
 /**
- * L'écran de chargement ne disparaît qu'une fois quelques dizaines de frames consécutives
- * rendues sans à-coup (compilation de shaders, warmup physique/audio encore en cours sinon) —
- * pas juste dès que le premier rendu a eu lieu, qui révélait un tout début de jeu saccadé.
- * Filet de sécurité : disparaît quand même après `LOADING_TIMEOUT_SECONDS` si le FPS ne se
- * stabilise jamais (appareil très faible), pour ne pas coincer le joueur derrière l'écran.
+ * Placeholder HTML statique (voir index.html) pour le tout début du chargement, avant que le
+ * moteur WebGL puisse rendre quoi que ce soit (chargement des modules, WASM physique, KTX2...) —
+ * masqué dès que l'écran de chargement générique (VHS bleu, voir `loadingGate.ts`) prend le
+ * relais pour le niveau 0 fictif du menu principal, seule fenêtre de chargement du jeu ensuite.
  */
-const LOADING_STABLE_FRAMES = 30;
-const LOADING_MAX_FRAME_MS = 33;
-const LOADING_TIMEOUT_SECONDS = 8;
-let loadingStableStreak = 0;
-let loadingScreenHidden = false;
-// Horloge réelle (performance.now()), pas le delta simulé/plafonné du jeu (Math.min(..., 0.1)) :
-// sur un appareil vraiment lent, le delta plafonné ferait paraître le filet de sécurité bien
-// plus long qu'annoncé en temps réel — à l'inverse de ce qu'on veut d'un garde-fou.
-const loadingStartedAt = performance.now();
-function updateLoadingScreen(deltaSeconds: number): void {
-  if (loadingScreenHidden) return;
-  loadingStableStreak = deltaSeconds * 1000 <= LOADING_MAX_FRAME_MS ? loadingStableStreak + 1 : 0;
-  if (loadingStableStreak < LOADING_STABLE_FRAMES && performance.now() - loadingStartedAt < LOADING_TIMEOUT_SECONDS * 1000) return;
-  loadingScreenHidden = true;
-  loadingScreen?.classList.add("is-hidden");
-}
+const htmlLoadingScreen = document.getElementById("loading-screen");
 const visualTestParams = new URLSearchParams(window.location.search);
 const visualTest = visualTestParams.get("visualTest");
 const visualTestObject = visualTestParams.get("object");
@@ -149,12 +133,12 @@ await loreJournal.load();
 const saveManager = new SaveManager();
 
 /**
- * Étape 7 : la vraie seed de run vient du serveur (`POST /run/start`), mais le premier
- * rendu ne doit jamais attendre l'aller-retour réseau — on démarre sur une seed locale
- * temporaire, remplacée dès que le serveur répond (voir `LevelManager.restartRun`). Si
- * le serveur est injoignable, le jeu reste jouable sur une seed locale.
+ * Seed fixe du niveau 0 fictif (voir `buildMenuRoom` plus bas) : l'espace où s'affiche le menu
+ * principal, joueur figé, jamais une vraie run. Amorcé dès la construction du `LevelManager`,
+ * avant même de savoir si une sauvegarde existe ou s'il faut une run neuve — cette décision
+ * (Continuer/Nouvelle partie) n'a lieu qu'au premier choix du joueur, voir plus bas.
  */
-const LOCAL_FALLBACK_SEED = "local-offline";
+const MENU_ROOM_SEED = "menu-room";
 const levelManager = new LevelManager(
   scene,
   audioListener,
@@ -162,9 +146,11 @@ const levelManager = new LevelManager(
   grabbables,
   (id) => collectionStore.has(id),
   () => loreJournal.nextFragment,
-  LOCAL_FALLBACK_SEED,
+  MENU_ROOM_SEED,
 );
 player.teleport(SPAWN_LOCAL_POSITION);
+// Doit exister avant le tout premier `respawn()` (niveau 0 fictif au démarrage, voir plus bas).
+const timer = new THREE.Timer();
 
 const input = new XrInput(renderer, player.body);
 const hands = [new Hand(input.left, physics), new Hand(input.right, physics)];
@@ -172,6 +158,10 @@ const sfx = new Sfx(audioListener);
 
 const vhsOverlay = new VhsOverlay(camera);
 const comfortVignette = new ComfortVignette(vhsOverlay);
+/** Écran de chargement unique (voir loadingGate.ts) : démarré avant même le premier rendu, pour
+ * que le niveau 0 fictif du menu principal apparaisse déjà masqué par l'écran bleu. */
+const loadingGate = new LoadingGate(vhsOverlay);
+loadingGate.start();
 // Laisser le navigateur peindre l'écran avant la génération synchrone des chunks initiaux.
 await nextPaint();
 levelManager.primeInitialArea();
@@ -253,6 +243,20 @@ collectionStore.onChange(applyPerks);
 applyPerks();
 
 let currentSession: RunSessionInfo | null = null;
+/**
+ * Vrai tant que le joueur est dans le niveau 0 fictif (voir `buildMenuRoom`) : joueur figé,
+ * menaces/vitals/corruption suspendus, seul le menu principal est interactif.
+ */
+let menuLimbo = false;
+/** Run mise en pause en entrant dans le niveau 0 fictif depuis l'inventaire (null au démarrage
+ * ou après un game over déjà clôturé — rien à reprendre) : voir `openMainMenu`/`continueRun`. */
+let pausedRun: SaveData | null = null;
+/** Résolution en arrière-plan (sauvegarde existante ou run neuve) pendant le tout premier
+ * affichage du niveau 0 fictif au démarrage — consommée par le premier "Continuer". */
+let bootSavePromise: Promise<SaveData | null> | null = null;
+/** Paramètres ouverts directement depuis l'inventaire (aperçu léger) plutôt que depuis le menu
+ * principal : "retour" referme simplement le panneau au lieu de réafficher le menu. */
+let settingsOpenedStandalone = false;
 
 // Déclarée avant les menus : leurs actions y font référence (appelées plus tard, au clic).
 let grabSystem: GrabSystem;
@@ -269,12 +273,11 @@ const inventoryMenu = new InventoryMenu(
       grabSystem.takeIntoHand(hand, entry, () => collectionStore.add(entry));
     },
     openJournal: () => journal.openFloating(),
-    openSettings: () => settingsMenu.open(),
-    openMainMenu: () => {
-      autosave();
-      player.paused = true;
-      mainMenu.open("panel");
+    openSettings: () => {
+      settingsOpenedStandalone = true;
+      settingsMenu.open();
     },
+    openMainMenu: () => openMainMenu(),
     isDebugEnabled: () => isDebugMenuEnabled(),
     openDebugMenu: () => debugMenu.open(),
   },
@@ -289,11 +292,14 @@ const endRunScreen = new EndRunScreen(
     if (!currentSession) return Promise.reject(new Error("Pas de session de run active"));
     return endRun(currentSession, pseudo);
   },
-  () => beginNewRun(true),
   () => {
-    beginNewRun(true, false);
-    player.paused = true;
-    mainMenu.open("fullscreen");
+    loadingGate.start();
+    beginNewRun(true);
+  },
+  () => {
+    pausedRun = null;
+    loadingGate.start();
+    buildMenuRoom();
   },
   () => loreJournal.serverProfile?.pseudo ?? null,
 );
@@ -308,12 +314,11 @@ const settingsMenu = new SettingsMenu(camera, player.body, sfx, {
     return comfortVignette.enabled;
   },
   currentPseudo: () => loreJournal.serverProfile?.pseudo ?? null,
-  // Les paramètres sont une sous-page du menu principal (voir settingsMenu.ts) : "retour" y
-  // ramène toujours, qu'on y soit entré depuis lui ou depuis l'inventaire en jeu — dans le même
-  // mode plein écran/panneau qu'à l'ouverture (reopenSameMode), pas systématiquement plein champ.
+  // Ouverts depuis l'inventaire en jeu (aperçu léger, sans figer le joueur), "retour" referme
+  // simplement le panneau ; ouverts depuis le menu principal (niveau 0 fictif, joueur déjà figé),
+  // "retour" y réaffiche le menu — jamais de rechargement, on ne quitte pas le niveau 0 fictif.
   back: () => {
-    player.paused = true;
-    mainMenu.reopenSameMode();
+    if (!settingsOpenedStandalone) mainMenu.open();
   },
 });
 
@@ -360,25 +365,48 @@ const debugMenu = new DebugMenu(camera, player.body, sfx, [
 ]);
 
 const mainMenu = new MainMenu(camera, player.body, sfx, {
+  // Reprend la run mise en pause (voir `pausedRun`), ou celle résolue en arrière-plan au
+  // démarrage (sauvegarde existante ou run neuve, voir `bootSavePromise`) — dans les deux cas
+  // via l'écran de chargement générique, jamais un simple dépilement du menu.
   continueRun: () => {
     mainMenu.close();
-    player.paused = false;
+    if (pausedRun) {
+      const save = pausedRun;
+      pausedRun = null;
+      loadingGate.start();
+      resumeFromSave(save, true);
+      return;
+    }
+    const pending = bootSavePromise;
+    bootSavePromise = null;
+    loadingGate.start();
+    (pending ?? Promise.resolve(null)).then((save) => {
+      if (save) resumeFromSave(save);
+      else beginNewRun(true);
+    });
   },
   newGame: () => {
     mainMenu.close();
+    pausedRun = null;
+    bootSavePromise = null;
     saveManager.clear();
+    loadingGate.start();
     beginNewRun(true);
   },
   openSettings: () => {
+    settingsOpenedStandalone = false;
     mainMenu.close();
     settingsMenu.open();
   },
-  // Ex-STOP REC de l'inventaire : termine la run en cours (score/pseudo). Pas de fermeture
-  // d'onglet/navigateur possible depuis le script d'une page web — "Quitter" quitte la partie.
+  // Ex-STOP REC de l'inventaire : termine la run mise en pause (score/pseudo). Rien à faire si
+  // aucune run n'est en pause (démarrage, ou retour au menu après un game over déjà clôturé).
   quit: () => {
+    if (!pausedRun) return;
+    const depth = pausedRun.depth;
+    pausedRun = null;
     mainMenu.close();
     saveManager.clear();
-    endRunScreen.show(levelManager.depth);
+    endRunScreen.show(depth);
   },
 });
 installAccountPanel(loreJournal);
@@ -606,13 +634,18 @@ function respawn(): void {
   cadreur.reset(levelManager.depth);
 }
 
-/** Niveau suivant : sortie atteinte ou menu debug. Une capture est désormais un game over. */
+/**
+ * Niveau suivant : sortie atteinte ou menu debug. Une capture est désormais un game over.
+ * Écran de chargement générique pendant la reconstruction du chunk (voir loadingGate.ts),
+ * puis carton "NIV {n}" (voir showCard) avant de révéler le jeu — jamais l'un sans l'autre.
+ */
 let take = 1;
 function goDeeper(): void {
   levelManager.descend();
   log("level", { action: "descend", depth: levelManager.depth });
   respawn();
-  vhsOverlay.blueScreen(1.4, [t("blue.level", { n: levelManager.depth })]);
+  loadingGate.start([t("blue.loading")], () => vhsOverlay.showCard(1.4, [t("blue.level", { n: levelManager.depth })]));
+  loadingGate.ready();
   corruption.add(1);
   if (currentSession) reportLevel(currentSession, levelManager.depth);
   autosave();
@@ -643,26 +676,27 @@ function triggerGameOver(reason: "health" | "caught" | "victory"): void {
 
 /**
  * Démarre une run côté serveur (seed + token). Serveur injoignable : on reste jouable en
- * local — et sur "nouvelle run", on repart quand même sur une seed locale fraîche.
- * `resume` : remet le mouvement du joueur en marche une fois le monde prêt (faux pour un
- * chargement en arrière-plan pendant que le menu principal reste affiché).
+ * local — et sur "nouvelle run", on repart quand même sur une seed locale fraîche. Toujours
+ * appelé avec l'écran de chargement générique déjà démarré (voir les actions du menu principal
+ * et de l'écran de fin de run) : `restartWorld` le referme une fois le monde prêt.
  */
-function beginNewRun(restartLocallyOnFailure: boolean, resume = true): void {
+function beginNewRun(restartLocallyOnFailure: boolean): void {
   startRun()
     .then((session) => {
       currentSession = session;
-      restartWorld(session.seed, resume);
+      restartWorld(session.seed);
     })
     .catch(() => {
       currentSession = null;
-      if (restartLocallyOnFailure) restartWorld(`local-${Date.now()}`, resume);
+      if (restartLocallyOnFailure) restartWorld(`local-${Date.now()}`);
     });
 }
 
-/** Nouvelle partie : monde neuf, inventaire vidé, rien en main. */
-function restartWorld(seed: string, resume = true): void {
+/** Nouvelle partie : monde neuf, inventaire vidé, rien en main — quitte le niveau 0 fictif. */
+function restartWorld(seed: string): void {
   gameOver = false;
-  if (resume) player.paused = false;
+  menuLimbo = false;
+  player.paused = false;
   vitals.reset();
   grabSystem.loseHeld();
   collectionStore.clear();
@@ -670,6 +704,7 @@ function restartWorld(seed: string, resume = true): void {
   take = 1;
   hud.resetClock();
   respawn();
+  loadingGate.ready();
   log("run", { action: "start", seed });
 }
 
@@ -688,29 +723,28 @@ function snapshot(): SaveData {
 }
 
 /**
- * Sauvegarde silencieuse (changement de level, menu principal ouvert en jeu, minuteur, page
- * masquée) : jamais pendant un game over (la run est de toute façon effacée juste après, voir
- * `triggerGameOver`) ni avant que le choix reprendre/nouvelle partie du démarrage soit tranché
- * (sinon une sauvegarde à peine restaurée s'écraserait elle-même à mi-chemin).
+ * Sauvegarde silencieuse (changement de level, minuteur, page masquée) : jamais pendant un game
+ * over (la run est de toute façon effacée juste après, voir `triggerGameOver`) ni dans le
+ * niveau 0 fictif (elle y snapshotterait ce faux niveau au lieu de la run mise en pause).
  */
-let saveReady = false;
 function autosave(): void {
-  if (!saveReady || gameOver) return;
+  if (gameOver || menuLimbo) return;
   saveManager.save(snapshot());
 }
 
 /**
  * Reprend une partie sauvegardée : même seed (le level se reconstruit à l'identique), même
- * profondeur, inventaire/santé/folie/batterie/position restaurés. Pas de suivi anti-triche côté
- * serveur pour la suite de cette run (`/run/level` exige une progression séquentielle depuis la
- * profondeur 0 d'une run fraîchement créée, incompatible avec une reprise à une profondeur
- * quelconque) — `currentSession` reste `null` ; un "STOP REC"/game over ultérieur ne pourra pas
- * envoyer de score, comme hors ligne. Les archives perdues restent suivies localement (elles se
- * resynchroniseront au prochain profil serveur avec suivi).
+ * profondeur, inventaire/santé/folie/batterie/position restaurés. Quitte le niveau 0 fictif.
+ * `keepSession` : vrai pour une run mise en pause (session serveur toujours valide, aucun level
+ * signalé pendant le passage par le menu) ; faux pour une sauvegarde relue au démarrage — pas de
+ * suivi anti-triche pour la suite de cette run (`/run/level` exige une progression séquentielle
+ * depuis la profondeur 0 d'une run fraîchement créée, incompatible avec une reprise à une
+ * profondeur quelconque) ; un "Quitter"/game over ultérieur ne pourra pas envoyer de score, comme
+ * hors ligne. Les archives perdues restent suivies localement dans tous les cas.
  */
-function resumeFromSave(save: SaveData): void {
+function resumeFromSave(save: SaveData, keepSession = false): void {
   gameOver = false;
-  currentSession = null;
+  if (!keepSession) currentSession = null;
   vitals.health = save.health;
   vitals.madness = save.madness;
   flashlight.battery = save.flashlightBattery;
@@ -724,20 +758,50 @@ function resumeFromSave(save: SaveData): void {
   hud.resetClock();
   respawn();
   player.teleport(new THREE.Vector3(save.position.x, 0, save.position.z));
-  log("run", { action: "resume", seed: save.seed, depth: save.depth });
+  menuLimbo = false;
+  player.paused = false;
+  loadingGate.ready();
+  log("run", { action: keepSession ? "resume-paused" : "resume", seed: save.seed, depth: save.depth });
 }
 
-// Le monde charge toujours en arrière-plan dès l'ouverture (session serveur ou reprise d'une
-// sauvegarde, premier niveau) ; le menu principal garde juste le joueur en pause devant le temps
-// de choisir (voir mainMenu.ts). "Continuer" ne fait alors que dépiler le menu : le monde voulu
-// est déjà prêt derrière, qu'il s'agisse d'une run neuve ou d'une reprise.
-player.paused = true;
-mainMenu.open("fullscreen");
-void saveManager.load().then((save) => {
-  if (save) resumeFromSave(save);
-  else beginNewRun(false, false);
-  saveReady = true;
-});
+/**
+ * Reconstruit le niveau 0 fictif (voir `MENU_ROOM_SEED`) et y installe le joueur, figé, avec le
+ * menu principal affiché — seul panneau interactif tant qu'on y reste. À appeler avec l'écran de
+ * chargement générique déjà démarré (voir `openMainMenu`, le bouton "Menu principal" de l'écran
+ * de fin de run, et le tout premier appel ci-dessous, au démarrage).
+ */
+function buildMenuRoom(): void {
+  menuLimbo = true;
+  levelManager.restartRun(MENU_ROOM_SEED, 0);
+  take = 1;
+  respawn();
+  player.paused = true;
+  mainMenu.open();
+  loadingGate.ready();
+}
+
+/**
+ * Ouvre le menu principal depuis l'inventaire, en jeu : la run en cours est mise en pause (voir
+ * `pausedRun`, restaurée par "Continuer") puis on bascule dans le niveau 0 fictif. Sans effet
+ * si le menu y est déjà (juste réaffiché, voir `settingsMenu`'s "retour").
+ */
+function openMainMenu(): void {
+  if (menuLimbo) {
+    mainMenu.open();
+    return;
+  }
+  pausedRun = snapshot();
+  saveManager.save(pausedRun);
+  loadingGate.start();
+  buildMenuRoom();
+}
+
+// Démarrage : le niveau 0 fictif (menu principal) s'affiche tout de suite, joueur figé ; la
+// sauvegarde éventuelle (ou la décision de repartir à neuf) se résout en arrière-plan et n'est
+// appliquée qu'au premier choix du joueur (voir `bootSavePromise`, consommé par "Continuer").
+bootSavePromise = saveManager.load();
+buildMenuRoom();
+htmlLoadingScreen?.classList.add("is-hidden");
 void loreJournal.sync();
 
 // Sauvegarde périodique (filet de sécurité) et à la mise en arrière-plan de la page (casque
@@ -817,7 +881,7 @@ renderer.xr.addEventListener("sessionstart", () => {
   resumeAudio("sessionstart");
   ambientHum.start();
   levelManager.onSessionStart();
-  vhsOverlay.blueScreen(2.5, ["CHARGEMENT", t("blue.level", { n: 0 })]);
+  vhsOverlay.showCard(2.5, [t("blue.loading"), t("blue.level", { n: levelManager.depth })]);
   const session = renderer.xr.getSession();
   if (session) {
     // Cadence fixée à 72 Hz (budget de 13,9 ms, celui que suit `PerfStats`) si le casque en
@@ -866,8 +930,6 @@ window.addEventListener("resize", () => {
   renderer.setSize(window.innerWidth, window.innerHeight);
 });
 
-const timer = new THREE.Timer();
-
 function syncHands(time: number): void {
   player.rig.updateMatrixWorld(true);
   for (const hand of hands) hand.update(time);
@@ -891,9 +953,10 @@ renderer.setAnimationLoop((timestamp) => {
   if (renderer.xr.isPresenting) renderer.xr.updateCamera(camera);
   input.update();
 
-  // Y : inventaire, B : lampe (contrôles type Saints & Sinners, voir README).
-  if (!gameOver && input.left.secondary.justPressed) inventoryMenu.toggle();
-  if (!gameOver && input.right.secondary.justPressed) {
+  // Y : inventaire, B : lampe (contrôles type Saints & Sinners, voir README) — indisponibles
+  // pendant un game over ou dans le niveau 0 fictif (rien d'autre que le menu n'y est interactif).
+  if (!gameOver && !menuLimbo && input.left.secondary.justPressed) inventoryMenu.toggle();
+  if (!gameOver && !menuLimbo && input.right.secondary.justPressed) {
     sfx.play(flashlight.toggle() ? "click" : "denied", 0.3);
   }
 
@@ -935,46 +998,53 @@ renderer.setAnimationLoop((timestamp) => {
   perfStats.begin("monde");
   const levelUpdate = levelManager.update(player.headWorld, camera, elapsedSeconds, deltaSeconds, corruption.value);
   perfStats.end("monde");
-  if (levelUpdate.corruptionDelta > 0) corruption.add(levelUpdate.corruptionDelta);
-  if (levelUpdate.wallTrapJustWarned) triggerHapticPulse(renderer, WALL_TRAP_WARNING_HAPTIC_INTENSITY, WALL_TRAP_WARNING_HAPTIC_DURATION_MS);
-  if (levelUpdate.wallTrapJustPopped) {
-    triggerHapticPulse(renderer, WALL_TRAP_POP_HAPTIC_INTENSITY, WALL_TRAP_POP_HAPTIC_DURATION_MS);
-    atmosphere.triggerFlicker(0.4);
-  }
 
-  perfStats.begin("menaces");
-  const head = player.headWorld;
-  const blackoutEvents = blackout.update(deltaSeconds, head, levelManager.depth);
-  // Avant la coupure, les néons s'étranglent.
-  if (blackout.warning && Math.random() < deltaSeconds * 3) atmosphere.triggerFlicker(0.12);
-  if (blackoutEvents.reachedPlayer) {
-    triggerHapticPulse(renderer, 0.25, 70);
-    cadreur.summon();
-  }
-  const localLight = blackout.lightAt(head.x, head.z);
-  const darkness = Math.max(levelUpdate.darkness, 1 - localLight);
-  const cadreurEvents = cadreur.update(deltaSeconds, {
-    head,
-    camera,
-    flashlight: flashlight.shining,
-    lightAt: (x, z) => levelManager.zoneLightAt(x, z) * blackout.lightAt(x, z) * atmosphere.level,
-    depth: levelManager.depth,
-  });
-  // Découvert : la bande décroche une fraction de seconde.
-  if (cadreurEvents.sighted) vhsOverlay.triggerTrackingLoss(0.35);
-  if (cadreurEvents.nearby) vhsOverlay.triggerTrackingLoss(0.45);
-  if (cadreurEvents.playerDamage > 0 && vitals.damage(cadreurEvents.playerDamage)) triggerGameOver("health");
-  if (cadreurEvents.sighted) vitals.addMadness(10);
-  if (cadreurEvents.watched) vitals.addMadness(deltaSeconds * 4);
-  perfStats.end("menaces");
+  // Niveau 0 fictif (menu principal, voir buildMenuRoom) : joueur figé et sans enjeu, aucune des
+  // menaces/de la fatigue de la vraie run ne doit s'y appliquer (santé, folie, corruption, sortie).
+  let darkness = levelUpdate.darkness;
+  let localLight = 1;
+  if (!menuLimbo) {
+    if (levelUpdate.corruptionDelta > 0) corruption.add(levelUpdate.corruptionDelta);
+    if (levelUpdate.wallTrapJustWarned) triggerHapticPulse(renderer, WALL_TRAP_WARNING_HAPTIC_INTENSITY, WALL_TRAP_WARNING_HAPTIC_DURATION_MS);
+    if (levelUpdate.wallTrapJustPopped) {
+      triggerHapticPulse(renderer, WALL_TRAP_POP_HAPTIC_INTENSITY, WALL_TRAP_POP_HAPTIC_DURATION_MS);
+      atmosphere.triggerFlicker(0.4);
+    }
 
-  if (cadreurEvents.caught) triggerGameOver("caught");
-  else if (!gameOver && levelManager.hasReachedExit(player.headWorld)) goDeeper();
-  if (levelUpdate.corruptionDelta > 0) vitals.addMadness(levelUpdate.corruptionDelta * 8);
-  if (levelUpdate.wallTrapJustPopped) vitals.addMadness(12);
-  if (blackoutEvents.reachedPlayer) vitals.addMadness(8);
-  if (vitals.update(deltaSeconds, flashlight.shining && player.movementIntensity < 0.1)) triggerGameOver("health");
-  corruption.update(deltaSeconds);
+    perfStats.begin("menaces");
+    const head = player.headWorld;
+    const blackoutEvents = blackout.update(deltaSeconds, head, levelManager.depth);
+    // Avant la coupure, les néons s'étranglent.
+    if (blackout.warning && Math.random() < deltaSeconds * 3) atmosphere.triggerFlicker(0.12);
+    if (blackoutEvents.reachedPlayer) {
+      triggerHapticPulse(renderer, 0.25, 70);
+      cadreur.summon();
+    }
+    localLight = blackout.lightAt(head.x, head.z);
+    darkness = Math.max(levelUpdate.darkness, 1 - localLight);
+    const cadreurEvents = cadreur.update(deltaSeconds, {
+      head,
+      camera,
+      flashlight: flashlight.shining,
+      lightAt: (x, z) => levelManager.zoneLightAt(x, z) * blackout.lightAt(x, z) * atmosphere.level,
+      depth: levelManager.depth,
+    });
+    // Découvert : la bande décroche une fraction de seconde.
+    if (cadreurEvents.sighted) vhsOverlay.triggerTrackingLoss(0.35);
+    if (cadreurEvents.nearby) vhsOverlay.triggerTrackingLoss(0.45);
+    if (cadreurEvents.playerDamage > 0 && vitals.damage(cadreurEvents.playerDamage)) triggerGameOver("health");
+    if (cadreurEvents.sighted) vitals.addMadness(10);
+    if (cadreurEvents.watched) vitals.addMadness(deltaSeconds * 4);
+    perfStats.end("menaces");
+
+    if (cadreurEvents.caught) triggerGameOver("caught");
+    else if (!gameOver && levelManager.hasReachedExit(player.headWorld)) goDeeper();
+    if (levelUpdate.corruptionDelta > 0) vitals.addMadness(levelUpdate.corruptionDelta * 8);
+    if (levelUpdate.wallTrapJustPopped) vitals.addMadness(12);
+    if (blackoutEvents.reachedPlayer) vitals.addMadness(8);
+    if (vitals.update(deltaSeconds, flashlight.shining && player.movementIntensity < 0.1)) triggerGameOver("health");
+    corruption.update(deltaSeconds);
+  }
 
   hud.status = {
     depth: levelManager.depth,
@@ -1015,7 +1085,7 @@ renderer.setAnimationLoop((timestamp) => {
   perfStats.begin("rendu");
   perfStats.beginGpu();
   renderer.render(scene, camera);
-  updateLoadingScreen(deltaSeconds);
+  loadingGate.update(deltaSeconds);
   perfStats.endGpu();
   perfStats.end("rendu");
   perfStats.endFrame(deltaSeconds);
