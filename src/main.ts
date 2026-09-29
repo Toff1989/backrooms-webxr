@@ -398,15 +398,14 @@ const mainMenu = new MainMenu(camera, player.body, sfx, {
     mainMenu.close();
     settingsMenu.open();
   },
-  // Ex-STOP REC de l'inventaire : termine la run mise en pause (score/pseudo). Rien à faire si
-  // aucune run n'est en pause (démarrage, ou retour au menu après un game over déjà clôturé).
+  // Ex-STOP REC de l'inventaire : ne termine plus la run (la sauvegarde mise en pause, voir
+  // `openMainMenu`, reste intacte pour "Continuer" la prochaine fois) — un simple "sauvegarder
+  // et quitter", confirmé par un écran bleu qui reste affiché (rien d'autre à faire ensuite que
+  // fermer l'onglet). La saisie du pseudo/score reste réservée aux vraies fins de run (mort,
+  // capturé, victoire), voir `triggerGameOver`.
   quit: () => {
-    if (!pausedRun) return;
-    const depth = pausedRun.depth;
-    pausedRun = null;
     mainMenu.close();
-    saveManager.clear();
-    endRunScreen.show(depth);
+    vhsOverlay.showLoading([t("blue.saved"), t("blue.closeTab")]);
   },
 });
 installAccountPanel(loreJournal);

@@ -14,6 +14,8 @@
   "hud.madnessShort": "M",
   "blue.level": "LVL {n}",
   "blue.loading": "LOADING",
+  "blue.saved": "GAME SAVED",
+  "blue.closeTab": "You can now close your browser.",
   "rarity.common": "Common",
   "rarity.rare": "Rare",
   "rarity.legendary": "Legendary",

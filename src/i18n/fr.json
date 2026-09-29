@@ -14,6 +14,8 @@
   "hud.madnessShort": "F",
   "blue.level": "NIV {n}",
   "blue.loading": "CHARGEMENT",
+  "blue.saved": "PARTIE SAUVEGARDÉE",
+  "blue.closeTab": "Vous pouvez maintenant fermer votre navigateur.",
   "rarity.common": "Commun",
   "rarity.rare": "Rare",
   "rarity.legendary": "Légendaire",
