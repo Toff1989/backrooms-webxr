@@ -188,6 +188,9 @@
   "inv.debug": "DEBUG",
 
   "menu.achievements": "ACHIEVEMENTS",
+  "notice.achievementLabel": "ACHIEVEMENT UNLOCKED",
+  "notice.loreLabel": "NEW ARCHIVE",
+  "notice.tapeTitle": "AUDIO SIGNAL CAPTURED",
   "achievements.title": "ACHIEVEMENTS",
   "achievements.progress": "{count} / {total} unlocked",
   "achievements.unlocked": "Achievement unlocked: {title}",

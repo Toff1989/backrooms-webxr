@@ -188,6 +188,9 @@
   "inv.debug": "DEBUG",
 
   "menu.achievements": "SUCCÈS",
+  "notice.achievementLabel": "SUCCÈS DÉBLOQUÉ",
+  "notice.loreLabel": "NOUVELLE ARCHIVE",
+  "notice.tapeTitle": "SIGNAL AUDIO CAPTÉ",
   "achievements.title": "SUCCÈS",
   "achievements.progress": "{count} / {total} débloqués",
   "achievements.unlocked": "Succès débloqué : {title}",

@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import { VRButton } from "three/addons/webxr/VRButton.js";
 import { AmbientHum } from "./assets/audio/ambientHum";
-import { getLanguage, onLanguageChange, setLanguage, t, type Language } from "./i18n";
+import { getLanguage, onLanguageChange, setLanguage, t, type Language, type TranslationKey } from "./i18n";
 import { runWarmupStep } from "./assets/audio/synth";
 import { DEBUG_ENABLED, installDebugLog, isDebugMenuEnabled, log } from "./debug/debugLog";
 import { PhysicsWorld, RAPIER } from "./physics/physicsWorld";
@@ -17,6 +17,8 @@ import { InventoryMenu } from "./player/inventoryMenu";
 import { Journal } from "./player/journal";
 import { LoadingGate } from "./player/loadingGate";
 import { MainMenu } from "./player/mainMenu";
+import { NoticeModal } from "./player/noticeModal";
+import { TapeSignalModal } from "./player/tapeSignalModal";
 import { SettingsMenu } from "./player/settingsMenu";
 import { AchievementsMenu } from "./player/achievementsMenu";
 import { PerfStats, setPerf } from "./player/perfStats";
@@ -45,7 +47,7 @@ import { resetProgress, setPseudo } from "./world/playerIdentity";
 import { AchievementTracker, computeAchievementPerks } from "./world/achievements";
 import { COLLECTIBLE_KINDS, generateCollectibleLore, getCollectibleRarity, type CollectibleKind } from "./shared/collectibles";
 import { PROP_HALF_EXTENTS, type PropKind } from "./shared/props";
-import { loreFormat } from "./shared/lore";
+import { loreFormat, type LoreFormat } from "./shared/lore";
 import { LoreJournal } from "./world/loreJournal";
 import { SaveManager, type SaveData } from "./world/saveManager";
 import { configureLoreServices, updateLoreObjects } from "./world/lorePage";
@@ -192,10 +194,13 @@ function setVignette(enabled: boolean): void {
   }
 }
 const hud = new CamcorderHud(camera);
-achievements.onUnlock((def) => hud.showNotice(t("achievements.unlocked", { title: t(def.titleKey) })));
+/** Bandeau bien visible (succès, archive trouvée) : distinct du HUD discret, avec son propre son. */
+const noticeModal = new NoticeModal(camera, sfx);
+achievements.onUnlock((def) => noticeModal.show("achievement", t(def.titleKey)));
 const vitals = new PlayerVitals();
-/** Archives perdues : cassettes lues dans le viseur, polaroids photographiés derrière le joueur. */
-const tapePlayer = new TapePlayer(audioListener, hud);
+/** Archives perdues : cassettes lues dans un modal dédié (signal + transcription), polaroids photographiés derrière le joueur. */
+const tapeSignalModal = new TapeSignalModal(camera);
+const tapePlayer = new TapePlayer(audioListener, tapeSignalModal);
 const capturePhoto = createPhotoCapture(renderer, scene, camera, physics);
 const captureObject = createObjectCapture(renderer, scene, camera);
 /** Vues en direct (télé, caméra de surveillance, jumelles, loupe, caméscope). */
@@ -457,6 +462,13 @@ for (const panel of [inventoryMenu, endRunScreen, journal, mainMenu, settingsMen
   panel.prepareForDisplay(renderer, camera, scene);
 }
 
+const LORE_FORMAT_LABEL_KEY: Record<LoreFormat, TranslationKey> = {
+  journal: "lore.format.journal",
+  fiche: "lore.format.fiche",
+  polaroid: "lore.format.polaroid",
+  audio: "lore.format.audio",
+};
+
 /**
  * Archive perdue saisie : lue selon sa forme (photo qui se développe, cassette qui se lance), elle
  * entre au journal (et au serveur si la run y est enregistrée).
@@ -466,9 +478,10 @@ function readLorePage(page: LorePageData, hand: Hand): void {
   page.onRead();
   levelManager.pinLorePage(fragment);
   if (!loreJournal.read(fragment)) return;
-  hud.showNotice(t("lore.new", { n: fragment + 1 }));
+  const format = loreFormat(fragment);
+  noticeModal.show("lore", t("lore.title", { n: fragment + 1 }), t(LORE_FORMAT_LABEL_KEY[format]));
   hand.pulse(0.5, 120);
-  log("lore", { action: "read", fragment, format: loreFormat(fragment), depth: levelManager.depth });
+  log("lore", { action: "read", fragment, format, depth: levelManager.depth });
   archiveReadThisLevel = true;
   // Condition de victoire : toutes les archives réunies.
   if (loreJournal.nextFragment === null) triggerGameOver("victory");
@@ -964,6 +977,8 @@ if (DEBUG_ENABLED) {
     },
     achievementsUnlocked: () => achievements.unlockedCount,
     achievements,
+    noticeModal,
+    tapeSignalModal,
     renderer,
   };
 }
@@ -1203,6 +1218,7 @@ renderer.setAnimationLoop((timestamp) => {
   tapePlayer.update(deltaSeconds);
   updateLoreObjects(deltaSeconds);
   hud.update(deltaSeconds);
+  noticeModal.update(deltaSeconds);
   flashlight.update(deltaSeconds, corruption.value);
   // Lumière renvoyée par la lampe : centrée un mètre devant, là où tombe le faisceau.
   bouncePosition.copy(camera.getWorldDirection(bouncePosition)).setY(0).normalize().add(player.headWorld).setY(1);
