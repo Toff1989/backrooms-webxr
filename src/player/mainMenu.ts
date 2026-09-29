@@ -5,27 +5,33 @@ import type { Hand } from "./hand";
 import type { Sfx } from "./sfx";
 
 const WIDTH = 0.6;
-const HEIGHT = 0.62;
+const HEIGHT = 0.66;
 const PX_PER_M = 1500;
 const DISTANCE = 0.75;
 const QUIT_CONFIRM_SECONDS = 3;
 
-type ButtonId = "continue" | "newGame" | "settings" | "quit";
+type ButtonId = "continue" | "newGame" | "guide" | "devices" | "scores" | "settings" | "quit";
 
 const CANVAS_W = WIDTH * PX_PER_M;
 const BUTTON_W = 700;
 const BUTTON_H = 90;
 const BUTTON_X = (CANVAS_W - BUTTON_W) / 2;
 const BUTTONS: Record<ButtonId, Rect> = {
-  continue: { x: BUTTON_X, y: 260, w: BUTTON_W, h: BUTTON_H },
-  newGame: { x: BUTTON_X, y: 370, w: BUTTON_W, h: BUTTON_H },
-  settings: { x: BUTTON_X, y: 480, w: BUTTON_W, h: BUTTON_H },
-  quit: { x: BUTTON_X, y: 590, w: BUTTON_W, h: BUTTON_H },
+  continue: { x: BUTTON_X, y: 200, w: BUTTON_W, h: BUTTON_H },
+  newGame: { x: BUTTON_X, y: 300, w: BUTTON_W, h: BUTTON_H },
+  guide: { x: BUTTON_X, y: 400, w: BUTTON_W, h: BUTTON_H },
+  devices: { x: BUTTON_X, y: 500, w: BUTTON_W, h: BUTTON_H },
+  scores: { x: BUTTON_X, y: 600, w: BUTTON_W, h: BUTTON_H },
+  settings: { x: BUTTON_X, y: 700, w: BUTTON_W, h: BUTTON_H },
+  quit: { x: BUTTON_X, y: 800, w: BUTTON_W, h: BUTTON_H },
 };
 
 export interface MainMenuActions {
   continueRun(): void;
   newGame(): void;
+  openGuide(): void;
+  openDevices(): void;
+  openScores(): void;
   openSettings(): void;
   /** "Quitter" : termine la run en cours (ex-STOP REC de l'inventaire), si une run est en pause. */
   quit(): void;
@@ -97,6 +103,9 @@ export class MainMenu extends UiPanel {
     this.sfx.play("click", 0.4);
     if (id === "continue") this.actions.continueRun();
     else if (id === "newGame") this.actions.newGame();
+    else if (id === "guide") this.actions.openGuide();
+    else if (id === "devices") this.actions.openDevices();
+    else if (id === "scores") this.actions.openScores();
     else if (id === "settings") this.actions.openSettings();
     else if (id === "quit") {
       // Termine la run en cours (score/pseudo, voir endRunScreen) : une confirmation évite un
@@ -124,10 +133,13 @@ export class MainMenu extends UiPanel {
     ctx.textBaseline = "middle";
     ctx.fillStyle = "#ff6b5a";
     ctx.font = "bold 44px monospace";
-    ctx.fillText(t("menu.title"), width / 2, 140);
+    ctx.fillText(t("menu.title"), width / 2, 105);
 
     drawButton(ctx, BUTTONS.continue, t("menu.continue"), { hovered: hovered.has("continue"), accent: "#9fe39f" });
     drawButton(ctx, BUTTONS.newGame, t("menu.newGame"), { hovered: hovered.has("newGame") });
+    drawButton(ctx, BUTTONS.guide, t("menu.guide"), { hovered: hovered.has("guide"), accent: "#7fc4e8" });
+    drawButton(ctx, BUTTONS.devices, t("menu.devices"), { hovered: hovered.has("devices"), accent: "#e8c34a" });
+    drawButton(ctx, BUTTONS.scores, t("menu.scores"), { hovered: hovered.has("scores"), accent: "#9fe39f" });
     drawButton(ctx, BUTTONS.settings, t("menu.settings"), { hovered: hovered.has("settings") });
     drawButton(ctx, BUTTONS.quit, this.quitArmedUntil ? t("inv.confirm") : t("menu.quit"), { hovered: hovered.has("quit"), accent: "#e06a5a" });
   }

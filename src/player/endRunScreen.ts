@@ -227,11 +227,13 @@ export class EndRunScreen extends UiPanel {
     } else {
       ctx.font = "bold 26px monospace";
       ctx.fillStyle = "#9fe39f";
-      wrapText(ctx, t("end.sent", { pseudo: this.submittedPseudo }), width / 2, 170, width - 180, 32, 2);
+      // La raison du game over (jusqu'à 2 lignes, y 150 → 180) pousse "Score envoyé" et le classement vers le bas.
+      const sentY = this.gameOverReason ? 226 : 170;
+      wrapText(ctx, t("end.sent", { pseudo: this.submittedPseudo }), width / 2, sentY, width - 180, 32, 2);
       ctx.textAlign = "left";
       ctx.font = "24px monospace";
       this.leaderboard.slice(0, LEADERBOARD_ROWS).forEach((entry, index) => {
-        const y = 222 + index * 46;
+        const y = sentY + 52 + index * 46;
         ctx.fillStyle = index === 0 ? "#ffe89a" : "#e2d8bf";
         ctx.fillText(ellipsize(ctx, `${String(index + 1).padStart(2, "0")}. ${entry.pseudo}`, width - 360), 120, y);
         ctx.fillStyle = "#a79d86";
@@ -241,7 +243,7 @@ export class EndRunScreen extends UiPanel {
       });
       if (this.leaderboard.length === 0) {
         ctx.fillStyle = "#a79d86";
-        ctx.fillText(t("end.empty"), 120, 240);
+        ctx.fillText(t("end.empty"), 120, sentY + 70);
       }
       ctx.textAlign = "center";
       drawButton(ctx, BUTTONS.restart, t("end.restart"), { hovered: hovered.has("restart") });

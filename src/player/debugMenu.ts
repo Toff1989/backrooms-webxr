@@ -21,7 +21,7 @@ function actionRect(index: number, count: number): Rect {
   const columns = 2;
   const rows = Math.ceil(count / columns);
   const w = (872 - gap * (columns - 1)) / columns;
-  const h = (520 - gap * (rows - 1)) / Math.max(1, rows);
+  const h = (490 - gap * (rows - 1)) / Math.max(1, rows);
   const column = index % columns;
   const row = Math.floor(index / columns);
   return { x: 40 + column * (w + gap), y: 90 + row * (h + gap), w, h };
@@ -123,7 +123,7 @@ export class DebugMenu extends UiPanel {
     if (this.statusUntil) {
       ctx.font = "20px monospace";
       ctx.fillStyle = "#9fe39f";
-      wrapText(ctx, this.statusMessage, width / 2, 638, width - 80, 22, 1);
+      wrapText(ctx, this.statusMessage, width / 2, 616, width - 80, 24, 2);
     }
   }
 }

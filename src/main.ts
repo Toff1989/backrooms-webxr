@@ -9,15 +9,18 @@ import { CamcorderHud } from "./player/camcorderHud";
 import { ComfortVignette } from "./player/comfortVignette";
 import { EndRunScreen } from "./player/endRunScreen";
 import { Flashlight } from "./player/flashlight";
+import { GuideMenu } from "./player/guideMenu";
 import { GrabSystem } from "./player/grabSystem";
 import { Hand } from "./player/hand";
 import { triggerHapticPulse } from "./player/haptics";
 import { DebugMenu } from "./player/debugMenu";
+import { DeviceMenu } from "./player/deviceMenu";
 import { InventoryMenu } from "./player/inventoryMenu";
 import { Journal } from "./player/journal";
 import { LoadingGate } from "./player/loadingGate";
 import { MainMenu } from "./player/mainMenu";
 import { SettingsMenu } from "./player/settingsMenu";
+import { ScoresMenu } from "./player/scoresMenu";
 import { PerfStats, setPerf } from "./player/perfStats";
 import { LiveViews } from "./player/liveViews";
 import { createObjectCapture, createPhotoCapture } from "./player/photoCapture";
@@ -261,6 +264,9 @@ let settingsOpenedStandalone = false;
 
 // Déclarée avant les menus : leurs actions y font référence (appelées plus tard, au clic).
 let grabSystem: GrabSystem;
+let guideMenu: GuideMenu;
+let deviceMenu: DeviceMenu;
+let scoresMenu: ScoresMenu;
 const DEBUG_SPAWN_KINDS: Array<CollectibleKind | PropKind> = [...COLLECTIBLE_KINDS, ...(Object.keys(PROP_HALF_EXTENTS) as PropKind[])];
 let debugSpawnIndex = 0;
 
@@ -400,6 +406,18 @@ const mainMenu = new MainMenu(camera, player.body, sfx, {
     mainMenu.close();
     settingsMenu.open();
   },
+  openGuide: () => {
+    mainMenu.close();
+    guideMenu.open();
+  },
+  openDevices: () => {
+    mainMenu.close();
+    deviceMenu.open();
+  },
+  openScores: () => {
+    mainMenu.close();
+    scoresMenu.open();
+  },
   // Ex-STOP REC de l'inventaire : ne termine plus la run (la sauvegarde mise en pause, voir
   // `openMainMenu`, reste intacte pour "Continuer" la prochaine fois) — un simple "sauvegarder
   // et quitter", confirmé par un écran bleu qui reste affiché (rien d'autre à faire ensuite que
@@ -410,10 +428,13 @@ const mainMenu = new MainMenu(camera, player.body, sfx, {
     vhsOverlay.showLoading([t("blue.saved"), t("blue.closeTab")]);
   },
 });
+guideMenu = new GuideMenu(camera, player.body, sfx, () => mainMenu.open());
+deviceMenu = new DeviceMenu(camera, player.body, loreJournal, sfx, () => mainMenu.open());
+scoresMenu = new ScoresMenu(camera, player.body, loreJournal, sfx, () => mainMenu.open());
 installAccountPanel(loreJournal);
 
-const pointer = new UiPointer(hands, scene, [inventoryMenu, endRunScreen, journal, mainMenu, settingsMenu, debugMenu]);
-for (const panel of [inventoryMenu, endRunScreen, journal, mainMenu, settingsMenu, debugMenu]) {
+const pointer = new UiPointer(hands, scene, [inventoryMenu, endRunScreen, journal, mainMenu, settingsMenu, debugMenu, guideMenu, deviceMenu, scoresMenu]);
+for (const panel of [inventoryMenu, endRunScreen, journal, mainMenu, settingsMenu, debugMenu, guideMenu, deviceMenu, scoresMenu]) {
   liveViews.hideFromOffscreen(panel.group);
   panel.prepareForDisplay(renderer, camera, scene);
 }
@@ -661,6 +682,9 @@ function closeAllMenus(): void {
   if (settingsMenu.visible) settingsMenu.close();
   if (debugMenu.visible) debugMenu.close();
   if (mainMenu.visible) mainMenu.close();
+  if (guideMenu?.visible) guideMenu.close();
+  if (deviceMenu?.visible) deviceMenu.close();
+  if (scoresMenu?.visible) scoresMenu.close();
 }
 
 function triggerGameOver(reason: "health" | "caught" | "victory"): void {
@@ -701,6 +725,7 @@ function restartWorld(seed: string): void {
   vitals.reset();
   grabSystem.loseHeld();
   collectionStore.clear();
+  flashlight.reset();
   levelManager.restartRun(seed);
   take = 1;
   hud.resetClock();
@@ -824,13 +849,16 @@ if (DEBUG_ENABLED) {
     },
     descend: () => goDeeper(),
     toggleInventory: () => inventoryMenu.toggle(),
-    openMenu: (name: "main" | "inventory" | "settings" | "journal" | "debug" | "end") => {
+    openMenu: (name: "main" | "inventory" | "settings" | "journal" | "debug" | "guide" | "devices" | "scores" | "end") => {
       closeAllMenus();
       if (name === "main") mainMenu.open();
       else if (name === "inventory") inventoryMenu.open();
       else if (name === "settings") settingsMenu.open();
       else if (name === "journal") journal.openFloating();
       else if (name === "debug") debugMenu.open();
+      else if (name === "guide") guideMenu.open();
+      else if (name === "devices") deviceMenu.open();
+      else if (name === "scores") scoresMenu.open();
       else endRunScreen.showGameOver(levelManager.depth, "health");
     },
     head: () => ({ x: player.headWorld.x, z: player.headWorld.z }),

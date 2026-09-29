@@ -158,6 +158,46 @@ export abstract class UiPanel {
   protected abstract draw(ctx: CanvasRenderingContext2D): void;
 }
 
+/**
+ * Crochets de diagnostic, inactifs en jeu : le test visuel des menus (`tests/browser/menus-render.test.ts`)
+ * les branche pour repérer les textes rognés ("..."), les phrases coupées faute de lignes
+ * (`wrapText`) et les zones de boutons, sans que le rendu réel n'en dépende.
+ */
+export const uiDiagnostics: {
+  onButton: ((rect: Rect, lines: string[]) => void) | null;
+  onEllipsis: ((original: string, shown: string) => void) | null;
+  onWrapOverflow: ((text: string, maxLines: number) => void) | null;
+} = { onButton: null, onEllipsis: null, onWrapOverflow: null };
+
+/** Coupe un libellé en deux lignes de largeur la plus équilibrée possible, à un espace (null s'il n'y en a pas). */
+function balancedSplit(ctx: CanvasRenderingContext2D, label: string): [string, string] | null {
+  let best: [string, string] | null = null;
+  let bestWidth = Infinity;
+  for (let i = 0; i < label.length; i++) {
+    if (label[i] !== " ") continue;
+    const pair: [string, string] = [label.slice(0, i), label.slice(i + 1)];
+    const width = Math.max(ctx.measureText(pair[0]).width, ctx.measureText(pair[1]).width);
+    if (width < bestWidth) {
+      best = pair;
+      bestWidth = width;
+    }
+  }
+  return best;
+}
+
+/**
+ * Police la plus grande (de `max` à `min` px) pour laquelle `text` tient dans `maxWidth` ; la
+ * police du contexte est laissée réglée dessus (à `min` si même là ça ne tient pas).
+ */
+export function fitFont(ctx: CanvasRenderingContext2D, text: string, maxWidth: number, max: number, min: number, weight = ""): number {
+  let size = max;
+  do {
+    ctx.font = `${weight}${size}px monospace`;
+    size -= 1;
+  } while (size >= min && ctx.measureText(text).width > maxWidth);
+  return size + 1;
+}
+
 /** Bouton arrondi dessiné sur un canvas de panneau. */
 export function drawButton(ctx: CanvasRenderingContext2D, rect: Rect, label: string, state: { hovered: boolean; accent?: string; disabled?: boolean }): void {
   const radius = 14;
@@ -171,19 +211,42 @@ export function drawButton(ctx: CanvasRenderingContext2D, rect: Rect, label: str
   ctx.strokeStyle = state.accent ?? "rgba(255, 244, 214, 0.45)";
   ctx.stroke();
   ctx.fillStyle = state.hovered ? "#15110b" : (state.accent ?? "#efe6cf");
-  let fontSize = 30;
   const maxWidth = rect.w - 32;
-  do {
-    ctx.font = `bold ${fontSize}px monospace`;
-    fontSize -= 1;
-  } while (fontSize >= 18 && ctx.measureText(label).width > maxWidth);
-  ctx.font = `bold ${Math.max(18, fontSize + 1)}px monospace`;
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
-  let fitted = label;
-  while (ctx.measureText(`${fitted}...`).width > maxWidth && fitted.length > 1) fitted = fitted.slice(0, -1);
-  if (fitted !== label) fitted = `${fitted.trimEnd()}...`;
-  ctx.fillText(fitted, rect.x + rect.w / 2, rect.y + rect.h / 2 + 1);
+  const fitsAt = (text: string, size: number): boolean => {
+    ctx.font = `bold ${size}px monospace`;
+    return ctx.measureText(text).width <= maxWidth;
+  };
+  // 1) une ligne, de 30 px réduite jusqu'à 18 px ; 2) sinon deux lignes équilibrées (bouton assez
+  // haut, libellé à plusieurs mots) ; 3) sinon une ligne encore réduite ; 4) en dernier recours
+  // seulement, une ellipse — jamais quand le libellé tient en entier.
+  let lines = [label];
+  let size = 30;
+  while (size > 18 && !fitsAt(label, size)) size -= 1;
+  if (!fitsAt(label, size)) {
+    const split = rect.h >= 56 ? balancedSplit(ctx, label) : null;
+    let twoLineSize = 26;
+    if (split) while (twoLineSize > 16 && !(fitsAt(split[0], twoLineSize) && fitsAt(split[1], twoLineSize))) twoLineSize -= 1;
+    if (split && fitsAt(split[0], twoLineSize) && fitsAt(split[1], twoLineSize)) {
+      lines = split;
+      size = twoLineSize;
+    } else {
+      size = 18;
+      while (size > 13 && !fitsAt(label, size)) size -= 1;
+      if (!fitsAt(label, size)) {
+        let cut = label;
+        while (cut.length > 1 && !fitsAt(`${cut}...`, size)) cut = cut.slice(0, -1);
+        lines = [`${cut.trimEnd()}...`];
+        uiDiagnostics.onEllipsis?.(label, lines[0]!);
+      }
+    }
+  }
+  ctx.font = `bold ${size}px monospace`;
+  uiDiagnostics.onButton?.(rect, lines);
+  const lineHeight = Math.round(size * 1.2);
+  const top = rect.y + rect.h / 2 + 1 - ((lines.length - 1) * lineHeight) / 2;
+  lines.forEach((line, index) => ctx.fillText(line, rect.x + rect.w / 2, top + index * lineHeight));
   ctx.restore();
 }
 
@@ -199,26 +262,22 @@ export function drawPanelBackground(ctx: CanvasRenderingContext2D, width: number
   ctx.stroke();
 }
 
-export function wrapText(ctx: CanvasRenderingContext2D, text: string, x: number, y: number, maxWidth: number, lineHeight: number, maxLines: number): void {
-  let lines = 0;
+export function wrapText(ctx: CanvasRenderingContext2D, text: string, x: number, y: number, maxWidth: number, lineHeight: number, maxLines: number): number {
+  const lines: string[] = [];
   for (const paragraph of text.split(/\r?\n/)) {
-    const words = paragraph.split(" ");
     let line = "";
-    for (const word of words) {
+    for (const word of paragraph.split(" ")) {
       const candidate = line ? `${line} ${word}` : word;
       if (ctx.measureText(candidate).width > maxWidth && line) {
-        ctx.fillText(line, x, y + lines * lineHeight);
+        lines.push(line);
         line = word;
-        lines += 1;
-        if (lines >= maxLines) return;
       } else {
         line = candidate;
       }
     }
-    if (line) {
-      ctx.fillText(line, x, y + lines * lineHeight);
-      lines += 1;
-      if (lines >= maxLines) return;
-    }
+    if (line) lines.push(line);
   }
+  if (lines.length > maxLines) uiDiagnostics.onWrapOverflow?.(text, maxLines);
+  lines.slice(0, maxLines).forEach((line, index) => ctx.fillText(line, x, y + index * lineHeight));
+  return Math.min(lines.length, maxLines);
 }

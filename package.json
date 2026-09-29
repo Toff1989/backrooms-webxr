@@ -13,6 +13,7 @@
     "test:physics": "vite-node tests/physics.sim.ts",
     "test:visual": "node scripts/render-test-all.mjs",
     "test:visual:windows": "node scripts/render-test-windows.mjs",
+    "test:visual:menus": "node scripts/render-menus.mjs",
     "test:visual:game": "node scripts/render-game-interactions-windows.mjs --interactions",
     "test:visual:object": "node scripts/render-game-interactions-windows.mjs",
     "debug": "node scripts/debug-local.mjs"

@@ -4,7 +4,6 @@ import { getModelShape } from "../physics/modelShape";
 import { drawButton, drawPanelBackground, inRect, UiPanel, wrapText, type PressButton, type Rect } from "../ui/uiPanel";
 import { spawnCollectibleModel } from "../world/collectibleLoader";
 import { SORT_MODES, type CollectionEntry, type CollectionStore } from "../world/collection";
-import { computePerks } from "../world/collectionPerks";
 import { wrapLines } from "../world/loreArt";
 import { applyVhsEffect } from "../world/vhsMaterial";
 import type { Hand } from "./hand";
@@ -47,10 +46,10 @@ const BUTTONS: Record<ButtonId, Rect> = {
   next: { x: 120, y: 556, w: 70, h: 64 },
   sort: { x: 200, y: 556, w: 300, h: 64 },
   close: { x: 520, y: 556, w: 464, h: 64 },
-  journal: { x: 40, y: 632, w: 230, h: 60 },
-  settings: { x: 280, y: 632, w: 230, h: 60 },
-  mainMenu: { x: 520, y: 632, w: 230, h: 60 },
-  debug: { x: 760, y: 632, w: 224, h: 60 },
+  journal: { x: 40, y: 632, w: 190, h: 60 },
+  settings: { x: 240, y: 632, w: 250, h: 60 },
+  mainMenu: { x: 500, y: 632, w: 290, h: 60 },
+  debug: { x: 800, y: 632, w: 184, h: 60 },
 };
 
 const rarityLabel = (rarity: CollectionEntry["rarity"]): string => t(`rarity.${rarity}`);
@@ -448,11 +447,6 @@ export class InventoryMenu extends UiPanel {
       ctx.font = "26px monospace";
       ctx.fillStyle = "#9fe39f";
       wrapText(ctx, this.statusMessage, 40, 470, width - 80, 28, 2);
-    } else {
-      ctx.font = "21px monospace";
-      ctx.fillStyle = "#a79d86";
-      wrapText(ctx, this.store.count === 0 ? t("inv.empty") : t("inv.aim"), 40, 470, width - 80, 24, 2);
-      wrapText(ctx, t("inv.store"), 40, 518, width - 80, 24, 2);
     }
 
     const hoveredButtons = new Set(this.hoverButton.values());
@@ -465,21 +459,10 @@ export class InventoryMenu extends UiPanel {
     drawButton(ctx, BUTTONS.mainMenu, t("inv.mainMenu"), { hovered: hoveredButtons.has("mainMenu") });
     if (this.actions.isDebugEnabled()) drawButton(ctx, BUTTONS.debug, t("inv.debug"), { hovered: hoveredButtons.has("debug"), accent: "#7fc4e8" });
 
-    ctx.textAlign = "center";
-    ctx.font = "20px monospace";
-    ctx.fillStyle = "#c9b98a";
-    const perks = computePerks(this.store.getAll());
-    const battery = Math.round((perks.batteryCapacity - 1) * 100);
-    const decay = Math.round((perks.corruptionDecay - 1) * 100);
-    const stamina = Math.round((perks.sprintRecovery - 1) * 100);
-    if (battery !== 0 || decay !== 0 || stamina !== 0 || perks.beaconSteadiness > 0) {
-      wrapText(ctx, t("perks.line", { battery, decay, stamina, compass: perks.beaconSteadiness > 0 ? t("perks.compass") : "" }), width / 2, 708, width - 80, 22, 2);
-    }
-    ctx.fillStyle = "#7d7563";
-    ctx.fillText(t("inv.footer"), width / 2, 752);
     ctx.textAlign = "right";
     ctx.font = "15px monospace";
-    ctx.fillText(`build ${__BUILD_ID__}`, width - 20, 774);
+    ctx.fillStyle = "#8d846e";
+    ctx.fillText(`build ${__BUILD_ID__}`, width - 30, 748);
   }
 }
 

@@ -67,6 +67,17 @@ export class Flashlight {
     this.battery = Math.min(1, this.battery + amount);
   }
 
+  reset(): void {
+    this.on = false;
+    this.battery = 1;
+    this.intensity = 0;
+    this.sag = 0;
+    this.sagTarget = 0;
+    this.sagTimer = 0;
+    this.cutSeconds = 0;
+    this.light.intensity = 0;
+  }
+
   /** Coupure brève (téléportation, glitch fort). */
   cut(seconds: number): void {
     this.cutSeconds = Math.max(this.cutSeconds, seconds);

@@ -1,12 +1,10 @@
 import * as THREE from "three";
 import { log } from "../debug/debugLog";
-import { loreFragment, onLanguageChange, t, type TranslationKey } from "../i18n";
+import { loreFragment, onLanguageChange, t } from "../i18n";
 import { LORE_FRAGMENT_COUNT, loreFormat, type LoreFormat } from "../shared/lore";
 import { drawButton, drawPanelBackground, inRect, UiPanel, wrapText, type PressButton, type Rect } from "../ui/uiPanel";
-import { loreExcerpt } from "../world/loreArt";
 import { playLoreTape } from "../world/lorePage";
 import type { LoreJournal } from "../world/loreJournal";
-import { confirmPairing, startPairing, type PairingRequest } from "../world/playerIdentity";
 import type { Hand } from "./hand";
 import type { Sfx } from "./sfx";
 
@@ -18,43 +16,26 @@ const CANVAS_H = Math.round(HEIGHT * PX_PER_M);
 
 const LEFT_PAGE: Rect = { x: 30, y: 30, w: 488, h: 570 };
 const RIGHT_PAGE: Rect = { x: CANVAS_W - 30 - 488, y: 30, w: 488, h: 570 };
-const TAB_BUTTONS: Record<"tapes" | "record" | "close", Rect> = {
-  tapes: { x: 30, y: 624, w: 230, h: 66 },
-  record: { x: 272, y: 624, w: 380, h: 66 },
-  close: { x: CANVAS_W - 30 - 230, y: 624, w: 230, h: 66 },
-};
-const INDEX_TOP = 128;
+const CLOSE_BUTTON: Rect = { x: CANVAS_W / 2 - 115, y: 624, w: 230, h: 66 };
+const INDEX_TOP = 118;
 const INDEX_ROW = 29;
 /** Couleur de l'étiquette de forme dans l'index (note, fiche, photo, audio). */
-const FORMAT_COLOR: Record<LoreFormat, string> = { journal: "#1c2753", fiche: "#a3221b", polaroid: "#2f6b2f", audio: "#8a5a2b" };
+const FORMAT_COLOR: Record<LoreFormat, string> = { journal: "#7fa6e8", fiche: "#e06a5a", polaroid: "#7fd07f", audio: "#e8a44a" };
 const PLAY_BUTTON: Rect = { x: CANVAS_W - 30 - 488 + 30, y: 30 + 570 - 84, w: 250, h: 58 };
 
 const FLOAT_DISTANCE = 0.55;
 
-type Tab = "tapes" | "record";
-type PairState =
-  | { kind: "idle" }
-  | { kind: "requesting" }
-  | { kind: "showing"; request: PairingRequest }
-  | { kind: "entering"; digits: string }
-  | { kind: "confirming" };
-
-const KEYPAD_TOP = 172;
-const KEYPAD = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "⌫", "0", "OK"] as const;
 
 /**
  * Journal des archives perdues : un carnet qu'on ouvre depuis le menu d'inventaire (bouton
  * JOURNAL), qui flotte alors devant soi. L'autre main tourne les pages au pointeur (gâchette).
  * - Onglet ARCHIVES : l'index des 16 archives (lues ou encore perdues), et l'archive choisie
  *   écrite à la main sur la page de droite.
- * - Onglet ENREGISTREMENT : le code de cassette (retrouver ses archives et scores ailleurs), les
- *   meilleures runs, et le jumelage façon télé (afficher un code / confirmer celui d'un autre).
+ * - Onglet ENREGISTREMENT : le code de cassette et les meilleures runs ; le jumelage se trouve
+ *   dans le menu APPAREILS du menu principal.
  */
 export class Journal extends UiPanel {
-  private tab: Tab = "tapes";
   private selected = 0;
-  private pair: PairState = { kind: "idle" };
-  private status: { key: TranslationKey; good: boolean } | null = null;
   private readonly hovered = new Map<Hand, string | null>();
   private hitRects: Array<{ id: string; rect: Rect }> = [];
   private hasInitialPlacement = false;
@@ -89,8 +70,6 @@ export class Journal extends UiPanel {
   close(): void {
     if (!this.visible) return;
     this.group.visible = false;
-    if (this.pair.kind === "showing") this.pair.request.cancel();
-    if (this.pair.kind !== "idle") this.pair = { kind: "idle" };
     this.sfx.play("click", 0.25);
   }
 
@@ -99,7 +78,6 @@ export class Journal extends UiPanel {
     this.group.visible = true;
     // Ouvert sur la dernière archive lue (la plus récente), sinon sur la première à trouver.
     this.selected = Math.max(0, Math.min(this.lore.count, LORE_FRAGMENT_COUNT) - 1);
-    this.status = null;
     this.sfx.play("take", 0.35);
     this.invalidate();
     void this.lore.sync();
@@ -128,11 +106,6 @@ export class Journal extends UiPanel {
   }
 
   private activate(id: string): void {
-    if (id === "tab:tapes" || id === "tab:record") {
-      this.tab = id === "tab:tapes" ? "tapes" : "record";
-      this.status = null;
-      return;
-    }
     if (id === "tab:close") {
       this.close();
       return;
@@ -145,52 +118,6 @@ export class Journal extends UiPanel {
       playLoreTape(this.selected);
       return;
     }
-    if (id === "pair:start") this.beginShowingCode();
-    else if (id === "pair:enter") {
-      this.pair = { kind: "entering", digits: "" };
-      this.status = null;
-    } else if (id === "pair:cancel") {
-      if (this.pair.kind === "showing") this.pair.request.cancel();
-      this.pair = { kind: "idle" };
-    } else if (id.startsWith("key:") && this.pair.kind === "entering") {
-      const key = id.slice(4);
-      if (key === "⌫") this.pair.digits = this.pair.digits.slice(0, -1);
-      else if (key === "OK") this.submitCode(this.pair.digits);
-      else if (this.pair.digits.length < 6) this.pair.digits += key;
-    }
-  }
-
-  private beginShowingCode(): void {
-    this.pair = { kind: "requesting" };
-    this.status = null;
-    void startPairing((success) => {
-      this.pair = { kind: "idle" };
-      this.status = success ? { key: "pair.success", good: true } : { key: "pair.failed", good: false };
-      if (success) void this.lore.sync();
-      this.invalidate();
-    }).then((request) => {
-      if (this.pair.kind !== "requesting") {
-        request?.cancel();
-        return;
-      }
-      if (request) this.pair = { kind: "showing", request };
-      else {
-        this.pair = { kind: "idle" };
-        this.status = { key: "pair.unavailable", good: false };
-      }
-      this.invalidate();
-    });
-  }
-
-  private submitCode(digits: string): void {
-    if (digits.length !== 6) return;
-    this.pair = { kind: "confirming" };
-    void confirmPairing(digits).then((ok) => {
-      this.pair = { kind: "idle" };
-      this.status = ok ? { key: "pair.confirmed", good: true } : { key: "pair.badCode", good: false };
-      if (ok) void this.lore.sync();
-      this.invalidate();
-    });
   }
 
   protected draw(ctx: CanvasRenderingContext2D): void {
@@ -198,16 +125,11 @@ export class Journal extends UiPanel {
     drawPanelBackground(ctx, CANVAS_W, CANVAS_H);
     this.drawPagePanel(ctx, LEFT_PAGE);
     this.drawPagePanel(ctx, RIGHT_PAGE);
-    if (this.tab === "tapes") this.drawTapes(ctx);
-    else this.drawRecord(ctx);
+    this.drawTapes(ctx);
 
     const hovered = new Set(this.hovered.values());
-    for (const [id, rect] of Object.entries(TAB_BUTTONS)) {
-      const key = `tab:${id}`;
-      const label = id === "tapes" ? t("journal.tapesTab") : id === "record" ? t("journal.recordTab") : t("journal.close");
-      drawButton(ctx, rect, label, { hovered: hovered.has(key), accent: id === this.tab ? "#e8c34a" : undefined });
-      this.hitRects.push({ id: key, rect });
-    }
+    drawButton(ctx, CLOSE_BUTTON, t("journal.close"), { hovered: hovered.has("tab:close") });
+    this.hitRects.push({ id: "tab:close", rect: CLOSE_BUTTON });
   }
 
   /** Fond simple d'une colonne (même esprit que les autres menus, pas de texture). */
@@ -255,14 +177,17 @@ export class Journal extends UiPanel {
       ctx.fillText(label, rect.x + 8, rect.y + 21);
       if (known) {
         const format = loreFormat(index);
-        ctx.font = "bold 13px monospace";
+        ctx.font = "bold 17px monospace";
         ctx.fillStyle = FORMAT_COLOR[format];
-        ctx.fillText(t(`lore.format.${format}`), rect.x + 70, rect.y + 20);
+        ctx.fillText(t(`lore.format.${format}`), rect.x + 80, rect.y + 21);
       }
-      ctx.font = "20px monospace";
-      ctx.fillStyle = known ? "#d8cfb6" : "rgba(255, 244, 214, 0.25)";
-      const text = known ? loreExcerpt(index) : "— — — — — —";
-      ctx.fillText(ellipsize(ctx, text, rect.w - 132), rect.x + 124, rect.y + 21);
+      // Pas d'extrait du texte dans l'index (il ne tiendrait jamais sans être rogné) : la page de droite
+      // affiche l'archive en entier dès qu'on la sélectionne.
+      if (!known) {
+        ctx.font = "20px monospace";
+        ctx.fillStyle = "rgba(255, 244, 214, 0.25)";
+        ctx.fillText("— — — — — —", rect.x + 80, rect.y + 21);
+      }
       this.hitRects.push({ id: `tape:${index}`, rect });
     }
 
@@ -270,12 +195,15 @@ export class Journal extends UiPanel {
       this.heading(ctx, RIGHT_PAGE, t("lore.title", { n: this.selected + 1 }));
       this.note(ctx, RIGHT_PAGE, loreFragment(this.selected) ?? "", 100, "#d8cfb6", 22);
       if (loreFormat(this.selected) === "audio") {
-        drawButton(ctx, PLAY_BUTTON, t("audio.play"), { hovered: hovered.has("audio:play"), accent: "#8a5a2b" });
+        drawButton(ctx, PLAY_BUTTON, t("audio.play"), { hovered: hovered.has("audio:play"), accent: "#e8a44a" });
         this.hitRects.push({ id: "audio:play", rect: PLAY_BUTTON });
       }
     } else {
       this.heading(ctx, RIGHT_PAGE, t("lore.title", { n: this.selected + 1 }));
-      this.note(ctx, RIGHT_PAGE, count === 0 ? t("journal.none") : t("journal.locked"), 100);
+      ctx.fillStyle = "#a79d86";
+      ctx.font = "22px monospace";
+      ctx.textAlign = "left";
+      ctx.fillText(t("journal.empty"), RIGHT_PAGE.x + 34, RIGHT_PAGE.y + 110);
     }
   }
 
@@ -285,89 +213,4 @@ export class Journal extends UiPanel {
     ctx.textAlign = "left";
     wrapText(ctx, text, page.x + 34, page.y + y, page.w - 68, Math.round(size * 1.3), 12);
   }
-
-  private drawRecord(ctx: CanvasRenderingContext2D): void {
-    const profile = this.lore.serverProfile;
-    this.heading(ctx, LEFT_PAGE, t("journal.codeTitle"));
-
-    ctx.fillStyle = "#ffe89a";
-    ctx.font = "bold 40px monospace";
-    ctx.textAlign = "left";
-    ctx.fillText(profile?.recoveryCode ?? "K7-····-····", LEFT_PAGE.x + 30, LEFT_PAGE.y + 110);
-    this.note(ctx, LEFT_PAGE, profile ? t("journal.codeHelp") : t("journal.offline"), 150);
-
-    this.heading(ctx, { ...LEFT_PAGE, y: LEFT_PAGE.y + 320 }, t("journal.best"));
-    ctx.font = "22px monospace";
-    ctx.textAlign = "left";
-    ctx.fillStyle = "#f2e8cf";
-    const runs = profile?.bestRuns ?? [];
-    if (runs.length === 0) {
-      ctx.fillStyle = "#a79d86";
-      ctx.fillText(t("journal.noRuns"), LEFT_PAGE.x + 34, LEFT_PAGE.y + 418);
-    }
-    runs.slice(0, 4).forEach((run, index) => {
-      const y = LEFT_PAGE.y + 418 + index * 28;
-      ctx.textAlign = "left";
-      ctx.fillStyle = "#f2e8cf";
-      ctx.fillText(`${index + 1}. ${run.pseudo}`, LEFT_PAGE.x + 34, y);
-      ctx.textAlign = "right";
-      ctx.fillStyle = "#a79d86";
-      ctx.fillText(t("end.levelShort", { n: run.depth }), LEFT_PAGE.x + LEFT_PAGE.w - 34, y);
-    });
-
-    this.drawPairing(ctx);
-  }
-
-  private drawPairing(ctx: CanvasRenderingContext2D): void {
-    const page = RIGHT_PAGE;
-    this.heading(ctx, page, t("journal.otherDevice"));
-    const hovered = new Set(this.hovered.values());
-    const button = (id: string, rect: Rect, label: string, accent?: string): void => {
-      drawButton(ctx, rect, label, { hovered: hovered.has(id), accent: accent ?? "#8a5a2b" });
-      this.hitRects.push({ id, rect });
-    };
-    const wide = (y: number): Rect => ({ x: page.x + 30, y: page.y + y, w: page.w - 60, h: 62 });
-
-    const pair = this.pair;
-    if (pair.kind === "idle" || pair.kind === "requesting") {
-      button("pair:start", wide(88), t("pair.start"));
-      this.note(ctx, page, t("pair.startHelp"), 186);
-      button("pair:enter", wide(290), t("pair.confirm"));
-      this.note(ctx, page, t("pair.confirmHelp"), 388);
-    } else if (pair.kind === "showing") {
-      ctx.fillStyle = "#ffe89a";
-      ctx.font = "bold 84px monospace";
-      ctx.textAlign = "center";
-      ctx.fillText(`${pair.request.code.slice(0, 3)} ${pair.request.code.slice(3)}`, page.x + page.w / 2, page.y + 170);
-      this.note(ctx, page, t("pair.showHelp"), 226);
-      this.note(ctx, page, t("pair.waiting"), 400, "#8a5a2b");
-      button("pair:cancel", wide(470), t("pair.cancel"));
-    } else if (pair.kind === "entering" || pair.kind === "confirming") {
-      const digits = pair.kind === "entering" ? pair.digits : "······";
-      ctx.fillStyle = "#f2e8cf";
-      ctx.font = "bold 54px monospace";
-      ctx.textAlign = "center";
-      ctx.fillText(digits.padEnd(6, "_").split("").join(" "), page.x + page.w / 2, page.y + 128);
-      const keyW = 118;
-      const keyH = 64;
-      KEYPAD.forEach((key, index) => {
-        const rect: Rect = { x: page.x + 40 + (index % 3) * (keyW + 12), y: page.y + KEYPAD_TOP + Math.floor(index / 3) * (keyH + 10), w: keyW, h: keyH };
-        button(`key:${key}`, rect, key, key === "OK" ? "#3f8a3f" : undefined);
-      });
-      button("pair:cancel", { x: page.x + 40, y: page.y + KEYPAD_TOP + 4 * (keyH + 10), w: keyW * 3 + 24, h: 56 }, t("pair.cancel"));
-    }
-    if (this.status) {
-      ctx.fillStyle = this.status.good ? "#2f6b2f" : "#9a2f22";
-      ctx.font = "20px monospace";
-      ctx.textAlign = "left";
-      wrapText(ctx, t(this.status.key), page.x + 34, page.y + 530, page.w - 68, 24, 2);
-    }
-  }
-}
-
-function ellipsize(ctx: CanvasRenderingContext2D, text: string, maxWidth: number): string {
-  if (ctx.measureText(text).width <= maxWidth) return text;
-  let cut = text;
-  while (cut.length > 1 && ctx.measureText(`${cut}…`).width > maxWidth) cut = cut.slice(0, -1);
-  return `${cut.trimEnd()}…`;
 }
