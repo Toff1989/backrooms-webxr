@@ -1,6 +1,5 @@
 import * as THREE from "three";
-import { DEBUG_ENABLED } from "../debug/debugLog";
-import { getLanguage, onLanguageChange, setLanguage, t } from "../i18n";
+import { getLanguage, onLanguageChange, t } from "../i18n";
 import { getModelShape } from "../physics/modelShape";
 import { drawButton, drawPanelBackground, inRect, UiPanel, type PressButton, type Rect } from "../ui/uiPanel";
 import { spawnCollectibleModel } from "../world/collectibleLoader";
@@ -12,9 +11,7 @@ import type { Hand } from "./hand";
 import type { Sfx } from "./sfx";
 
 const WIDTH = 0.64;
-/** Mode debug (`?debug=1`) : une rangée de boutons de test en plus. */
-const DEBUG_ROW = DEBUG_ENABLED ? 72 : 0;
-const HEIGHT = 0.49 + DEBUG_ROW / 1600;
+const HEIGHT = 0.49;
 const PX_PER_M = 1600;
 
 const COLUMNS = 5;
@@ -38,19 +35,24 @@ const MENU_DROP = 0.14;
 const MENU_TILT = THREE.MathUtils.degToRad(14);
 const STOP_CONFIRM_SECONDS = 3;
 
-type ButtonId = "prev" | "next" | "sort" | "height" | "lang" | "vignette" | "stop" | "journal" | "close";
+type ButtonId = "prev" | "next" | "sort" | "stop" | "close" | "journal" | "settings" | "mainMenu" | "debug";
 
-/** Rangée 1 : inventaire et fin de run. Rangée 2 : options du jeu (langue, confort, hauteur). */
+/**
+ * Rangée 1 : opérations sur l'inventaire lui-même (page, tri, fin de prise, fermer). Rangée 2 :
+ * navigation vers les autres menus (journal, paramètres, menu principal, debug si activé) —
+ * langue/vignette/hauteur et les actions de test ont déménagé dans des menus dédiés
+ * (`settingsMenu.ts`, `debugMenu.ts`) pour alléger ce panneau à son seul rôle d'inventaire.
+ */
 const BUTTONS: Record<ButtonId, Rect> = {
   prev: { x: 40, y: 556, w: 70, h: 64 },
   next: { x: 120, y: 556, w: 70, h: 64 },
   sort: { x: 200, y: 556, w: 190, h: 64 },
-  stop: { x: 400, y: 556, w: 250, h: 64 },
-  journal: { x: 660, y: 556, w: 180, h: 64 },
-  close: { x: 850, y: 556, w: 134, h: 64 },
-  lang: { x: 40, y: 632, w: 330, h: 60 },
-  vignette: { x: 380, y: 632, w: 330, h: 60 },
-  height: { x: 720, y: 632, w: 264, h: 60 },
+  stop: { x: 400, y: 556, w: 320, h: 64 },
+  close: { x: 730, y: 556, w: 254, h: 64 },
+  journal: { x: 40, y: 632, w: 230, h: 60 },
+  settings: { x: 280, y: 632, w: 230, h: 60 },
+  mainMenu: { x: 520, y: 632, w: 230, h: 60 },
+  debug: { x: 760, y: 632, w: 224, h: 60 },
 };
 
 const rarityLabel = (rarity: CollectionEntry["rarity"]): string => t(`rarity.${rarity}`);
@@ -63,27 +65,16 @@ interface Miniature {
 
 export interface InventoryMenuActions {
   takeOut(hand: Hand, entry: CollectionEntry): void;
-  recalibrateHeight(): void;
   stopRec(): void;
   /** Ouvre le journal des bandes perdues (il flotte devant le joueur). */
   openJournal(): void;
-  /** Vignette de confort : état courant, et bascule (renvoie le nouvel état). */
-  vignetteEnabled(): boolean;
-  toggleVignette(): boolean;
-  /** Boutons de test (mode debug seulement) : libellé courant, action (renvoie un message). */
-  debug?: DebugAction[];
-}
-
-export interface DebugAction {
-  label(): string;
-  run(): string;
-}
-
-const DEBUG_Y = 708;
-function debugRect(index: number, count: number): Rect {
-  const gap = 10;
-  const w = (944 - gap * (count - 1)) / count;
-  return { x: 40 + index * (w + gap), y: DEBUG_Y, w, h: 60 };
+  /** Ouvre le menu Paramètres (langue, confort, hauteur, mode debug). */
+  openSettings(): void;
+  /** Retour au menu principal (met la run en pause, ne la termine pas — voir mainMenu.ts). */
+  openMainMenu(): void;
+  /** Menu debug (mode debug seulement) : visible dès qu'activé depuis les paramètres. */
+  isDebugEnabled(): boolean;
+  openDebugMenu(): void;
 }
 
 /**
@@ -95,7 +86,7 @@ function debugRect(index: number, count: number): Rect {
 export class InventoryMenu extends UiPanel {
   private page = 0;
   private readonly hoverSlot = new Map<Hand, number | null>();
-  private readonly hoverButton = new Map<Hand, ButtonId | number | null>();
+  private readonly hoverButton = new Map<Hand, ButtonId | null>();
   private readonly miniatures = new Map<number, Miniature>();
   private stopArmedUntil = 0;
   /** Objet sélectionné pour être déplacé (index global dans l'inventaire), ou null. */
@@ -204,10 +195,7 @@ export class InventoryMenu extends UiPanel {
       return true;
     }
     const id = this.buttonAt(px, py);
-    if (id !== null && button === "trigger") {
-      if (typeof id === "number") this.runDebug(id);
-      else this.activate(id);
-    }
+    if (id !== null && button === "trigger") this.activate(id);
     return true;
   }
 
@@ -224,10 +212,6 @@ export class InventoryMenu extends UiPanel {
         this.clampPage();
         this.rebuildMiniatures();
         break;
-      case "height":
-        this.actions.recalibrateHeight();
-        this.showStatus(t("inv.heightStatus"));
-        break;
       case "sort": {
         this.sortIndex = (this.sortIndex + 1) % SORT_MODES.length;
         const mode = SORT_MODES[this.sortIndex]!;
@@ -236,13 +220,6 @@ export class InventoryMenu extends UiPanel {
         this.showStatus(t("inv.sortStatus", { mode: t(`sort.${mode}`) }));
         break;
       }
-      case "lang":
-        setLanguage(getLanguage() === "fr" ? "en" : "fr");
-        this.showStatus(t("inv.langStatus"));
-        break;
-      case "vignette":
-        this.showStatus(this.actions.toggleVignette() ? t("inv.vignetteOnStatus") : t("inv.vignetteOffStatus"));
-        break;
       case "stop":
         if (this.stopArmedUntil) {
           this.stopArmedUntil = 0;
@@ -256,18 +233,23 @@ export class InventoryMenu extends UiPanel {
         this.close();
         this.actions.openJournal();
         return;
+      case "settings":
+        this.close();
+        this.actions.openSettings();
+        return;
+      case "mainMenu":
+        this.close();
+        this.actions.openMainMenu();
+        return;
+      case "debug":
+        if (!this.actions.isDebugEnabled()) break;
+        this.close();
+        this.actions.openDebugMenu();
+        return;
       case "close":
         this.close();
         return;
     }
-    this.invalidate();
-  }
-
-  private runDebug(index: number): void {
-    const action = this.actions.debug?.[index];
-    if (!action) return;
-    this.sfx.play("click", 0.4);
-    this.showStatus(action.run());
     this.invalidate();
   }
 
@@ -340,11 +322,8 @@ export class InventoryMenu extends UiPanel {
     return null;
   }
 
-  /** Bouton sous le pointeur : identifiant, ou index d'un bouton de debug. */
-  private buttonAt(px: number, py: number): ButtonId | number | null {
+  private buttonAt(px: number, py: number): ButtonId | null {
     for (const [id, rect] of Object.entries(BUTTONS) as Array<[ButtonId, Rect]>) if (inRect(rect, px, py)) return id;
-    const debug = DEBUG_ENABLED ? (this.actions.debug ?? []) : [];
-    for (let i = 0; i < debug.length; i++) if (inRect(debugRect(i, debug.length), px, py)) return i;
     return null;
   }
 
@@ -498,21 +477,15 @@ export class InventoryMenu extends UiPanel {
     drawButton(ctx, BUTTONS.prev, "◀", { hovered: hoveredButtons.has("prev"), disabled: this.pageCount < 2 });
     drawButton(ctx, BUTTONS.next, "▶", { hovered: hoveredButtons.has("next"), disabled: this.pageCount < 2 });
     drawButton(ctx, BUTTONS.sort, t("inv.sort"), { hovered: hoveredButtons.has("sort") });
-    drawButton(ctx, BUTTONS.height, t("inv.height"), { hovered: hoveredButtons.has("height") });
-    drawButton(ctx, BUTTONS.lang, t("inv.lang"), { hovered: hoveredButtons.has("lang") });
-    drawButton(ctx, BUTTONS.vignette, this.actions.vignetteEnabled() ? t("inv.vignetteOn") : t("inv.vignetteOff"), {
-      hovered: hoveredButtons.has("vignette"),
-    });
     drawButton(ctx, BUTTONS.stop, this.stopArmedUntil ? t("inv.confirm") : t("inv.stop"), {
       hovered: hoveredButtons.has("stop"),
       accent: "#ff6b5a",
     });
-    drawButton(ctx, BUTTONS.journal, t("inv.journal"), { hovered: hoveredButtons.has("journal"), accent: "#e8c34a" });
     drawButton(ctx, BUTTONS.close, t("inv.close"), { hovered: hoveredButtons.has("close") });
-    if (DEBUG_ENABLED) {
-      const debug = this.actions.debug ?? [];
-      debug.forEach((action, i) => drawButton(ctx, debugRect(i, debug.length), action.label(), { hovered: hoveredButtons.has(i), accent: "#7fc4e8" }));
-    }
+    drawButton(ctx, BUTTONS.journal, t("inv.journal"), { hovered: hoveredButtons.has("journal"), accent: "#e8c34a" });
+    drawButton(ctx, BUTTONS.settings, t("inv.settings"), { hovered: hoveredButtons.has("settings") });
+    drawButton(ctx, BUTTONS.mainMenu, t("inv.mainMenu"), { hovered: hoveredButtons.has("mainMenu") });
+    if (this.actions.isDebugEnabled()) drawButton(ctx, BUTTONS.debug, t("inv.debug"), { hovered: hoveredButtons.has("debug"), accent: "#7fc4e8" });
 
     ctx.textAlign = "center";
     ctx.font = "20px monospace";
@@ -522,13 +495,13 @@ export class InventoryMenu extends UiPanel {
     const decay = Math.round((perks.corruptionDecay - 1) * 100);
     const stamina = Math.round((perks.sprintRecovery - 1) * 100);
     if (battery !== 0 || decay !== 0 || stamina !== 0 || perks.beaconSteadiness > 0) {
-      ctx.fillText(t("perks.line", { battery, decay, stamina, compass: perks.beaconSteadiness > 0 ? t("perks.compass") : "" }), width / 2, 720 + DEBUG_ROW);
+      ctx.fillText(t("perks.line", { battery, decay, stamina, compass: perks.beaconSteadiness > 0 ? t("perks.compass") : "" }), width / 2, 720);
     }
     ctx.fillStyle = "#7d7563";
-    ctx.fillText(t("inv.footer"), width / 2, 752 + DEBUG_ROW);
+    ctx.fillText(t("inv.footer"), width / 2, 752);
     ctx.textAlign = "right";
     ctx.font = "15px monospace";
-    ctx.fillText(`build ${__BUILD_ID__}`, width - 20, 774 + DEBUG_ROW);
+    ctx.fillText(`build ${__BUILD_ID__}`, width - 20, 774);
   }
 }
 

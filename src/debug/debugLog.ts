@@ -11,6 +11,20 @@
 
 export const DEBUG_ENABLED = typeof window !== "undefined" && new URLSearchParams(window.location.search).has("debug");
 
+/**
+ * Visibilité du menu debug in-game (bouton dédié dans l'inventaire) : distincte de
+ * `DEBUG_ENABLED` (qui gate le journal envoyé au serveur, fixé une fois pour toutes par
+ * l'URL). Celle-ci peut être basculée à la volée depuis le menu Paramètres, sans recharger la
+ * page ; elle démarre alignée sur `DEBUG_ENABLED` pour que `?debug` continue de tout activer.
+ */
+let debugMenuEnabled = DEBUG_ENABLED;
+export function isDebugMenuEnabled(): boolean {
+  return debugMenuEnabled;
+}
+export function setDebugMenuEnabled(value: boolean): void {
+  debugMenuEnabled = value;
+}
+
 const FLUSH_INTERVAL_MS = 5000;
 const MAX_BUFFER = 2000;
 const MAX_MEMORY = 5000;

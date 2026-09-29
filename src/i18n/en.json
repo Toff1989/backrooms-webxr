@@ -154,5 +154,21 @@
   "audio.transcript": "TRANSCRIPT",
   "blue.cut": "CUT!",
   "blue.take": "TAKE {n}",
-  "fiche.full": "UNCUT"
+  "fiche.full": "UNCUT",
+  "end.mainMenu": "MAIN MENU",
+  "menu.title": "BACKROOMS",
+  "menu.continue": "CONTINUE",
+  "menu.newGame": "NEW GAME",
+  "menu.settings": "SETTINGS",
+  "menu.quit": "QUIT",
+  "settings.title": "SETTINGS",
+  "settings.back": "◀ BACK",
+  "settings.debugOn": "DEBUG MODE: ON",
+  "settings.debugOff": "DEBUG MODE: OFF",
+  "settings.debugOnStatus": "Debug mode enabled (debug menu available from the inventory).",
+  "settings.debugOffStatus": "Debug mode disabled.",
+  "debugMenu.title": "DEBUG MENU",
+  "inv.settings": "SETTINGS",
+  "inv.mainMenu": "MAIN MENU",
+  "inv.debug": "DEBUG"
 }

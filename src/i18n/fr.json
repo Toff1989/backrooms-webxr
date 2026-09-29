@@ -154,5 +154,21 @@
   "audio.transcript": "TRANSCRIPTION",
   "blue.cut": "COUPEZ !",
   "blue.take": "PRISE {n}",
-  "fiche.full": "INTÉGRAL"
+  "fiche.full": "INTÉGRAL",
+  "end.mainMenu": "MENU PRINCIPAL",
+  "menu.title": "BACKROOMS",
+  "menu.continue": "CONTINUER",
+  "menu.newGame": "NOUVELLE PARTIE",
+  "menu.settings": "PARAMÈTRES",
+  "menu.quit": "QUITTER",
+  "settings.title": "PARAMÈTRES",
+  "settings.back": "◀ RETOUR",
+  "settings.debugOn": "MODE DEBUG : ACTIVÉ",
+  "settings.debugOff": "MODE DEBUG : DÉSACTIVÉ",
+  "settings.debugOnStatus": "Mode debug activé (menu debug disponible dans l'inventaire).",
+  "settings.debugOffStatus": "Mode debug désactivé.",
+  "debugMenu.title": "MENU DEBUG",
+  "inv.settings": "PARAMÈTRES",
+  "inv.mainMenu": "MENU PRINCIPAL",
+  "inv.debug": "DEBUG"
 }

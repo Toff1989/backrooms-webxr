@@ -12,21 +12,27 @@ const PX_PER_M = 1830;
 const DISTANCE = 0.75;
 const LEADERBOARD_ROWS = 7;
 
-type Phase = "review" | "submitting" | "result" | "error" | "gameover";
-type ButtonId = "adjective" | "noun" | "submit" | "restart";
+type Phase = "review" | "submitting" | "result" | "error";
+type ButtonId = "adjective" | "noun" | "submit" | "restart" | "mainMenu";
 export type GameOverReason = "health" | "caught";
 
 const BUTTONS: Record<ButtonId, Rect> = {
   adjective: { x: 60, y: 330, w: 420, h: 70 },
   noun: { x: 545, y: 330, w: 420, h: 70 },
   submit: { x: 212, y: 440, w: 600, h: 84 },
-  restart: { x: 262, y: 580, w: 500, h: 76 },
+  restart: { x: 212, y: 580, w: 320, h: 76 },
+  mainMenu: { x: 550, y: 580, w: 320, h: 76 },
 };
 
 /**
  * Écran de fin de run (fiche projet étape 7 : "saisie du pseudo → envoi du score au
  * classement"). Pas de clavier virtuel : le pseudo se compose en faisant défiler un
  * adjectif et un nom au pointeur (gâchette), puis on l'envoie ; A valide aussi.
+ *
+ * Une seule voie d'entrée pour tout, qu'on arrête soi-même la prise (STOP REC) ou qu'on soit
+ * rattrapé/vidé de santé (`showGameOver`) : dans les deux cas on compose un pseudo et on envoie
+ * le score au classement — auparavant un game over sautait droit à "recommencer" sans jamais
+ * pouvoir enregistrer son score.
  */
 export class EndRunScreen extends UiPanel {
   private phase: Phase = "review";
@@ -36,9 +42,9 @@ export class EndRunScreen extends UiPanel {
   private suffix = 0;
   private leaderboard: LeaderboardEntry[] = [];
   private errorMessage = "";
-  private gameOverReason: GameOverReason = "health";
+  /** Non-null quand cet écran a été ouvert par un game over (affiche la raison au-dessus du reste). */
+  private gameOverReason: GameOverReason | null = null;
   private readonly hovered = new Map<Hand, ButtonId | null>();
-  private hasInitialPlacement = false;
 
   constructor(
     private readonly camera: THREE.Camera,
@@ -46,6 +52,7 @@ export class EndRunScreen extends UiPanel {
     private readonly sfx: Sfx,
     private readonly onConfirmPseudo: (pseudo: string) => Promise<{ leaderboard: LeaderboardEntry[] }>,
     private readonly onStartNewRun: () => void,
+    private readonly onGoToMainMenu: () => void,
   ) {
     super(WIDTH, HEIGHT, PX_PER_M);
     this.group.name = "end-run-screen";
@@ -53,29 +60,35 @@ export class EndRunScreen extends UiPanel {
     onLanguageChange(() => this.invalidate());
   }
 
+  /** Fin volontaire (STOP REC) : pas de raison de game over affichée. */
   show(depthReached: number): void {
+    this.gameOverReason = null;
+    this.open(depthReached);
+  }
+
+  /** Fin forcée (santé à 0, rattrapé) : même écran, avec la raison affichée en plus. */
+  showGameOver(depthReached: number, reason: GameOverReason): void {
+    this.gameOverReason = reason;
+    this.open(depthReached);
+  }
+
+  private open(depthReached: number): void {
     this.depthReached = depthReached;
     this.adjectiveIndex = Math.floor(Math.random() * PSEUDO_ADJECTIVE_COUNT);
     this.nounIndex = Math.floor(Math.random() * PSEUDO_NOUN_COUNT);
     this.suffix = Math.floor(Math.random() * 10000);
     this.phase = "review";
     this.errorMessage = "";
-    this.placeIfNeeded();
+    // Toujours repositionné devant la tête au moment de l'appel (pas une seule fois pour toute
+    // la session) : sans ça, le panneau reste où il a été placé la première fois — potentiellement
+    // loin derrière le joueur après qu'il a marché — et "recommencer" semble ne rien faire alors
+    // qu'il suffit de se retourner pour le voir.
+    this.place();
     this.group.visible = true;
     this.invalidate();
   }
 
-  showGameOver(depthReached: number, reason: GameOverReason): void {
-    this.depthReached = depthReached;
-    this.gameOverReason = reason;
-    this.phase = "gameover";
-    this.placeIfNeeded();
-    this.group.visible = true;
-    this.invalidate();
-  }
-
-  private placeIfNeeded(): void {
-    if (this.hasInitialPlacement) return;
+  private place(): void {
     const head = this.camera.position;
     const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(this.camera.quaternion);
     forward.y = 0;
@@ -83,7 +96,6 @@ export class EndRunScreen extends UiPanel {
     forward.normalize();
     this.group.position.set(head.x + forward.x * DISTANCE, head.y - 0.05, head.z + forward.z * DISTANCE);
     this.group.rotation.set(0, Math.atan2(-forward.x, -forward.z), 0);
-    this.hasInitialPlacement = true;
   }
 
   /** Raccourci : A (main droite) valide / relance. */
@@ -92,7 +104,7 @@ export class EndRunScreen extends UiPanel {
     for (const hand of hands) {
       if (hand.input.handedness !== "right" || !hand.input.primary.justPressed) continue;
       if (this.phase === "review") this.submit();
-      else if (this.phase === "result" || this.phase === "error" || this.phase === "gameover") this.restart();
+      else if (this.phase === "result" || this.phase === "error") this.restart();
     }
   }
 
@@ -113,12 +125,13 @@ export class EndRunScreen extends UiPanel {
     else if (id === "noun") this.nounIndex += 1;
     else if (id === "submit") this.submit();
     else if (id === "restart") this.restart();
+    else if (id === "mainMenu") this.goToMainMenu();
     this.invalidate();
     return true;
   }
 
   private buttonAt(px: number, py: number): ButtonId | null {
-    const visible: ButtonId[] = this.phase === "review" ? ["adjective", "noun", "submit"] : this.phase === "submitting" ? [] : ["restart"];
+    const visible: ButtonId[] = this.phase === "review" ? ["adjective", "noun", "submit"] : this.phase === "submitting" ? [] : ["restart", "mainMenu"];
     return visible.find((id) => inRect(BUTTONS[id], px, py)) ?? null;
   }
 
@@ -148,6 +161,11 @@ export class EndRunScreen extends UiPanel {
     this.onStartNewRun();
   }
 
+  private goToMainMenu(): void {
+    this.group.visible = false;
+    this.onGoToMainMenu();
+  }
+
   protected draw(ctx: CanvasRenderingContext2D): void {
     const width = this.canvas.width;
     drawPanelBackground(ctx, width, this.canvas.height);
@@ -161,14 +179,19 @@ export class EndRunScreen extends UiPanel {
     ctx.fillStyle = "#f2e8cf";
     ctx.font = "30px monospace";
     ctx.fillText(t("end.depth", { depth: this.depthReached }), width / 2, 116);
+    if (this.gameOverReason) {
+      ctx.font = "24px monospace";
+      ctx.fillStyle = "#e06a5a";
+      ctx.fillText(t(this.gameOverReason === "caught" ? "end.caught" : "end.healthEmpty"), width / 2, 150);
+    }
 
     if (this.phase === "review") {
-      ctx.font = "24px monospace";
+      ctx.font = "22px monospace";
       ctx.fillStyle = "#a79d86";
-      ctx.fillText(t("end.prompt"), width / 2, 180);
+      ctx.fillText(t("end.prompt"), width / 2, this.gameOverReason ? 200 : 180);
       ctx.font = "bold 40px monospace";
       ctx.fillStyle = "#ffe89a";
-      ctx.fillText(this.currentPseudo(), width / 2, 250);
+      ctx.fillText(this.currentPseudo(), width / 2, 260);
       drawButton(ctx, BUTTONS.adjective, t("end.adjective"), { hovered: hovered.has("adjective") });
       drawButton(ctx, BUTTONS.noun, t("end.noun"), { hovered: hovered.has("noun") });
       drawButton(ctx, BUTTONS.submit, t("end.submit"), { hovered: hovered.has("submit"), accent: "#9fe39f" });
@@ -183,14 +206,7 @@ export class EndRunScreen extends UiPanel {
       wrapText(ctx, this.errorMessage, 80, 260, width - 160, 32, 3);
       ctx.textAlign = "center";
       drawButton(ctx, BUTTONS.restart, t("end.restart"), { hovered: hovered.has("restart") });
-    } else if (this.phase === "gameover") {
-      ctx.font = "bold 34px monospace";
-      ctx.fillStyle = "#ff6b5a";
-      ctx.fillText(t(this.gameOverReason === "caught" ? "end.caught" : "end.healthEmpty"), width / 2, 220);
-      ctx.font = "26px monospace";
-      ctx.fillStyle = "#cfc5ad";
-      ctx.fillText(t("end.gameOver"), width / 2, 290);
-      drawButton(ctx, BUTTONS.restart, t("end.restart"), { hovered: hovered.has("restart"), accent: "#ff6b5a" });
+      drawButton(ctx, BUTTONS.mainMenu, t("end.mainMenu"), { hovered: hovered.has("mainMenu") });
     } else {
       ctx.font = "bold 26px monospace";
       ctx.fillStyle = "#9fe39f";
@@ -212,6 +228,7 @@ export class EndRunScreen extends UiPanel {
       }
       ctx.textAlign = "center";
       drawButton(ctx, BUTTONS.restart, t("end.restart"), { hovered: hovered.has("restart") });
+      drawButton(ctx, BUTTONS.mainMenu, t("end.mainMenu"), { hovered: hovered.has("mainMenu") });
     }
   }
 }

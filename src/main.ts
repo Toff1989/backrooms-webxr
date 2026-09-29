@@ -3,7 +3,7 @@ import { VRButton } from "three/addons/webxr/VRButton.js";
 import { AmbientHum } from "./assets/audio/ambientHum";
 import { getLanguage, onLanguageChange, setLanguage, t, type Language } from "./i18n";
 import { runWarmupStep } from "./assets/audio/synth";
-import { DEBUG_ENABLED, installDebugLog, log } from "./debug/debugLog";
+import { DEBUG_ENABLED, installDebugLog, isDebugMenuEnabled, log } from "./debug/debugLog";
 import { PhysicsWorld, RAPIER } from "./physics/physicsWorld";
 import { CamcorderHud } from "./player/camcorderHud";
 import { ComfortVignette } from "./player/comfortVignette";
@@ -12,8 +12,11 @@ import { Flashlight } from "./player/flashlight";
 import { GrabSystem } from "./player/grabSystem";
 import { Hand } from "./player/hand";
 import { triggerHapticPulse } from "./player/haptics";
+import { DebugMenu } from "./player/debugMenu";
 import { InventoryMenu } from "./player/inventoryMenu";
 import { Journal } from "./player/journal";
+import { MainMenu } from "./player/mainMenu";
+import { SettingsMenu } from "./player/settingsMenu";
 import { PerfStats, setPerf } from "./player/perfStats";
 import { LiveViews } from "./player/liveViews";
 import { createObjectCapture, createPhotoCapture } from "./player/photoCapture";
@@ -239,55 +242,15 @@ const inventoryMenu = new InventoryMenu(
       collectionStore.remove(entry.id);
       grabSystem.takeIntoHand(hand, entry, () => collectionStore.add(entry));
     },
-    recalibrateHeight: () => player.recalibrate(),
     stopRec: () => endRunScreen.show(levelManager.depth),
     openJournal: () => journal.openFloating(),
-    vignetteEnabled: () => comfortVignette.enabled,
-    toggleVignette: () => {
-      setVignette(!comfortVignette.enabled);
-      return comfortVignette.enabled;
+    openSettings: () => settingsMenu.open(),
+    openMainMenu: () => {
+      player.paused = true;
+      mainMenu.open();
     },
-    // Mode debug : tester les menaces et effets sans attendre (rangée bleue du menu).
-    debug: [
-      {
-        label: () => (blackout.active ? t("debug.blackoutStop") : t("debug.blackoutStart")),
-        run: () => {
-          blackout.toggle();
-          return blackout.active ? t("debug.blackoutStarted") : t("debug.blackoutStopped");
-        },
-      },
-      {
-        label: () => (cadreur.present ? t("debug.cadreurStop") : t("debug.cadreurStart")),
-        run: () => {
-          const wasPresent = cadreur.present;
-          cadreur.toggle();
-          return wasPresent ? t("debug.cadreurDismissed") : t("debug.cadreurCalled");
-        },
-      },
-      {
-        label: () => t("debug.level"),
-        run: () => {
-          goDeeper();
-          return t("debug.levelDone");
-        },
-      },
-      {
-        label: () => t("debug.battery"),
-        run: () => {
-          flashlight.recharge(1);
-          return t("debug.batteryDone");
-        },
-      },
-      {
-        label: () => t("debug.spawn", { kind: DEBUG_SPAWN_KINDS[debugSpawnIndex % DEBUG_SPAWN_KINDS.length]! }),
-        run: () => {
-          const kind = DEBUG_SPAWN_KINDS[debugSpawnIndex % DEBUG_SPAWN_KINDS.length]!;
-          debugSpawnIndex = (debugSpawnIndex + 1) % DEBUG_SPAWN_KINDS.length;
-          void spawnDebugObject(kind);
-          return t("debug.spawnStarted", { kind });
-        },
-      },
-    ],
+    isDebugEnabled: () => isDebugMenuEnabled(),
+    openDebugMenu: () => debugMenu.open(),
   },
   sfx,
 );
@@ -301,13 +264,95 @@ const endRunScreen = new EndRunScreen(
     return endRun(currentSession, pseudo);
   },
   () => beginNewRun(true),
+  () => {
+    beginNewRun(true, false);
+    player.paused = true;
+    mainMenu.open();
+  },
 );
 
 const journal = new Journal(camera, player.body, loreJournal, sfx);
+
+const settingsMenu = new SettingsMenu(camera, player.body, sfx, {
+  recalibrateHeight: () => player.recalibrate(),
+  vignetteEnabled: () => comfortVignette.enabled,
+  toggleVignette: () => {
+    setVignette(!comfortVignette.enabled);
+    return comfortVignette.enabled;
+  },
+  // Les paramètres sont une sous-page du menu principal (voir settingsMenu.ts) : "retour" y
+  // ramène toujours, qu'on y soit entré depuis lui ou depuis l'inventaire en jeu.
+  back: () => {
+    player.paused = true;
+    mainMenu.open();
+  },
+});
+
+// Mode debug : tester les menaces et effets sans attendre (menu dédié, voir debugMenu.ts).
+const debugMenu = new DebugMenu(camera, player.body, sfx, [
+  {
+    label: () => (blackout.active ? t("debug.blackoutStop") : t("debug.blackoutStart")),
+    run: () => {
+      blackout.toggle();
+      return blackout.active ? t("debug.blackoutStarted") : t("debug.blackoutStopped");
+    },
+  },
+  {
+    label: () => (cadreur.present ? t("debug.cadreurStop") : t("debug.cadreurStart")),
+    run: () => {
+      const wasPresent = cadreur.present;
+      cadreur.toggle();
+      return wasPresent ? t("debug.cadreurDismissed") : t("debug.cadreurCalled");
+    },
+  },
+  {
+    label: () => t("debug.level"),
+    run: () => {
+      goDeeper();
+      return t("debug.levelDone");
+    },
+  },
+  {
+    label: () => t("debug.battery"),
+    run: () => {
+      flashlight.recharge(1);
+      return t("debug.batteryDone");
+    },
+  },
+  {
+    label: () => t("debug.spawn", { kind: DEBUG_SPAWN_KINDS[debugSpawnIndex % DEBUG_SPAWN_KINDS.length]! }),
+    run: () => {
+      const kind = DEBUG_SPAWN_KINDS[debugSpawnIndex % DEBUG_SPAWN_KINDS.length]!;
+      debugSpawnIndex = (debugSpawnIndex + 1) % DEBUG_SPAWN_KINDS.length;
+      void spawnDebugObject(kind);
+      return t("debug.spawnStarted", { kind });
+    },
+  },
+]);
+
+const mainMenu = new MainMenu(camera, player.body, sfx, {
+  continueRun: () => {
+    mainMenu.close();
+    player.paused = false;
+  },
+  newGame: () => {
+    mainMenu.close();
+    beginNewRun(true);
+  },
+  openSettings: () => {
+    mainMenu.close();
+    settingsMenu.open();
+  },
+  quit: () => {
+    const session = renderer.xr.getSession();
+    if (session) void session.end();
+    window.close();
+  },
+});
 installAccountPanel(loreJournal);
 
-const pointer = new UiPointer(hands, scene, [inventoryMenu, endRunScreen, journal]);
-for (const panel of [inventoryMenu, endRunScreen, journal]) {
+const pointer = new UiPointer(hands, scene, [inventoryMenu, endRunScreen, journal, mainMenu, settingsMenu, debugMenu]);
+for (const panel of [inventoryMenu, endRunScreen, journal, mainMenu, settingsMenu, debugMenu]) {
   liveViews.hideFromOffscreen(panel.group);
   panel.prepareForDisplay(renderer, camera, scene);
 }
@@ -540,12 +585,20 @@ function goDeeper(): void {
 
 let gameOver = false;
 
+/** Referme tous les panneaux de menu (inventaire, journal, paramètres, debug, menu principal). */
+function closeAllMenus(): void {
+  if (inventoryMenu.visible) inventoryMenu.close();
+  if (journal.visible) journal.close();
+  if (settingsMenu.visible) settingsMenu.close();
+  if (debugMenu.visible) debugMenu.close();
+  if (mainMenu.visible) mainMenu.close();
+}
+
 function triggerGameOver(reason: "health" | "caught"): void {
   if (gameOver) return;
   gameOver = true;
   player.paused = true;
-  if (inventoryMenu.visible) inventoryMenu.close();
-  if (journal.visible) journal.close();
+  closeAllMenus();
   grabSystem.loseHeld();
   cadreur.reset(levelManager.depth);
   endRunScreen.showGameOver(levelManager.depth, reason);
@@ -555,23 +608,25 @@ function triggerGameOver(reason: "health" | "caught"): void {
 /**
  * Démarre une run côté serveur (seed + token). Serveur injoignable : on reste jouable en
  * local — et sur "nouvelle run", on repart quand même sur une seed locale fraîche.
+ * `resume` : remet le mouvement du joueur en marche une fois le monde prêt (faux pour un
+ * chargement en arrière-plan pendant que le menu principal reste affiché).
  */
-function beginNewRun(restartLocallyOnFailure: boolean): void {
+function beginNewRun(restartLocallyOnFailure: boolean, resume = true): void {
   startRun()
     .then((session) => {
       currentSession = session;
-      restartWorld(session.seed);
+      restartWorld(session.seed, resume);
     })
     .catch(() => {
       currentSession = null;
-      if (restartLocallyOnFailure) restartWorld(`local-${Date.now()}`);
+      if (restartLocallyOnFailure) restartWorld(`local-${Date.now()}`, resume);
     });
 }
 
 /** Nouvelle partie : monde neuf, inventaire vidé, rien en main. */
-function restartWorld(seed: string): void {
+function restartWorld(seed: string, resume = true): void {
   gameOver = false;
-  player.paused = false;
+  if (resume) player.paused = false;
   vitals.reset();
   grabSystem.loseHeld();
   collectionStore.clear();
@@ -582,7 +637,11 @@ function restartWorld(seed: string): void {
   log("run", { action: "start", seed });
 }
 
-beginNewRun(false);
+// Le monde charge toujours en arrière-plan dès l'ouverture (session serveur, premier niveau) ;
+// le menu principal garde juste le joueur en pause devant le temps de choisir (voir mainMenu.ts).
+player.paused = true;
+mainMenu.open();
+beginNewRun(false, false);
 void loreJournal.sync();
 
 // Mode debug : commandes pour les bancs de test automatisés (session XR émulée) — déplacer le
@@ -747,6 +806,8 @@ renderer.setAnimationLoop((timestamp) => {
   pointer.update();
   inventoryMenu.update(deltaSeconds, hands, (hand) => pointer.frame(hand).target === inventoryMenu);
   endRunScreen.update(hands);
+  settingsMenu.update(deltaSeconds);
+  debugMenu.update(deltaSeconds);
   grabSystem.update(elapsedSeconds, pointer);
   perfStats.end("joueur");
 
