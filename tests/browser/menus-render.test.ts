@@ -207,6 +207,7 @@ function guideGroup(): Group {
     scenarios: [
       { name: "controles", setup: () => (panel["page"] = "controls") },
       { name: "systemes", setup: () => (panel["page"] = "systems") },
+      { name: "credits", setup: () => (panel["page"] = "credits") },
     ],
   };
 }

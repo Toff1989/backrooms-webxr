@@ -353,3 +353,6 @@ implémentées) : reste à mesurer en casque avec `?debug=1` et à ajuster (éta
   compression Draco. La démarche vient d'une animation de marche Mixamo (Adobe), transférée sur ce
   squelette (`src/assets/models/entities/cadreurWalk.json`). Si tu réutilises ou redistribues ce
   modèle, cite l'auteur avec ce même lien.
+
+Ces crédits sont aussi affichés en jeu : Menu principal → Guide → page « Crédits » (3ᵉ page, après
+Contrôles et Systèmes).

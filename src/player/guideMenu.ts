@@ -10,7 +10,10 @@ const PX_PER_M = 1500;
 const DISTANCE = 0.72;
 
 type ButtonId = "previous" | "next" | "back";
-type Page = "controls" | "systems";
+type Page = "controls" | "systems" | "credits";
+
+const PAGES: readonly Page[] = ["controls", "systems", "credits"];
+const TITLE_KEYS = { controls: "guide.controlsTitle", systems: "guide.systemsTitle", credits: "guide.creditsTitle" } as const;
 
 const BUTTONS: Record<ButtonId, Rect> = {
   previous: { x: 40, y: 820, w: 250, h: 66 },
@@ -21,6 +24,7 @@ const BUTTONS: Record<ButtonId, Rect> = {
 const PAGE_LINES: Record<Page, string[]> = {
   controls: Array.from({ length: 8 }, (_, index) => `guide.controls.${index + 1}`),
   systems: Array.from({ length: 8 }, (_, index) => `guide.systems.${index + 1}`),
+  credits: Array.from({ length: 5 }, (_, index) => `guide.credits.${index + 1}`),
 };
 
 export class GuideMenu extends UiPanel {
@@ -69,8 +73,8 @@ export class GuideMenu extends UiPanel {
     const id = this.buttonAt(px, py);
     if (!id) return true;
     this.sfx.play("click", 0.4);
-    if (id === "previous") this.page = "controls";
-    else if (id === "next") this.page = "systems";
+    if (id === "previous") this.page = PAGES[Math.max(0, PAGES.indexOf(this.page) - 1)]!;
+    else if (id === "next") this.page = PAGES[Math.min(PAGES.length - 1, PAGES.indexOf(this.page) + 1)]!;
     else {
       this.close();
       this.onBack();
@@ -90,7 +94,10 @@ export class GuideMenu extends UiPanel {
     const width = this.canvas.width;
     drawPanelBackground(ctx, width, this.canvas.height);
     const hovered = new Set(this.hovered.values());
-    const title = this.page === "controls" ? t("guide.controlsTitle") : t("guide.systemsTitle");
+    const index = PAGES.indexOf(this.page);
+    const title = t(TITLE_KEYS[this.page]);
+    const previousPage = PAGES[index - 1];
+    const nextPage = PAGES[index + 1];
 
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
@@ -111,8 +118,8 @@ export class GuideMenu extends UiPanel {
       y += lines * 28 + 20;
     }
 
-    drawButton(ctx, BUTTONS.previous, t("guide.previous"), { hovered: hovered.has("previous"), disabled: this.page === "controls" });
+    drawButton(ctx, BUTTONS.previous, previousPage ? `◀ ${t(TITLE_KEYS[previousPage])}` : "", { hovered: hovered.has("previous"), disabled: !previousPage });
     drawButton(ctx, BUTTONS.back, t("guide.back"), { hovered: hovered.has("back") });
-    drawButton(ctx, BUTTONS.next, t("guide.next"), { hovered: hovered.has("next"), disabled: this.page === "systems" });
+    drawButton(ctx, BUTTONS.next, nextPage ? `${t(TITLE_KEYS[nextPage])} ▶` : "", { hovered: hovered.has("next"), disabled: !nextPage });
   }
 }
