@@ -93,6 +93,8 @@ export interface PropPlacement {
   y: number;
   /** Renversé sur le flanc : naît éveillé et retombe (la physique décide de sa pose). */
   tipped: boolean;
+  /** Meuble d'un tas jeté en vrac : naît éveillé à cette hauteur, penché, et retombe. */
+  heap: { y: number; tiltX: number; tiltZ: number } | null;
 }
 
 export interface CollectiblePlacement {
@@ -338,10 +340,11 @@ function generatePropCluster(
     }
 
     const footprint: PlacedFootprint = { kind: slot.kind, x: rawX + shiftX, z: rawZ + shiftZ, hx, hz, angle, shiftX, shiftZ, rawX, rawZ };
-    if (y === 0 && placed.some((other) => footprintsOverlap(other, footprint))) return false;
+    // Un tas se superpose par nature : ni test de chevauchement, ni support pour les autres.
+    if (!slot.heap && y === 0 && placed.some((other) => footprintsOverlap(other, footprint))) return false;
     // Une caisse empilée sert de support à la suivante (dernier élément de `placed`).
-    if (y === 0 || STACKABLE_PROPS.has(slot.kind)) placed.push(footprint);
-    propPlacements.push({ kind: slot.kind, x: centerX + footprint.x, z: centerZ + footprint.z, rotationY: angle, y, tipped: slot.tipped ?? false });
+    if (!slot.heap && (y === 0 || STACKABLE_PROPS.has(slot.kind))) placed.push(footprint);
+    propPlacements.push({ kind: slot.kind, x: centerX + footprint.x, z: centerZ + footprint.z, rotationY: angle, y, tipped: slot.tipped ?? false, heap: slot.heap ?? null });
     return true;
   }
 

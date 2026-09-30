@@ -1,26 +1,31 @@
 import * as THREE from "three";
 import cadreurUrl from "../assets/models/entities/cadreur.glb";
+import cadreurWalk from "../assets/models/entities/cadreurWalk.json";
 import { spawnCollectibleModel } from "./collectibleLoader";
 import { gltfLoader } from "./gltfLoader";
 import { applyVhsEffect } from "./vhsMaterial";
 
 /**
- * Le Cadreur, monstre : un mannequin (rig Mixamo "X Bot", décimé + Draco) d'un brun presque
- * noir et luisant, plus grand qu'un homme, dont la tête est une vieille caméra 8 mm vissée sur
- * le cou — l'objectif est son visage, la LED "REC" son œil. Bras trop longs qui pendent,
- * doigts crispés, dos voûté.
+ * Le Cadreur, monstre : un homme en costume sombre (« Male Character in Suit » de sthaarpit,
+ * CC BY 4.0 — voir README ; squelette Mixamo, décimé + Draco), plus grand qu'un homme, dont la
+ * tête est une vieille caméra 8 mm vissée sur le cou — l'objectif est son visage, la LED "REC"
+ * son œil. Bras trop longs qui pendent, doigts crispés, dos voûté.
  *
- * Démarche humanoïde (cycle de marche Mixamo) rendue malsaine : il boite (une jambe traîne),
+ * Démarche humanoïde (cycle de marche Mixamo, pré-transféré sur ce squelette dans
+ * `cadreurWalk.json`) rendue malsaine : il boite (une jambe traîne),
  * s'arrête net par à-coups puis repart d'un coup, et sa tête-caméra se tord pour rester braquée
  * sur le joueur, avec des tressautements secs. Le déplacement suit exactement l'avancée de
  * l'animation (pas de pieds qui glissent).
  */
 
-/** Taille du monstre (le mannequin mesure 1,81 m). */
-const BODY_SCALE = 1.12;
+/** Taille du monstre : facteur de grandeur sur le modèle (recalé sur une taille de 1,81 m). */
+const BODY_SCALE = 1.12 * 0.98875;
 /** Distance parcourue par cycle de marche de l'animation (m, à l'échelle du monstre). */
-const STRIDE_LENGTH = 1.35 * BODY_SCALE;
+const STRIDE_LENGTH = 1.35 * 1.12;
 const CAMCORDER_SCALE = 3;
+/** Assombrissement du costume et de la peau (multiplie la couleur de base). */
+const OUTFIT_DARKEN = 0.35;
+const SKIN_DARKEN = 0.3;
 /** Allongement des avant-bras. */
 const FOREARM_STRETCH = 1.35;
 /** Dos voûté, tête rentrée (radians). */
@@ -48,14 +53,16 @@ export interface CadreurRig {
 export async function loadCadreur(): Promise<CadreurRig> {
   const [gltf, camcorder] = await Promise.all([gltfLoader.loadAsync(cadreurUrl), spawnCollectibleModel("cadreurHead")]);
   const character = gltf.scene;
-  character.scale.setScalar(BODY_SCALE);
-  const skin = new THREE.MeshStandardMaterial({ color: 0x15110d, roughness: 0.38, metalness: 0.05 });
-  const joints = new THREE.MeshStandardMaterial({ color: 0x0b0907, roughness: 0.55, metalness: 0.05 });
-  applyVhsEffect(skin);
-  applyVhsEffect(joints);
+  character.scale.multiplyScalar(BODY_SCALE);
+  // Costume et peau assombris : le monstre doit se fondre dans l'obscurité.
   character.traverse((object) => {
     if (object instanceof THREE.SkinnedMesh) {
-      object.material = object.name.includes("Joints") ? joints : skin;
+      const list = Array.isArray(object.material) ? object.material : [object.material];
+      for (const material of list) {
+        if (!(material instanceof THREE.MeshStandardMaterial)) continue;
+        material.color.multiplyScalar(material.name === "outfit" ? OUTFIT_DARKEN : SKIN_DARKEN);
+        applyVhsEffect(material);
+      }
       object.frustumCulled = false;
     }
   });
@@ -112,7 +119,7 @@ export async function loadCadreur(): Promise<CadreurRig> {
   const restPose = bones.map((b) => b.quaternion.clone());
 
   const mixer = new THREE.AnimationMixer(character);
-  const walk = gltf.animations.find((clip) => clip.name === "walk") ?? gltf.animations[0]!;
+  const walk = THREE.AnimationClip.parse(cadreurWalk as unknown as THREE.AnimationClipJSON);
   const action = mixer.clipAction(walk);
   action.play();
 

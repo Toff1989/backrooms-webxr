@@ -351,7 +351,7 @@ export class ChunkStreamer {
           this.spawnQueue.push(() => {
             // Le chunk a pu être déchargé/régénéré pendant le chargement asynchrone du modèle.
             if (this.loaded.get(key) !== loadedChunk) return;
-            this.grabbables.createProp(placement.kind, model, template, placement.x, placement.z, placement.rotationY, placement.y, placement.tipped);
+            this.grabbables.createProp(placement.kind, model, template, placement.x, placement.z, placement.rotationY, placement.y, placement.tipped, placement.heap);
           });
         })
         .catch(() => {});

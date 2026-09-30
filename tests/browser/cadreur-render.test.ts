@@ -23,7 +23,7 @@ import { VhsOverlay } from "../../src/player/vhsOverlay";
 import { createLogger, createRenderer, createStageController } from "./support/harness";
 
 const { log } = createLogger();
-const stages = createStageController(["WATCHED", "FROZEN", "HUNTING"]);
+const stages = createStageController(["WATCHED", "FROZEN", "HUNTING", "BODY_FRONT", "HANDS_CLOSE", "SIDE"]);
 
 // Mêmes valeurs que main.ts (fond/brouillard) et flashlight.ts (lampe torche).
 const BACKGROUND_COLOR = 0x0a0805;
@@ -100,6 +100,25 @@ async function run(): Promise<void> {
   renderFrame(3);
   log(`Rendu 'chasse dans le noir' (vitesse ${HUNTING_SPEED.toFixed(2)} m/s, lampe éteinte) affiché.`);
   await stages.enter("HUNTING");
+
+  // --- Contrôle du corps sous lumière franche : mains, bras, dos voûté ---
+  flashlight.intensity = FLASHLIGHT_INTENSITY;
+  rig.root.position.set(0, 0, -2.2);
+  rig.root.rotation.y = 0;
+  settle(0, new THREE.Vector3(0, 1.8, 0), 45);
+  const bodyTarget = new THREE.Vector3(0, 1.1, -2.2);
+  camera.position.set(0, 1.4, 0);
+  camera.lookAt(bodyTarget);
+  renderFrame(4);
+  await stages.enter("BODY_FRONT");
+  camera.position.set(0.25, 1.0, -1.2);
+  camera.lookAt(new THREE.Vector3(0.1, 0.85, -2.2));
+  renderFrame(5);
+  await stages.enter("HANDS_CLOSE");
+  camera.position.set(2.2, 1.3, -2.2);
+  camera.lookAt(bodyTarget);
+  renderFrame(6);
+  await stages.enter("SIDE");
 }
 
 run().catch((error) => {

@@ -57,6 +57,7 @@ const PROP_SCALE: Partial<Record<PropKind, number>> = { metalShelves: 1.85 / 21.
 /** Hauteur (m) d'où tombe un meuble renversé : il se couche de lui-même sur le sol. */
 const TIPPED_SPAWN_HEIGHT = 0.55;
 const X_AXIS = new THREE.Vector3(1, 0, 0);
+const Z_AXIS = new THREE.Vector3(0, 0, 1);
 const Y_AXIS = new THREE.Vector3(0, 1, 0);
 
 export type HighlightLevel = 0 | 1 | 2;
@@ -290,13 +291,30 @@ export class GrabbableRegistry {
     return grabbable;
   }
 
-  /** Meuble posé au sol (ou à `y` : caisse empilée, objet sur un bureau), ou renversé (il retombe). */
-  createProp(kind: PropKind, model: THREE.Object3D, template: THREE.Object3D, x: number, z: number, rotationY: number, y = 0, tipped = false): Grabbable {
+  /**
+   * Meuble posé au sol (ou à `y` : caisse empilée, objet sur un bureau), renversé (il retombe),
+   * ou lâché en l'air penché (`heap` : tas de mobilier jeté en vrac, il retombe sur les autres).
+   */
+  createProp(
+    kind: PropKind,
+    model: THREE.Object3D,
+    template: THREE.Object3D,
+    x: number,
+    z: number,
+    rotationY: number,
+    y = 0,
+    tipped = false,
+    heap: { y: number; tiltX: number; tiltZ: number } | null = null,
+  ): Grabbable {
     const quaternion = new THREE.Quaternion().setFromAxisAngle(Y_AXIS, rotationY);
     if (tipped) quaternion.multiply(new THREE.Quaternion().setFromAxisAngle(X_AXIS, Math.PI / 2));
+    if (heap) {
+      quaternion.multiply(new THREE.Quaternion().setFromAxisAngle(X_AXIS, heap.tiltX));
+      quaternion.multiply(new THREE.Quaternion().setFromAxisAngle(Z_AXIS, heap.tiltZ));
+    }
     const scale = PROP_SCALE[kind] ?? 1;
     const lowest = lowestRotatedBox(getModelShape(template).box, scale, quaternion);
-    const spawnY = tipped ? TIPPED_SPAWN_HEIGHT : y + 0.005;
+    const spawnY = heap ? heap.y : tipped ? TIPPED_SPAWN_HEIGHT : y + 0.005;
     return this.create({
       model,
       template,
@@ -306,7 +324,7 @@ export class GrabbableRegistry {
       mass: PROP_MASS[kind],
       item: null,
       boxCollider: BOX_COLLIDER_PROPS.has(kind),
-      awake: tipped,
+      awake: tipped || heap !== null,
       propKind: kind,
     });
   }

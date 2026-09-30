@@ -155,7 +155,7 @@ src/
     rng.ts                   Hash déterministe par coordonnées + PRNG seedé (seedrandom)
     noise.ts                 Bruit simplex 2D seedé (simplex-noise)
     chunkLayout.ts           Génère la disposition (murs/piliers/pièges/mobilier/collection/page) d'un chunk
-    props.ts                 Mises en scène du mobilier (bureau, réserve, classe, salle d'attente, abandon)
+    props.ts                 Mises en scène du mobilier (bureau, réserve, classe, salle d'attente, abandon, tas jeté en vrac)
     lore.ts                  Bandes perdues : nombre de fragments, cellule de la page de chaque level
     collectibles.ts          Pool des ~50 objets de collection (rareté fixe, lore FR/EN)
     pseudoGenerator.ts       Suggestions de pseudo (templates seedés, pas de clavier virtuel)
@@ -267,7 +267,7 @@ tests/physics.sim.ts         Simulation physique sans rendu (`npm run test:physi
   tableau noir, carton, caisse en plastique, panneau « sol glissant », télévision, plante),
   optimisés avec glTF-Transform (Draco, WebP 512 px). Ils sont placés en mises en scène
   (`shared/props.ts`) tournées d'un quart de tour aléatoire : coin bureau, réserve avec caisses
-  empilées, salle de classe, salle d'attente, zone abandonnée (chaises renversées), ou épars.
+  empilées, salle de classe, salle d'attente, zone abandonnée (chaises renversées), tas de mobilier jeté en vrac (7 à 10 meubles lâchés penchés, qui retombent en monticule), ou épars.
 - **Ombres des zones sombres** : le seuil clair/noir est appliqué au pixel (seul le bruit
   lumineux, qui varie doucement, est interpolé entre sommets) — fini les ombres en biseau
   dessinées par les triangles ; pénombre plus large et moins noire.
@@ -301,8 +301,8 @@ tests/physics.sim.ts         Simulation physique sans rendu (`npm run test:physi
 
 - **Collection (étape 6)** : 39 modèles CC0 distincts (Poly Haven), rareté fixe par objet
   (pièces détachées retirées : cassette du baladeur, câbles de la manette et du multimètre,
-  sangle des jumelles, étui à cigarettes réduit à l'étui ouvert). Modèle du Cadreur : « X Bot »
-  de Mixamo (Adobe), décimé et compressé.
+  sangle des jumelles, étui à cigarettes réduit à l'étui ouvert). Modèle du Cadreur : voir
+  « Crédits » ci-dessous.
   (commun/rare/légendaire — pas un tirage indépendant), lore FR/EN généré par templates seedés,
   espacement minimal entre objets (difficiles à trouver, jamais groupés).
   - **Physique** : moteur Rapier. Murs/piliers en colliders fixes par chunk, sol et plafond
@@ -343,3 +343,16 @@ tests/physics.sim.ts         Simulation physique sans rendu (`npm run test:physi
 
 Voir `docs/PLAN-ACTION.md` (améliorations esthétique / gameplay / performance, toutes
 implémentées) : reste à mesurer en casque avec `?debug=1` et à ajuster (étape 9).
+
+## Crédits
+
+- **Le Cadreur** : corps d'après « [Male Character in Suit](https://sketchfab.com/3d-models/male-character-in-suit-14d3dd2000cf46cca34a4f5fc621ce74) »
+  par [sthaarpit](https://sketchfab.com/sthaarpit), licence
+  [CC BY 4.0](http://creativecommons.org/licenses/by/4.0/). Modifié : tête, cheveux, yeux et dents
+  retirés, maillage simplifié, textures réduites et assombries, squelette renommé (`mixamorig*`),
+  compression Draco. La démarche vient d'une animation de marche Mixamo (Adobe), transférée sur ce
+  squelette (`src/assets/models/entities/cadreurWalk.json`). Si tu réutilises ou redistribues ce
+  modèle, cite l'auteur avec ce même lien.
+
+Ces crédits sont aussi affichés en jeu : Menu principal → Guide → page « Crédits » (3ᵉ page, après
+Contrôles et Systèmes).
