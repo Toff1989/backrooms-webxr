@@ -301,8 +301,8 @@ tests/physics.sim.ts         Simulation physique sans rendu (`npm run test:physi
 
 - **Collection (étape 6)** : 39 modèles CC0 distincts (Poly Haven), rareté fixe par objet
   (pièces détachées retirées : cassette du baladeur, câbles de la manette et du multimètre,
-  sangle des jumelles, étui à cigarettes réduit à l'étui ouvert). Modèle du Cadreur : « X Bot »
-  de Mixamo (Adobe), décimé et compressé.
+  sangle des jumelles, étui à cigarettes réduit à l'étui ouvert). Modèle du Cadreur : voir
+  « Crédits » ci-dessous.
   (commun/rare/légendaire — pas un tirage indépendant), lore FR/EN généré par templates seedés,
   espacement minimal entre objets (difficiles à trouver, jamais groupés).
   - **Physique** : moteur Rapier. Murs/piliers en colliders fixes par chunk, sol et plafond
@@ -343,3 +343,13 @@ tests/physics.sim.ts         Simulation physique sans rendu (`npm run test:physi
 
 Voir `docs/PLAN-ACTION.md` (améliorations esthétique / gameplay / performance, toutes
 implémentées) : reste à mesurer en casque avec `?debug=1` et à ajuster (étape 9).
+
+## Crédits
+
+- **Le Cadreur** : corps d'après « [Male Character in Suit](https://sketchfab.com/3d-models/male-character-in-suit-14d3dd2000cf46cca34a4f5fc621ce74) »
+  par [sthaarpit](https://sketchfab.com/sthaarpit), licence
+  [CC BY 4.0](http://creativecommons.org/licenses/by/4.0/). Modifié : tête, cheveux, yeux et dents
+  retirés, maillage simplifié, textures réduites et assombries, squelette renommé (`mixamorig*`),
+  compression Draco. La démarche vient d'une animation de marche Mixamo (Adobe), transférée sur ce
+  squelette (`src/assets/models/entities/cadreurWalk.json`). Si tu réutilises ou redistribues ce
+  modèle, cite l'auteur avec ce même lien.
