@@ -106,8 +106,6 @@ async function run(): Promise<void> {
   rig.root.position.set(0, 0, -1.2);
   rig.root.rotation.y = 0;
   settle(0, new THREE.Vector3(0, 1.8, 0), 45);
-  const stemObj = rig.root.getObjectByName("cadreurNeck");
-  if (stemObj) log(`cou: ${JSON.stringify(new THREE.Box3().setFromObject(stemObj))} scale ${JSON.stringify(stemObj.getWorldScale(new THREE.Vector3()))}`);
   const neckTarget = new THREE.Vector3(0, 1.8, -1.2);
   const shots: Array<[string, THREE.Vector3]> = [
     ["NECK_FRONT", new THREE.Vector3(0, 1.85, -0.35)],

@@ -22,8 +22,6 @@ const BODY_SCALE = 1.12;
 /** Distance parcourue par cycle de marche de l'animation (m, à l'échelle du monstre). */
 const STRIDE_LENGTH = 1.35 * BODY_SCALE;
 const CAMCORDER_SCALE = 3;
-/** Relèvement de la tête-caméra sur le corps en costume, pour montrer un cou (m). */
-const SUIT_NECK_LIFT = 0.14;
 /** Allongement des avant-bras. */
 const FOREARM_STRETCH = 1.35;
 /** Dos voûté, tête rentrée (radians). */
@@ -108,23 +106,7 @@ export async function loadCadreur(options: LoadCadreurOptions = {}): Promise<Cad
   // vers l'avant du corps en pose de référence, puis la caméra suit le cou.
   camera.position.copy(head.position).add(new THREE.Vector3(0, 0.01 / neckScale, 0.04 / neckScale));
   camera.quaternion.copy(neck.getWorldQuaternion(new THREE.Quaternion()).invert());
-  // Corps en costume : la caméra est relevée pour laisser voir un cou entre le col et le boîtier.
-  if (options.suit) camera.position.add(new THREE.Vector3(0, SUIT_NECK_LIFT / neckScale, 0).applyQuaternion(camera.quaternion));
   neck.add(camera);
-
-  // Le crâne écrasé emporte le cou du modèle en costume : on lui rend un cou (tronc de cône de
-  // peau blafarde) qui monte du col jusque dans le boîtier de la caméra.
-  if (options.suit) {
-    const neckLength = head.position.length() + (0.09 + SUIT_NECK_LIFT) / neckScale;
-    const neckMaterial = new THREE.MeshStandardMaterial({ color: 0x7a6a5c, roughness: 0.7, side: THREE.DoubleSide });
-    applyVhsEffect(neckMaterial);
-    const stem = new THREE.Mesh(new THREE.CylinderGeometry(0.046 / neckScale, 0.058 / neckScale, neckLength, 12, 1, true), neckMaterial);
-    stem.position.set(0, neckLength / 2 - 0.03 / neckScale, 0.005 / neckScale);
-    stem.position.applyQuaternion(camera.quaternion);
-    stem.quaternion.copy(camera.quaternion);
-    stem.name = "cadreurNeck";
-    neck.add(stem);
-  }
 
   const led = new THREE.Mesh(new THREE.SphereGeometry(0.005, 8, 6), new THREE.MeshBasicMaterial({ color: 0xff2a1a, fog: false, toneMapped: false }));
   led.position.set(0.028, 0.07, 0.015);
