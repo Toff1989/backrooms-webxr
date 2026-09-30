@@ -17,14 +17,14 @@ const ROW_GAP = 8;
 const ROW_X = 40;
 const ROW_Y0 = 150;
 const ROW_W = 892;
+const NAV_Y = 738;
 
 type ButtonId = "prev" | "next" | "back";
 
-const CANVAS_W = WIDTH * PX_PER_M;
 const NAV_BUTTONS: Record<ButtonId, Rect> = {
-  prev: { x: 40, y: 756, w: 90, h: 64 },
-  next: { x: 150, y: 756, w: 90, h: 64 },
-  back: { x: CANVAS_W - 300, y: 756, w: 300, h: 64 },
+  prev: { x: ROW_X, y: NAV_Y, w: 90, h: 64 },
+  next: { x: ROW_X + 90 + 120, y: NAV_Y, w: 90, h: 64 },
+  back: { x: ROW_X + ROW_W - 300, y: NAV_Y, w: 300, h: 64 },
 };
 
 const CATEGORY_ORDER: AchievementCategory[] = ["exploration", "survival", "collection", "lore", "mastery", "account", "secret"];
@@ -132,11 +132,10 @@ export class AchievementsMenu extends UiPanel {
       this.drawRow(ctx, definition, ROW_X, y);
     });
 
-    ctx.textAlign = "left";
-    ctx.font = "20px monospace";
+    ctx.font = "22px monospace";
     ctx.fillStyle = "#a79d86";
     ctx.textAlign = "center";
-    ctx.fillText(`${this.page + 1} / ${PAGE_COUNT}`, 245, 788);
+    ctx.fillText(`${this.page + 1} / ${PAGE_COUNT}`, ROW_X + 90 + 60, NAV_Y + 32);
 
     drawButton(ctx, NAV_BUTTONS.prev, "◀", { hovered: hovered.has("prev") });
     drawButton(ctx, NAV_BUTTONS.next, "▶", { hovered: hovered.has("next") });
@@ -161,9 +160,9 @@ export class AchievementsMenu extends UiPanel {
     ctx.fillStyle = unlocked ? "#ffe89a" : "#8a8272";
     ctx.fillText(`${unlocked ? "✓" : "▢"} ${t(definition.titleKey)}`, x + 30, y + 30);
 
-    ctx.font = "19px monospace";
+    ctx.font = "21px monospace";
     ctx.fillStyle = unlocked ? "#e2d8bf" : "#7c7565";
-    wrapText(ctx, t(definition.descriptionKey), x + 30, y + 58, ROW_W - 60, 24, 2);
+    wrapText(ctx, t(definition.descriptionKey), x + 30, y + 60, ROW_W - 60, 24, 2);
 
     if (unlocked && definition.perk) {
       ctx.textAlign = "right";

@@ -31,7 +31,9 @@ import { SettingsMenu } from "../../src/player/settingsMenu";
 import { COLLECTIBLE_KINDS, generateCollectibleLore, getCollectibleRarity } from "../../src/shared/collectibles";
 import { LORE_FRAGMENT_COUNT, loreFormat } from "../../src/shared/lore";
 import { loreFragment } from "../../src/i18n";
+import { AchievementsMenu } from "../../src/player/achievementsMenu";
 import { ACHIEVEMENTS } from "../../src/world/achievementDefs";
+import { AchievementTracker } from "../../src/world/achievements";
 import { NoticeModal } from "../../src/player/noticeModal";
 import { TapeSignalModal } from "../../src/player/tapeSignalModal";
 import { VhsOverlay } from "../../src/player/vhsOverlay";
@@ -526,6 +528,28 @@ function journalGroup(): Group {
   };
 }
 
+function achievementsGroup(): Group {
+  let panel: AnyPanel;
+  let tracker = new AchievementTracker();
+  const pageCount = Math.ceil(ACHIEVEMENTS.length / 5);
+  const at = (page: number, unlockAll: boolean): (() => void) => () => {
+    tracker["unlocked"] = new Set(unlockAll ? ACHIEVEMENTS.map((def) => def.id) : []);
+    panel["page"] = page;
+  };
+  const pages: Scenario[] = Array.from({ length: pageCount }, (_, i) => ({ name: `page-${i + 1}-debloques`, setup: at(i, true), score: i }));
+  return {
+    panel: "succes",
+    make: () => (panel = new AchievementsMenu(camera, parent, sfx, (tracker = new AchievementTracker()), () => {}) as AnyPanel),
+    scenarios: [
+      { name: "page-1-verrouilles", setup: at(0, false) },
+      { name: "derniere-page", setup: at(pageCount - 1, false) },
+      { name: "survol-retour", setup: () => (at(0, false)(), panel["hovered"].set(fakeHand, "back")) },
+      { name: "survol-suivant", setup: () => (at(0, false)(), panel["hovered"].set(fakeHand, "next")) },
+    ],
+    sweeps: [{ name: "toutes-les-pages", variants: pages }],
+  };
+}
+
 /** Modals collés à la caméra (notification, cassette) et texte OSD de l'écran bleu : pas des UiPanel, mais même dessin canvas. */
 function modalsGroup(): Group {
   const notice = new NoticeModal(camera, sfx) as unknown as Record<string, any>;
@@ -634,7 +658,7 @@ async function main(): Promise<void> {
     return { font: ctx.font, emPerChar: ctx.measureText("MMMMMMMMMM").width / 1000, narrow: ctx.measureText("iiiiiiiiii").width / 1000 };
   })();
 
-  const groups = [mainMenuGroup(), guideGroup(), deviceGroup(), scoresGroup(), settingsGroup(), inventoryGroup(), journalGroup(), endRunGroup(), debugGroup(), modalsGroup()];
+  const groups = [mainMenuGroup(), guideGroup(), deviceGroup(), scoresGroup(), settingsGroup(), inventoryGroup(), journalGroup(), endRunGroup(), debugGroup(), achievementsGroup(), modalsGroup()];
   for (const lang of ["fr", "en"] as const) {
     setLanguage(lang);
     for (const group of groups) {
