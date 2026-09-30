@@ -155,7 +155,7 @@ src/
     rng.ts                   Hash déterministe par coordonnées + PRNG seedé (seedrandom)
     noise.ts                 Bruit simplex 2D seedé (simplex-noise)
     chunkLayout.ts           Génère la disposition (murs/piliers/pièges/mobilier/collection/page) d'un chunk
-    props.ts                 Mises en scène du mobilier (bureau, réserve, classe, salle d'attente, abandon)
+    props.ts                 Mises en scène du mobilier (bureau, réserve, classe, salle d'attente, abandon, tas jeté en vrac)
     lore.ts                  Bandes perdues : nombre de fragments, cellule de la page de chaque level
     collectibles.ts          Pool des ~50 objets de collection (rareté fixe, lore FR/EN)
     pseudoGenerator.ts       Suggestions de pseudo (templates seedés, pas de clavier virtuel)
@@ -267,7 +267,7 @@ tests/physics.sim.ts         Simulation physique sans rendu (`npm run test:physi
   tableau noir, carton, caisse en plastique, panneau « sol glissant », télévision, plante),
   optimisés avec glTF-Transform (Draco, WebP 512 px). Ils sont placés en mises en scène
   (`shared/props.ts`) tournées d'un quart de tour aléatoire : coin bureau, réserve avec caisses
-  empilées, salle de classe, salle d'attente, zone abandonnée (chaises renversées), ou épars.
+  empilées, salle de classe, salle d'attente, zone abandonnée (chaises renversées), tas de mobilier jeté en vrac (7 à 10 meubles lâchés penchés, qui retombent en monticule), ou épars.
 - **Ombres des zones sombres** : le seuil clair/noir est appliqué au pixel (seul le bruit
   lumineux, qui varie doucement, est interpolé entre sommets) — fini les ombres en biseau
   dessinées par les triangles ; pénombre plus large et moins noire.

@@ -64,6 +64,11 @@ export interface PropSlot {
   y?: number;
   /** Renversé : il naît éveillé, basculé, et la physique le laisse retomber. */
   tipped?: boolean;
+  /**
+   * Tas de mobilier jeté en vrac : le meuble naît éveillé à `y` (m), penché de `tiltX`/`tiltZ`
+   * (rad), et retombe sur les autres. Ignore le test de chevauchement au sol.
+   */
+  heap?: { y: number; tiltX: number; tiltZ: number };
 }
 
 type Roll = (salt: number) => number;
@@ -185,6 +190,46 @@ function scattered(r: Roll): PropSlot[] {
   return slots;
 }
 
+/** Meubles qu'on trouve jetés en tas (les plus encombrants tombent en premier, au fond du tas). */
+const HEAP_KINDS: Array<[PropKind, number]> = [
+  ["chair", 20],
+  ["monoblocChair", 16],
+  ["schoolDesk", 12],
+  ["metalStool", 8],
+  ["armChair", 6],
+  ["coffeeTable", 6],
+  ["cardboardBox", 5],
+  ["cabinet", 4],
+  ["metalShelves", 3],
+  ["television", 2],
+];
+/** Hauteur de chute (m) du premier meuble du tas, puis pas entre deux meubles (plafond à 2,7 m). */
+const HEAP_BASE_Y = 0.3;
+const HEAP_STEP_Y = 0.16;
+
+/**
+ * Tas de mobilier jeté en vrac, comme si on l'avait déménagé à la va-vite : 7 à 10 meubles lâchés
+ * les uns au-dessus des autres, penchés au hasard, qui retombent en un monticule de travers.
+ */
+function heap(r: Roll): PropSlot[] {
+  const count = 7 + Math.floor(r(1) * 4);
+  const kinds = Array.from({ length: count }, (_, i) => weighted<PropKind>(r(10 + i), HEAP_KINDS));
+  // Les plus grands en bas : ils tombent d'abord et servent de base.
+  const footprint = (kind: PropKind): number => PROP_HALF_EXTENTS[kind].x * PROP_HALF_EXTENTS[kind].z;
+  kinds.sort((a, b) => footprint(b) - footprint(a));
+  return kinds.map((kind, i) => {
+    const angle = i * 2.4 + r(20 + i) * 0.6;
+    const radius = Math.min(0.7, 0.08 + 0.07 * i);
+    return {
+      kind,
+      dx: Math.cos(angle) * radius,
+      dz: Math.sin(angle) * radius,
+      rotationY: r(30 + i) * Math.PI * 2,
+      heap: { y: HEAP_BASE_Y + i * HEAP_STEP_Y, tiltX: (r(40 + i) - 0.5) * 2.2, tiltZ: (r(50 + i) - 0.5) * 2.2 },
+    };
+  });
+}
+
 /**
  * Amas de mobilier d'une cellule : une mise en scène tirée au sort, ou quelques meubles épars.
  * L'amas entier est tourné d'un quart de tour aléatoire : une même scène ne se présente jamais
@@ -198,6 +243,7 @@ export function composePropCluster(r: Roll): { slots: PropSlot[]; rotationY: num
     [abandoned, 13],
     [classroom, 10],
     [waitingRoom, 9],
+    [heap, 7],
   ]);
   return { slots: scene((salt) => r(100 + salt)), rotationY: Math.floor(r(1) * 4) * (Math.PI / 2) };
 }
