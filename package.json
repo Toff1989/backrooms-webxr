@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Backrooms VR — exploration horrifique infinie en WebXR (Meta Quest, navigateur).",
+  "description": "Backrooms VR : Prise Une — exploration horrifique infinie en WebXR (Meta Quest, navigateur).",
   "scripts": {
     "dev": "vite",
     "dev:open": "vite --open",

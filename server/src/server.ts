@@ -61,7 +61,7 @@ app.setNotFoundHandler((request, reply) => {
 app
   .listen({ port: PORT, host: HOST })
   .then(() => {
-    app.log.info(`Backrooms VR server listening on ${HOST}:${PORT} (static: ${STATIC_DIR})`);
+    app.log.info(`Backrooms VR : Prise Une server listening on ${HOST}:${PORT} (static: ${STATIC_DIR})`);
   })
   .catch((error) => {
     app.log.error(error);
