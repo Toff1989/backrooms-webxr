@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import cadreurUrl from "../assets/models/entities/cadreur.glb";
+import cadreurSuitUrl from "../assets/models/entities/cadreur-suit.glb";
 import { spawnCollectibleModel } from "./collectibleLoader";
 import { gltfLoader } from "./gltfLoader";
 import { applyVhsEffect } from "./vhsMaterial";
@@ -45,17 +46,34 @@ export interface CadreurRig {
   update(deltaSeconds: number, speed: number, lookAt: THREE.Vector3): CadreurStep;
 }
 
-export async function loadCadreur(): Promise<CadreurRig> {
-  const [gltf, camcorder] = await Promise.all([gltfLoader.loadAsync(cadreurUrl), spawnCollectibleModel("cadreurHead")]);
+export interface LoadCadreurOptions {
+  /** Corps d'homme en costume (squelette Mixamo-like, marche transférée depuis le mannequin). */
+  suit?: boolean;
+}
+
+export async function loadCadreur(options: LoadCadreurOptions = {}): Promise<CadreurRig> {
+  const [mannequin, camcorder] = await Promise.all([gltfLoader.loadAsync(cadreurUrl), spawnCollectibleModel("cadreurHead")]);
+  let gltf = mannequin;
+  if (options.suit) {
+    const suit = await gltfLoader.loadAsync(cadreurSuitUrl);
+    const clips = retargetWalk(mannequin, suit.scene);
+    gltf = { ...suit, animations: clips } as typeof suit;
+  }
   const character = gltf.scene;
-  character.scale.setScalar(BODY_SCALE);
+  if (!options.suit) character.scale.setScalar(BODY_SCALE);
+  else character.scale.multiplyScalar(BODY_SCALE * suitHeightRatio(mannequin.scene, character));
   const skin = new THREE.MeshStandardMaterial({ color: 0x15110d, roughness: 0.38, metalness: 0.05 });
   const joints = new THREE.MeshStandardMaterial({ color: 0x0b0907, roughness: 0.55, metalness: 0.05 });
   applyVhsEffect(skin);
   applyVhsEffect(joints);
   character.traverse((object) => {
     if (object instanceof THREE.SkinnedMesh) {
-      object.material = object.name.includes("Joints") ? joints : skin;
+      if (options.suit) {
+        const list = Array.isArray(object.material) ? object.material : [object.material];
+        for (const material of list) if (material instanceof THREE.MeshStandardMaterial) applyVhsEffect(material);
+      } else {
+        object.material = object.name.includes("Joints") ? joints : skin;
+      }
       object.frustumCulled = false;
     }
   });
@@ -233,3 +251,106 @@ function setWorldQuaternion(object: THREE.Object3D, world: THREE.Quaternion): vo
   object.quaternion.copy(parentWorld.invert().multiply(world));
   object.updateMatrixWorld(true);
 }
+
+/** "Hips_01" -> "mixamorigHips" (Sketchfab suffixe les os d'un _NN). */
+const mixamoName = (name: string): string => `mixamorig${name.replace(/_\d+$/, "")}`;
+
+/** Rapport de taille (os Head, monde) entre le mannequin et le corps en costume. */
+function suitHeightRatio(mannequin: THREE.Object3D, suit: THREE.Object3D): number {
+  mannequin.updateMatrixWorld(true);
+  suit.updateMatrixWorld(true);
+  const height = (root: THREE.Object3D, name: string): number => {
+    const bone = root.getObjectByName(name);
+    return bone ? bone.getWorldPosition(new THREE.Vector3()).y : 1;
+  };
+  const suitHead = [...boneList(suit)].find((b) => mixamoName(b.name) === "mixamorigHead");
+  const suitY = suitHead ? suitHead.getWorldPosition(new THREE.Vector3()).y : 1.7;
+  return height(mannequin, "mixamorigHead") / suitY;
+}
+
+function boneList(root: THREE.Object3D): THREE.Bone[] {
+  const bones: THREE.Bone[] = [];
+  root.traverse((o) => {
+    if (o instanceof THREE.Bone) bones.push(o);
+  });
+  return bones;
+}
+
+/**
+ * Transfère le clip "walk" du mannequin vers le squelette du costume : renomme les os en
+ * `mixamorig*`, puis rejoue la marche en monde (delta d'orientation par rapport à la pose de
+ * repos) pour tenir compte des poses de repos différentes.
+ */
+function retargetWalk(source: { scene: THREE.Group; animations: THREE.AnimationClip[] }, target: THREE.Group): THREE.AnimationClip[] {
+  const targetBones = boneList(target);
+  for (const b of targetBones) b.name = mixamoName(b.name);
+  const srcBones = boneList(source.scene);
+  const clip = source.animations.find((c) => c.name === "walk") ?? source.animations[0]!;
+
+  source.scene.updateMatrixWorld(true);
+  target.updateMatrixWorld(true);
+  const srcByName = new Map(srcBones.map((b) => [b.name, b]));
+  const pairs = targetBones.flatMap((t) => {
+    const s = srcByName.get(t.name);
+    return s ? [{ s, t }] : [];
+  });
+  const q = () => new THREE.Quaternion();
+  const restSrc = new Map(pairs.map(({ s }) => [s, s.getWorldQuaternion(q())]));
+  const restDst = new Map(pairs.map(({ t }) => [t, t.getWorldQuaternion(q())]));
+  const hipsSrc = srcByName.get("mixamorigHips")!;
+  const hipsDst = targetBones.find((b) => b.name === "mixamorigHips")!;
+  const hipsSrcRest = hipsSrc.getWorldPosition(new THREE.Vector3());
+  const hipsDstRest = hipsDst.getWorldPosition(new THREE.Vector3());
+  const ratio = hipsDstRest.y / hipsSrcRest.y;
+
+  const fps = 30;
+  const frames = Math.max(2, Math.round(clip.duration * fps) + 1);
+  const times = Array.from({ length: frames }, (_, i) => (i / (frames - 1)) * clip.duration);
+  const quatValues = new Map(pairs.map(({ t }) => [t, new Float32Array(frames * 4)]));
+  const hipsValues = new Float32Array(frames * 3);
+
+  const mixer = new THREE.AnimationMixer(source.scene);
+  mixer.clipAction(clip).play();
+  const delta = q();
+  const world = q();
+  const parentWorld = q();
+  const local = q();
+  const tmp = new THREE.Vector3();
+  const rest = new Map(pairs.map(({ t }) => [t, t.quaternion.clone()]));
+  for (let f = 0; f < frames; f++) {
+    mixer.setTime(times[f]!);
+    source.scene.updateMatrixWorld(true);
+    // Les os sont traités parents d'abord (ordre du parcours) : on compose les mondes cibles.
+    const dstWorld = new Map<THREE.Object3D, THREE.Quaternion>();
+    for (const t of targetBones) {
+      const pair = pairs.find((p) => p.t === t);
+      const parent = t.parent;
+      const parentQ = parent && dstWorld.has(parent) ? dstWorld.get(parent)! : parent ? parent.getWorldQuaternion(parentWorld.clone()) : q();
+      if (pair) {
+        pair.s.getWorldQuaternion(delta).multiply(restSrc.get(pair.s)!.clone().invert());
+        world.copy(delta).multiply(restDst.get(t)!);
+        local.copy(parentQ).invert().multiply(world);
+        dstWorld.set(t, world.clone());
+        local.toArray(quatValues.get(t)!, f * 4);
+      } else {
+        // Os sans équivalent (jumelles d'avant-bras...) : reste en pose de repos locale.
+        const r = rest.get(t) ?? t.quaternion;
+        dstWorld.set(t, parentQ.clone().multiply(r));
+      }
+    }
+    hipsSrc.getWorldPosition(tmp).sub(hipsSrcRest).multiplyScalar(ratio);
+    tmp.toArray(hipsValues, f * 3);
+  }
+  const tracks: THREE.KeyframeTrack[] = pairs.map(({ t }) => new THREE.QuaternionKeyframeTrack(`${t.name}.quaternion`, times, quatValues.get(t)!));
+  const hipsBase = hipsDst.position;
+  const hipsTrack = new Float32Array(hipsValues.length);
+  for (let f = 0; f < frames; f++) {
+    hipsTrack[f * 3] = hipsBase.x + hipsValues[f * 3]! / character_scale(target);
+    hipsTrack[f * 3 + 1] = hipsBase.y + hipsValues[f * 3 + 1]! / character_scale(target);
+    hipsTrack[f * 3 + 2] = hipsBase.z + hipsValues[f * 3 + 2]! / character_scale(target);
+  }
+  tracks.push(new THREE.VectorKeyframeTrack(`${hipsDst.name}.position`, times, hipsTrack));
+  return [new THREE.AnimationClip("walk", clip.duration, tracks)];
+}
+
+const character_scale = (target: THREE.Object3D): number => (target.getWorldScale(new THREE.Vector3()).y || 1);
