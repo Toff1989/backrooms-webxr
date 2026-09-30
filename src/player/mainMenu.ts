@@ -136,7 +136,10 @@ export class MainMenu extends UiPanel {
     ctx.textBaseline = "middle";
     ctx.fillStyle = "#ff6b5a";
     ctx.font = "bold 44px monospace";
-    ctx.fillText(t("menu.title"), width / 2, 105);
+    ctx.fillText(t("menu.title"), width / 2, 80);
+    ctx.fillStyle = "#e8c34a";
+    ctx.font = "bold 34px monospace";
+    ctx.fillText(t("menu.subtitle"), width / 2, 140);
 
     drawButton(ctx, BUTTONS.continue, t("menu.continue"), { hovered: hovered.has("continue"), accent: "#9fe39f" });
     drawButton(ctx, BUTTONS.newGame, t("menu.newGame"), { hovered: hovered.has("newGame") });

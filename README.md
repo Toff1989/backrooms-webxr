@@ -1,4 +1,4 @@
-# Backrooms VR (titre provisoire)
+# Backrooms VR : Prise Une
 
 Jeu d'exploration horrifique en VR, dans le navigateur (WebXR). Voir la fiche projet pour le concept complet.
 
