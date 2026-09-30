@@ -23,7 +23,7 @@ import { VhsOverlay } from "../../src/player/vhsOverlay";
 import { createLogger, createRenderer, createStageController } from "./support/harness";
 
 const { log } = createLogger();
-const stages = createStageController(["WATCHED", "FROZEN", "HUNTING", "NECK_FRONT", "NECK_34", "NECK_SIDE"]);
+const stages = createStageController(["WATCHED", "FROZEN", "HUNTING", "NECK_FRONT", "NECK_34", "NECK_SIDE", "NECK_BACK"]);
 
 // Mêmes valeurs que main.ts (fond/brouillard) et flashlight.ts (lampe torche).
 const BACKGROUND_COLOR = 0x0a0805;
@@ -106,11 +106,14 @@ async function run(): Promise<void> {
   rig.root.position.set(0, 0, -1.2);
   rig.root.rotation.y = 0;
   settle(0, new THREE.Vector3(0, 1.8, 0), 45);
+  const stemObj = rig.root.getObjectByName("cadreurNeck");
+  if (stemObj) log(`cou: ${JSON.stringify(new THREE.Box3().setFromObject(stemObj))} scale ${JSON.stringify(stemObj.getWorldScale(new THREE.Vector3()))}`);
   const neckTarget = new THREE.Vector3(0, 1.8, -1.2);
   const shots: Array<[string, THREE.Vector3]> = [
     ["NECK_FRONT", new THREE.Vector3(0, 1.85, -0.35)],
     ["NECK_34", new THREE.Vector3(0.6, 1.9, -0.65)],
     ["NECK_SIDE", new THREE.Vector3(0.8, 1.85, -1.2)],
+    ["NECK_BACK", new THREE.Vector3(0.1, 1.9, -2.2)],
   ];
   let shotTime = 4;
   for (const [name, position] of shots) {
