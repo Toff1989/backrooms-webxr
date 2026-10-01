@@ -40,7 +40,7 @@ const THUMB_JOINTS = ["thumb-metacarpal", "thumb-phalanx-proximal", "thumb-phala
  * bas. Une rotation de 45° autour de X les aligne sur la direction de visée (vers l'avant),
  * paume tournée vers l'intérieur, pouce en haut — la pose des mains de Saints & Sinners.
  */
-const GRIP_ROTATION_X = THREE.MathUtils.degToRad(45);
+export const GRIP_ROTATION_X = THREE.MathUtils.degToRad(45);
 const GRIP_OFFSET: Record<Handedness, THREE.Vector3> = {
   right: new THREE.Vector3(-0.008, 0.045, -0.012),
   left: new THREE.Vector3(0.008, 0.045, -0.012),

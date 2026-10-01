@@ -6,6 +6,7 @@ import { spawnCollectibleModel } from "../world/collectibleLoader";
 import type { CollectionEntry } from "../world/collection";
 import { MAX_LIFT_MASS, type Grabbable, type GrabbableRegistry } from "../world/grabbable";
 import { MARKER_GRIP_OFFSET } from "../world/markerModel";
+import { penGripQuaternion } from "./penGrip";
 import type { Hand } from "./hand";
 import type { Sfx } from "./sfx";
 
@@ -389,6 +390,8 @@ export class GrabSystem {
       const r = state.grabbable.body.rotation();
       tmpCurrentQuat.set(r.x, r.y, r.z, r.w);
       tmpVec.copy(state.grabPointLocal).applyQuaternion(tmpCurrentQuat).add(tmpCurrentPos.set(t.x, t.y, t.z));
+      // La main modèle est posée par son point "paume" : pour le stylo, on ramène le creux du poing sur la mine.
+      if (state.grabbable.kind === "marker") tmpVec.add(hand.palm).sub(hand.penPoint);
       hand.setHeldAnchor(tmpVec);
     }
   }
@@ -565,10 +568,9 @@ export class GrabSystem {
     let grabPointLocal: THREE.Vector3;
     let heldQuaternion = offsetQuaternion;
     if (grabbable.kind === "marker") {
-      // Prise "stylo" : la mine (+Y du modèle) pointe toujours vers l'avant de la manette, quelle que
-      // soit la façon dont l'objet gisait — jamais retourné dans le mauvais sens — et on le tient au tiers arrière.
-      const aimLocal = tmpVec.copy(hand.aimDirection).applyQuaternion(handInverse);
-      heldQuaternion = new THREE.Quaternion().setFromUnitVectors(Y_AXIS, aimLocal);
+      // Prise "stylo" : orientation fixe dans la main (voir `penGrip.ts`), la mine (+Y du modèle) toujours
+      // du même côté quelle que soit la façon dont l'objet gisait — jamais retourné —, serré au tiers arrière.
+      heldQuaternion = penGripQuaternion();
       grabPointLocal = new THREE.Vector3(0, MARKER_GRIP_OFFSET * grabbable.object.scale.x, 0);
     } else if (mode === "centered") {
       grabPointLocal = grabbable.localCenter.clone();
@@ -610,7 +612,8 @@ export class GrabSystem {
   /** Cible du corps pour une main : orientation relative figée, point saisi dans la paume. */
   private computeTarget(hand: Hand, state: HeldState): void {
     tmpTargetQuat.multiplyQuaternions(hand.quaternion, state.offsetQuaternion);
-    tmpTargetPos.copy(state.grabPointLocal).applyQuaternion(tmpTargetQuat).negate().add(hand.palm);
+    // Le stylo passe par le creux du poing, les autres objets sont saisis au point "paume".
+    tmpTargetPos.copy(state.grabPointLocal).applyQuaternion(tmpTargetQuat).negate().add(state.grabbable.kind === "marker" ? hand.penPoint : hand.palm);
   }
 
   /** Cible commune d'un objet : celle de la main qui le tient, ou la moyenne des deux. */

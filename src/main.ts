@@ -1342,7 +1342,7 @@ renderer.setAnimationLoop((timestamp) => {
     forward: trackForward,
     exit: levelManager.exitPosition,
     cadreur: cadreur.worldPosition,
-    archive: loreJournal.nextFragment !== null && !archiveReadThisLevel ? levelManager.lorePagePosition : null,
+    archive: levelManager.hasLorePage(loreJournal.nextFragment) && !archiveReadThisLevel ? levelManager.lorePagePosition : null,
     battery: flashlight.battery,
     noise: corruption.value,
   });

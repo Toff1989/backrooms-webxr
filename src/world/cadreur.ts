@@ -40,7 +40,17 @@ const LIT_THRESHOLD = 0.3;
 /** Si près qu'on le devine même dans le noir. */
 const TOUCH_VISIBLE_DISTANCE = 1.4;
 const MAX_SEE_DISTANCE = 40;
-const NEAR_EFFECT_DISTANCE = 6;
+const NEAR_EFFECT_DISTANCE = 8;
+/**
+ * Embuscade interdite : il n'apparaît jamais dans le champ de vision (lumière ou non — dans le noir
+ * d'une coupure, "non éclairé" ne veut pas dire "hors de vue") ni à moins de SPAWN_MIN_DISTANCE m
+ * à vol d'oiseau, et il ne fonce jamais sur un joueur qui ne l'a pas vu : à moins de
+ * SNEAK_RANGE m il ralentit, et il s'annonce (zoom du caméscope) avant d'être sur lui.
+ */
+const SPAWN_VIEW_COS = Math.cos(THREE.MathUtils.degToRad(70));
+const SPAWN_MIN_DISTANCE = 11;
+const SNEAK_RANGE = 8;
+const SNEAK_SPEED = 1.1;
 const PLAYER_DAMAGE_DISTANCE = 4;
 const PLAYER_DAMAGE_MAX_PER_SECOND = 36;
 const NEAR_EFFECT_COOLDOWN = 3;
@@ -140,6 +150,8 @@ export class Cadreur {
   /** Bruit vers lequel il marche (leurre), et le temps passé à le chercher. */
   private lure: { x: number; z: number; seconds: number; searching: number } | null = null;
   private lastSeenSeconds = 0;
+  /** Annonce sonore (zoom) déjà jouée pour cette approche. */
+  private announced = false;
   private lastNearEffect = -Infinity;
   private lastRelocation = -Infinity;
   /** Étourdi (tapette à souris) : figé, la caméra grésille. */
@@ -153,8 +165,8 @@ export class Cadreur {
     private readonly physics: PhysicsWorld,
   ) {
     this.motor = new THREE.PositionalAudio(listener);
-    this.motor.setRefDistance(1.2);
-    this.motor.setRolloffFactor(1.8);
+    this.motor.setRefDistance(3.5);
+    this.motor.setRolloffFactor(1.2);
     this.motor.setLoop(true);
     this.voice = new THREE.PositionalAudio(listener);
     this.voice.setRefDistance(1.6);
@@ -304,7 +316,13 @@ export class Cadreur {
     const gap = this.pathBehind();
     const catchUp = watched ? 1 : THREE.MathUtils.clamp(1 + (gap - CATCH_UP_START) / 14, 1, CATCH_UP_MAX_FACTOR);
     const speed = stunned || searching ? 0 : watched ? WATCHED_SPEED * (sight.flashlit ? FLASHLIGHT_SPEED_FACTOR : 1) : hunting * catchUp;
-    this.advance(deltaSeconds, speed, watched, context);
+    // Jamais d'embuscade : près du joueur qui ne l'a pas vu, il ralentit, et s'annonce une fois.
+    const closeBy = this.distanceTo(context.head) < SNEAK_RANGE;
+    if (closeBy && !this.announced) {
+      this.announced = true;
+      this.play(this.zoomBuffer, 1);
+    } else if (!closeBy && this.distanceTo(context.head) > SNEAK_RANGE + 6) this.announced = false;
+    this.advance(deltaSeconds, closeBy && !stunned && !searching ? Math.min(speed, SNEAK_SPEED) : speed, watched, context);
     if (sight.flashlit) {
       // Pris dans la lampe : la caméra grésille par salves.
       this.staticTimer -= deltaSeconds;
@@ -397,7 +415,7 @@ export class Cadreur {
       if (length > SPAWN_MAX_BEHIND + 10) break;
       this.position.set(b.x, 0, b.z);
       // Jamais sous les yeux du joueur : il apparaît hors de vue, derrière un angle.
-      if (this.sight(context).seen) continue;
+      if (this.sight(context).seen || this.inAmbushZone()) continue;
       this.trailIndex = i;
       this.stalking = true;
       this.lastNearEffect = -Infinity;
@@ -439,7 +457,7 @@ export class Cadreur {
       if (length < wanted) continue;
       if (length > RELOCATE_MAX_BEHIND + 10) break;
       this.position.set(b.x, 0, b.z);
-      if (this.sight(context).seen) continue;
+      if (this.sight(context).seen || this.inAmbushZone()) continue;
       this.trailIndex = i;
       this.lastSeenSeconds = 0;
       this.stuckSeconds = 0;
@@ -456,6 +474,7 @@ export class Cadreur {
 
   private despawn(): void {
     this.stalking = false;
+    this.announced = false;
     this.lure = null;
     this.stunnedSeconds = 0;
     this.body.setTranslation({ x: 0, y: -20, z: 0 }, true);
@@ -480,6 +499,14 @@ export class Cadreur {
     const clear =
       this.clearLine(this.cameraPosition, this.position.x, 1.3, this.position.z) || this.clearLine(this.cameraPosition, this.position.x, 1.9, this.position.z);
     return clear ? { seen: true, flashlit } : none;
+  }
+
+  /** Vrai si `position` est dans le champ du joueur (même dans le noir) ou trop près de lui : interdit pour apparaître. */
+  private inAmbushZone(): boolean {
+    this.tmp.set(this.position.x, 1.3, this.position.z).sub(this.cameraPosition);
+    const distance = Math.hypot(this.tmp.x, this.tmp.z);
+    if (distance < SPAWN_MIN_DISTANCE) return true;
+    return this.tmp.normalize().dot(this.forward) > SPAWN_VIEW_COS;
   }
 
   private clearLine(from: THREE.Vector3, x: number, y: number, z: number): boolean {

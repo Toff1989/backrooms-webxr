@@ -3,6 +3,7 @@ import { CollisionGroups, RAPIER, type PhysicsWorld } from "../physics/physicsWo
 import type { Grabbable } from "../world/grabbable";
 import { pulseGamepad } from "./haptics";
 import { HandModel } from "./handModel";
+import { PEN_HOLD_POINT } from "./penGrip";
 import type { HandInput } from "./xrInput";
 
 /** Point de saisie devant la paume, dans l'espace grip (paume vers -X main droite, +X main gauche). */
@@ -30,6 +31,8 @@ export class Hand {
   readonly quaternion = new THREE.Quaternion();
   readonly velocity = new THREE.Vector3();
   readonly angularVelocity = new THREE.Vector3();
+  /** Creux du poing (espace monde) : par où passe le stylo tenu, voir `PEN_HOLD_POINT`. */
+  readonly penPoint = new THREE.Vector3();
   readonly aimOrigin = new THREE.Vector3();
   readonly aimDirection = new THREE.Vector3();
   /** Objet tenu (géré par `GrabSystem`). */
@@ -115,6 +118,8 @@ export class Hand {
     grip.getWorldPosition(this.gripPosition);
     grip.getWorldQuaternion(this.quaternion);
     this.palm.copy(PALM_OFFSET[this.input.handedness]).applyQuaternion(this.quaternion).add(this.gripPosition);
+
+    this.penPoint.copy(PEN_HOLD_POINT[this.input.handedness]).applyQuaternion(this.quaternion).add(this.gripPosition);
 
     const ray = this.input.targetRay;
     if (ray) {

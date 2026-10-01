@@ -3,7 +3,7 @@ import type { PhysicsWorld } from "../physics/physicsWorld";
 import { CELL_SIZE } from "../shared/constants";
 import { getExitLocation, getExitWorldPosition } from "../shared/exit";
 import { createLevelProfile, type LevelProfile } from "../shared/levelProfile";
-import { getLorePageLocation } from "../shared/lore";
+import { getLorePageLocation, loreMinDepth } from "../shared/lore";
 import { ChunkStreamer } from "./chunkStreamer";
 import { ExitBeacon } from "./exitBeacon";
 import { FloorCeiling } from "./floorCeiling";
@@ -74,7 +74,7 @@ export class LevelManager {
     setDepthLook(this.depth);
     this.floorCeiling = new FloorCeiling(scene);
     this.floorCeiling.update(SPAWN_LOCAL_POSITION);
-    this.chunkStreamer = new ChunkStreamer(scene, audioListener, physics, grabbables, isItemStored, () => this.pinnedLoreFragment ?? nextLoreFragment(), this.profile);
+    this.chunkStreamer = new ChunkStreamer(scene, audioListener, physics, grabbables, isItemStored, () => this.loreFragmentHere(nextLoreFragment()), this.profile);
     const exitPosition = getExitWorldPosition(this.profile);
     this.exitWorldX = exitPosition.x;
     this.exitWorldZ = exitPosition.z;
@@ -135,6 +135,20 @@ export class LevelManager {
 
   markMedkitPicked(id: string): void {
     this.chunkStreamer.markMedkitPicked(id);
+  }
+
+  /**
+   * Archive portée par la page de CE level : la page relue (épinglée) ou la prochaine du journal,
+   * mais seulement si le niveau est assez profond pour elle (voir `loreMinDepth`).
+   */
+  private loreFragmentHere(next: number | null): number | null {
+    if (this.pinnedLoreFragment !== null) return this.pinnedLoreFragment;
+    return next !== null && this.depth >= loreMinDepth(next) ? next : null;
+  }
+
+  /** Vrai si ce level porte une page d'archive (prochaine archive assez débloquée pour ce niveau). */
+  hasLorePage(next: number | null): boolean {
+    return this.loreFragmentHere(next) !== null;
   }
 
   /** Position monde de la page d'archive perdue de ce level (fonction pure de la seed, même avant que son chunk soit chargé). */
