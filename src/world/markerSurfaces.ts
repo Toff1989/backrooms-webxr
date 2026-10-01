@@ -38,6 +38,8 @@ const MAX_SEGMENT = 0.25;
 /** Les tuiles au-delà de cette distance (m) ne sont pas rendues. */
 const VISIBLE_DISTANCE = 28;
 
+/** Colonnes testées par tuile de mur pour savoir si le mur existe encore (2,5 m / 10 = 25 cm). */
+const REVALIDATE_COLUMNS = 10;
 const UP = new THREE.Vector3(0, 1, 0);
 const WALL_DIRECTIONS: ReadonlyArray<{ x: number; z: number }> = [
   { x: 1, z: 0 },
@@ -61,6 +63,9 @@ interface Tile {
   material: THREE.MeshStandardMaterial;
   mesh: THREE.Mesh;
   center: THREE.Vector3;
+  normal: THREE.Vector3;
+  /** Distance (m) du décalque devant la surface physique. */
+  offset: number;
   xAxis: THREE.Vector3;
   yAxis: THREE.Vector3;
   width: number;
@@ -83,6 +88,7 @@ export class MarkerSurfaces {
   private readonly tiles = new Map<string, Tile>();
   private frame = 0;
   private visibilityTimer = 0;
+  private readonly pendingBounds: THREE.Box3[] = [];
 
   constructor(
     private readonly scene: THREE.Scene,
@@ -151,9 +157,51 @@ export class MarkerSurfaces {
     return { plane: contact.plane, point: contact.point.clone() };
   }
 
+  /**
+   * Un chunk vient d'être (re)chargé : le labyrinthe est dynamique (chunks régénérés hors de vue,
+   * rechargés avec une autre disposition), les murs et piliers ont pu changer. Les traits sont revérifiés
+   * à la frame suivante (les nouveaux colliders ne sont interrogeables qu'après un pas de physique).
+   */
+  queueRevalidate(bounds: THREE.Box3): void {
+    this.pendingBounds.push(bounds.clone());
+  }
+
+  /**
+   * Efface des tuiles de mur les colonnes qui ne reposent plus sur un mur (le mur a disparu ou
+   * bougé) : un trait ne reste jamais dans le vide. Une tuile entièrement orpheline est supprimée.
+   */
+  private revalidate(bounds: THREE.Box3): void {
+    const sampleOrigin = new THREE.Vector3();
+    for (const tile of [...this.tiles.values()]) {
+      if (!tile.key.startsWith("wall:")) continue;
+      if (tile.center.x < bounds.min.x - 0.3 || tile.center.x > bounds.max.x + 0.3 || tile.center.z < bounds.min.z - 0.3 || tile.center.z > bounds.max.z + 0.3) continue;
+      let supported = 0;
+      for (let column = 0; column < REVALIDATE_COLUMNS; column++) {
+        const u = ((column + 0.5) / REVALIDATE_COLUMNS - 0.5) * tile.width;
+        // Rayon parti de devant la surface vers le mur : touché tout près, la colonne repose sur un mur.
+        sampleOrigin.copy(tile.center).addScaledVector(tile.xAxis, u).addScaledVector(tile.normal, 0.08 - tile.offset);
+        queryRay.origin = { x: sampleOrigin.x, y: WALL_HEIGHT / 2, z: sampleOrigin.z };
+        queryRay.dir = { x: -tile.normal.x, y: 0, z: -tile.normal.z };
+        const hit = this.physics.world.castRay(queryRay, 0.2, true, undefined, CollisionGroups.queryWalls);
+        if (hit && hit.timeOfImpact > 0.04 && hit.timeOfImpact < 0.12) {
+          supported++;
+          continue;
+        }
+        const x0 = ((u - tile.width / REVALIDATE_COLUMNS / 2) / tile.width + 0.5) * TILE_PIXELS;
+        tile.ctx.clearRect(x0 - 1, 0, TILE_PIXELS / REVALIDATE_COLUMNS + 2, TILE_PIXELS);
+        tile.dirty = true;
+      }
+      if (supported === 0) {
+        this.tiles.delete(tile.key);
+        this.disposeTile(tile);
+      }
+    }
+  }
+
   /** À appeler à chaque frame : envoie les canvas modifiés au GPU, masque les tuiles lointaines. */
   update(deltaSeconds: number, head: THREE.Vector3): void {
     this.frame++;
+    for (const bounds of this.pendingBounds.splice(0)) this.revalidate(bounds);
     for (const tile of this.tiles.values()) {
       if (!tile.dirty) continue;
       tile.dirty = false;
@@ -196,14 +244,14 @@ export class MarkerSurfaces {
     let tile = this.tiles.get(key);
     if (!tile) {
       if (this.tiles.size >= MAX_TILES) this.recycleOldest();
-      tile = this.createTile(key, center.addScaledVector(normal, offset), xAxis, yAxis, normal, width, height);
+      tile = this.createTile(key, center.addScaledVector(normal, offset), xAxis, yAxis, normal, width, height, offset);
       this.tiles.set(key, tile);
     }
     tile.lastUsed = this.frame;
     return tile;
   }
 
-  private createTile(key: string, center: THREE.Vector3, xAxis: THREE.Vector3, yAxis: THREE.Vector3, normal: THREE.Vector3, width: number, height: number): Tile {
+  private createTile(key: string, center: THREE.Vector3, xAxis: THREE.Vector3, yAxis: THREE.Vector3, normal: THREE.Vector3, width: number, height: number, offset: number): Tile {
     const canvas = document.createElement("canvas");
     canvas.width = TILE_PIXELS;
     canvas.height = TILE_PIXELS;
@@ -233,7 +281,7 @@ export class MarkerSurfaces {
     mesh.matrixAutoUpdate = false;
     mesh.updateMatrix();
     this.scene.add(mesh);
-    return { key, canvas, ctx, texture, material, mesh, center, xAxis, yAxis, width, height, dirty: false, lastUsed: this.frame };
+    return { key, canvas, ctx, texture, material, mesh, center, normal: normal.clone(), offset, xAxis, yAxis, width, height, dirty: false, lastUsed: this.frame };
   }
 
   private stroke(tile: Tile, from: THREE.Vector3, to: THREE.Vector3, color: string | null): void {

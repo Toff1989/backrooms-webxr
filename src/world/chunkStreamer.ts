@@ -86,6 +86,8 @@ export class ChunkStreamer {
   /** Piles déjà ramassées dans ce level (ne réapparaissent pas au rechargement du chunk). */
   private readonly pickedBatteries = new Set<string>();
   private readonly pickedMedkits = new Set<string>();
+  /** Appelé quand un chunk vient d'être (re)chargé : ce qui était posé sur ses murs doit être revérifié (voir `MarkerSurfaces`). */
+  onChunkLoaded: ((bounds: THREE.Box3) => void) | null = null;
   private noise2D: NoiseFunction2D;
   private profile: LevelProfile;
   private currentChunkX = Number.NaN;
@@ -361,6 +363,7 @@ export class ChunkStreamer {
 
     const loadedChunk: LoadedChunk = { group, staticBody, layout, wallTraps, epoch, bounds };
     this.loaded.set(key, loadedChunk);
+    this.onChunkLoaded?.(bounds);
     log("chunk", { action: "load", key, epoch, ms: Math.round((performance.now() - startedAt) * 10) / 10, walls: layout.wallSegments.length, props: layout.propPlacements.length });
 
     for (const placement of layout.propPlacements) {

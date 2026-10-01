@@ -583,6 +583,7 @@ grabSystem = new GrabSystem(physics, grabbables, hands, sfx, {
 const objectAudio = new ObjectAudio(scene, audioListener);
 /** Dessin au marqueur sur sol/murs/plafond : tuiles canvas, effacées à chaque niveau (voir markerSurfaces.ts). */
 const markerSurfaces = new MarkerSurfaces(scene, physics);
+levelManager.onChunkLoaded = (bounds) => markerSurfaces.queueRevalidate(bounds);
 const interactions = new InteractionSystem({
   audio: objectAudio,
   physics,
