@@ -98,7 +98,7 @@ const KIND_DATA: Record<CollectibleKind, KindData> = {
   lighter: { rarity: "rare", nameFr: "briquet vintage", nameEn: "vintage lighter" },
   wallClock: { rarity: "rare", nameFr: "horloge murale", nameEn: "wall clock" },
 
-  marker: { rarity: "rare", nameFr: "marqueur indélébile", nameEn: "permanent marker" },
+  marker: { rarity: "rare", nameFr: "marqueur pour tableau blanc", nameEn: "whiteboard marker" },
 
   // Légendaire — ne devrait pas se trouver dans les Backrooms.
   vase: { rarity: "legendary", nameFr: "vase en céramique antique", nameEn: "antique ceramic vase" },

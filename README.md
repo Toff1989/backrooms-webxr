@@ -39,7 +39,7 @@ main, menus sans quitter le jeu) :
 | Inventaire | Y (ouvrir/fermer) ; gâchette sur une case puis sur une autre : déplacer l'objet ; grip sur une case : sortir l'objet, puis le relâcher sur une autre case pour l'y ranger ; bouton TRI (récent / rareté / profondeur / nom) ; identifiant de build en bas à droite |
 | Lampe frontale | B (batterie limitée, HUD `BAT` : ramasser des piles au sol en marchant dessus ou en les touchant) |
 | Signal du caméscope | X (main gauche, mains vides) change la cible : sortie, Cadreur (distance, vide la pile de la lampe), archive perdue du niveau (distance, sans limite) ; ou bouton CAMÉRA du menu d'inventaire |
-| Marqueur | Stylo rangeable (un est posé près du spawn au niveau 0) : tenu comme un stylo (la mine pointe vers l'avant de la manette), il écrit sur le sol, les murs et le plafond quand sa mine touche la surface ; gâchette = écrire / gommer. Les traits durent le temps du niveau |
+| Marqueur | Marqueur de tableau blanc rangeable (un est posé près du spawn au niveau 0) : tenu comme un stylo (la pointe pointe vers l'avant de la manette), il écrit sur le sol, les murs et le plafond quand sa mine touche la surface ; gâchette = écrire / gommer. Les traits durent le temps du niveau |
 | Soin | Trousse de soin (rare) : la saisir puis gâchette, rend de la santé |
 | Apaiser la folie | Ballon et canard en caoutchouc : les utiliser (gâchette, ou rebond du ballon) fait baisser la folie, une fois par objet toutes les 45 s |
 | Journal des bandes perdues | Bouton JOURNAL du menu d'inventaire (il flotte devant soi) ; l'autre main tourne les pages à la gâchette |

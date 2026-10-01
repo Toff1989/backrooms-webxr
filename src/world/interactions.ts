@@ -559,8 +559,8 @@ const marker: Factory = (g, w) => {
   let pen: Pen | null = null;
   let hapticTimer = 0;
   // Bague de gomme : visible seulement dans ce mode, propre à cette instance.
-  const ring = new THREE.Mesh(new THREE.CylinderGeometry(0.0062, 0.0062, 0.006, 16), new THREE.MeshBasicMaterial({ color: 0xf2efe6, toneMapped: false }));
-  ring.position.y = MARKER_HALF_LENGTH - 0.02;
+  const ring = new THREE.Mesh(new THREE.CylinderGeometry(0.009, 0.009, 0.006, 16), new THREE.MeshBasicMaterial({ color: 0xf2efe6, toneMapped: false }));
+  ring.position.y = MARKER_HALF_LENGTH - 0.03;
   ring.visible = false;
   g.object.add(ring);
   return {
