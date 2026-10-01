@@ -33,7 +33,7 @@ const MENU_DISTANCE = 0.6;
 const MENU_DROP = 0.14;
 const MENU_TILT = THREE.MathUtils.degToRad(14);
 
-type ButtonId = "prev" | "next" | "sort" | "close" | "journal" | "settings" | "mainMenu" | "debug";
+type ButtonId = "prev" | "next" | "sort" | "close" | "camera" | "journal" | "settings" | "mainMenu" | "debug";
 
 /**
  * Rangée 1 : opérations sur l'inventaire lui-même (page, tri, fermer). Rangée 2 : navigation vers
@@ -46,10 +46,11 @@ const BUTTONS: Record<ButtonId, Rect> = {
   next: { x: 120, y: 556, w: 70, h: 64 },
   sort: { x: 200, y: 556, w: 300, h: 64 },
   close: { x: 520, y: 556, w: 464, h: 64 },
-  journal: { x: 40, y: 632, w: 190, h: 60 },
-  settings: { x: 240, y: 632, w: 250, h: 60 },
-  mainMenu: { x: 500, y: 632, w: 290, h: 60 },
-  debug: { x: 800, y: 632, w: 184, h: 60 },
+  camera: { x: 40, y: 632, w: 160, h: 60 },
+  journal: { x: 210, y: 632, w: 160, h: 60 },
+  settings: { x: 380, y: 632, w: 200, h: 60 },
+  mainMenu: { x: 590, y: 632, w: 250, h: 60 },
+  debug: { x: 850, y: 632, w: 134, h: 60 },
 };
 
 const rarityLabel = (rarity: CollectionEntry["rarity"]): string => t(`rarity.${rarity}`);
@@ -62,6 +63,8 @@ interface Miniature {
 
 export interface InventoryMenuActions {
   takeOut(hand: Hand, entry: CollectionEntry): void;
+  /** Ouvre le menu du caméscope (choix de la cible du signal). */
+  openCamera(): void;
   /** Ouvre le journal des archives perdues (il flotte devant le joueur). */
   openJournal(): void;
   /** Ouvre le menu Paramètres (langue, confort, hauteur, mode debug). */
@@ -210,6 +213,10 @@ export class InventoryMenu extends UiPanel {
         this.showStatus(t("inv.sortStatus", { mode: t(`sort.${mode}`) }));
         break;
       }
+      case "camera":
+        this.close();
+        this.actions.openCamera();
+        return;
       case "journal":
         this.close();
         this.actions.openJournal();
@@ -454,6 +461,7 @@ export class InventoryMenu extends UiPanel {
     drawButton(ctx, BUTTONS.next, "▶", { hovered: hoveredButtons.has("next"), disabled: this.pageCount < 2 });
     drawButton(ctx, BUTTONS.sort, t("inv.sort"), { hovered: hoveredButtons.has("sort") });
     drawButton(ctx, BUTTONS.close, t("inv.close"), { hovered: hoveredButtons.has("close") });
+    drawButton(ctx, BUTTONS.camera, t("inv.camera"), { hovered: hoveredButtons.has("camera"), accent: "#ff6b5a" });
     drawButton(ctx, BUTTONS.journal, t("inv.journal"), { hovered: hoveredButtons.has("journal"), accent: "#e8c34a" });
     drawButton(ctx, BUTTONS.settings, t("inv.settings"), { hovered: hoveredButtons.has("settings") });
     drawButton(ctx, BUTTONS.mainMenu, t("inv.mainMenu"), { hovered: hoveredButtons.has("mainMenu") });

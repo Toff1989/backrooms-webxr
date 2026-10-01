@@ -7,6 +7,8 @@ import { stringSeedToInt } from "../shared/rng";
 import type { Grabbable, GrabbableRegistry } from "./grabbable";
 import { findModelFace, type ModelFace } from "./modelFace";
 import { emitNoise } from "./noise";
+import type { MarkerSurfaces, Pen } from "./markerSurfaces";
+import { MARKER_HALF_LENGTH, MARKER_INKS, setMarkerInk } from "./markerModel";
 import type { LoopHandle, ObjectAudio } from "./objectAudio";
 
 /** Ce que les objets manipulables savent du monde et du joueur (fourni par `main.ts`). */
@@ -31,6 +33,10 @@ export interface InteractionWorld {
   views: LiveViews;
   /** Œil du Cadreur (sa tête-caméra) et ce qu'il regarde, quand il est là. */
   cadreurEye(): { position: THREE.Vector3; target: THREE.Vector3 } | null;
+  /** Dessin au marqueur sur sol, murs et plafond (voir `markerSurfaces.ts`). */
+  surfaces: MarkerSurfaces;
+  /** Objet réconfortant utilisé : fait baisser la folie (cooldown par objet côté appelant). Vrai si l'effet a eu lieu. */
+  comfort(g: Grabbable, amount: number): boolean;
 }
 
 interface Behaviour {
@@ -515,6 +521,89 @@ function useSound(sound: "metalClick" | "rustle" | "squeak" | "whistle", loudnes
     };
   };
 }
+
+/**
+ * Objet réconfortant : l'usage (gâchette) et, s'il y a un choc (ballon qui rebondit), le choc
+ * font redescendre la folie — une seule fois par cooldown et par objet (voir `main.ts`).
+ */
+function comforting(base: Factory, amount: number, extra?: (g: Grabbable, w: InteractionWorld) => Behaviour): Factory {
+  return (g, w, system) => {
+    const inner = base(g, w, system);
+    const added = extra?.(g, w);
+    const soothe = (): void => {
+      if (w.comfort(g, amount)) log("interact", { action: "comfort", kind: g.kind });
+    };
+    return {
+      ...inner,
+      use: (hand) => {
+        (added?.use ?? inner.use)?.(hand);
+        soothe();
+      },
+      impact: (speed) => {
+        inner.impact?.(speed);
+        if (g.heldBy === null && speed > 2) soothe();
+      },
+    };
+  };
+}
+
+/**
+ * Marqueur : tenu, sa mine écrit sur le sol, un mur ou le plafond qu'elle touche (voir
+ * `MarkerSurfaces`) ; la gâchette change d'encre (noir, rouge, bleu, vert, gomme). On écrit toujours
+ * avec le bout qui dépasse de la main : le modèle se retourne si besoin.
+ */
+const marker: Factory = (g, w) => {
+  const tip = new THREE.Vector3();
+  const axis = new THREE.Vector3();
+  const palm = new THREE.Vector3();
+  let inkIndex = 0;
+  let pen: Pen | null = null;
+  let tipSign = 1;
+  let hapticTimer = 0;
+  const inner = g.object.getObjectByName("markerInner");
+  setMarkerInk(MARKER_INKS[inkIndex]!.color);
+  return {
+    use: () => {
+      inkIndex = (inkIndex + 1) % MARKER_INKS.length;
+      const ink = MARKER_INKS[inkIndex]!;
+      setMarkerInk(ink.color);
+      w.audio.playAt("metalClick", g.object.position, 0.4, `${g.kind}:ink`);
+      log("interact", { action: "marker-ink", ink: ink.id });
+    },
+    update: (deltaSeconds) => {
+      const hand = g.heldBy as Hand | null;
+      if (!hand) {
+        pen = null;
+        return;
+      }
+      axis.set(0, 1, 0).applyQuaternion(g.object.quaternion);
+      const half = MARKER_HALF_LENGTH * g.object.scale.x;
+      palm.copy(hand.palm);
+      // Le bout le plus éloigné de la paume est celui qui écrit (hystérésis : pas de bascule à l'équateur).
+      const plusEnd = tmp.copy(g.object.position).addScaledVector(axis, half).distanceTo(palm);
+      const minusEnd = tmp2.copy(g.object.position).addScaledVector(axis, -half).distanceTo(palm);
+      if (Math.abs(plusEnd - minusEnd) > 0.015) {
+        const sign = plusEnd > minusEnd ? 1 : -1;
+        if (sign !== tipSign) {
+          tipSign = sign;
+          if (inner) inner.rotation.x = sign > 0 ? 0 : Math.PI;
+        }
+      }
+      tip.copy(g.object.position).addScaledVector(axis, tipSign * half);
+      const contact = w.surfaces.probe(tip);
+      if (!contact) {
+        pen = null;
+        return;
+      }
+      pen = w.surfaces.draw(contact, pen, MARKER_INKS[inkIndex]!.color);
+      hapticTimer -= deltaSeconds;
+      if (hapticTimer <= 0) {
+        hapticTimer = 0.07;
+        hand.pulse(0.07, 14);
+      }
+    },
+  };
+};
 
 /** Canette : s'écrase dans la main ; lancée, elle rebondit bruyamment (leurre). */
 const can: Factory = (g, w, system) => {
@@ -1151,11 +1240,19 @@ const BEHAVIOURS: Record<string, Factory> = {
     },
   }),
   can,
+  marker,
   // Seuil abaissé (1.5 -> 0.9) : un rebond de ballon typique n'atteignait pas la vitesse minimale, restait muet.
   hammer: impactNoise("bang", 3, 0.9),
   vase: breakable(2.5, 0.8, "potBreak"),
   lightbulb,
-  toy: useSound("squeak", 0.5, 0.7, 0.3, "squeeze"),
+  // Canard en caoutchouc et ballon : réconfortants, ils apaisent la folie (cooldown par objet, voir `main.ts`).
+  toy: comforting(useSound("squeak", 0.5, 0.7, 0.3, "squeeze"), 14),
+  football: comforting(impactNoise("thump", 1, 0.35), 10, (g, w) => ({
+    use: () => {
+      w.audio.playAt("thump", g.object.position, 0.5, `${g.kind}:bounce`);
+      noiseAt(g, 0.25);
+    },
+  })),
   // Choc : mêmes sons que le pot en laiton (gong), la bouilloire est aussi un objet métallique creux.
   kettle: (g, w, s) => merge(useSound("whistle", 0.8, 0.8, 3.2)(g, w, s), impactNoise("gong", 2, 0.7)(g, w, s)),
   cigaretteCase: useSound("metalClick", 0.1, 0.7, 0.3, "open"),

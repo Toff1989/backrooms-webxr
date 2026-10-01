@@ -3,6 +3,7 @@ import type { PhysicsWorld } from "../physics/physicsWorld";
 import { CELL_SIZE } from "../shared/constants";
 import { getExitLocation, getExitWorldPosition } from "../shared/exit";
 import { createLevelProfile, type LevelProfile } from "../shared/levelProfile";
+import { getLorePageLocation } from "../shared/lore";
 import { ChunkStreamer } from "./chunkStreamer";
 import { ExitBeacon } from "./exitBeacon";
 import { FloorCeiling } from "./floorCeiling";
@@ -125,6 +126,16 @@ export class LevelManager {
 
   markBatteryPicked(id: string): void {
     this.chunkStreamer.markBatteryPicked(id);
+  }
+
+  markMedkitPicked(id: string): void {
+    this.chunkStreamer.markMedkitPicked(id);
+  }
+
+  /** Position monde de la page d'archive perdue de ce level (fonction pure de la seed, même avant que son chunk soit chargé). */
+  get lorePagePosition(): { x: number; z: number } {
+    const location = getLorePageLocation(this.profile);
+    return { x: location.x, z: location.z };
   }
 
   /** Position monde de la sortie du level (boussole, multimètre). */

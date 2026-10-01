@@ -67,6 +67,12 @@ export class Flashlight {
     this.battery = Math.min(1, this.battery + amount);
   }
 
+  /** Retire de la pile (suivi du Cadreur par le caméscope) ; la lampe s'éteint si elle tombe à sec. */
+  drain(amount: number): void {
+    this.battery = Math.max(0, this.battery - amount);
+    if (this.battery === 0) this.on = false;
+  }
+
   reset(): void {
     this.on = false;
     this.battery = 1;

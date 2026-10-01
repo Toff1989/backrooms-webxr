@@ -25,6 +25,16 @@ export class PlayerVitals {
     if (amount > 0) this.madness = Math.min(this.maxMadness, this.madness + amount);
   }
 
+  /** Apaisement (objet réconfortant : ballon, canard...) : fait redescendre la folie. */
+  soothe(amount: number): void {
+    if (amount > 0) this.madness = Math.max(0, this.madness - amount);
+  }
+
+  /** Soin (trousse de soin) : rend de la santé, sans dépasser le maximum. */
+  heal(amount: number): void {
+    if (amount > 0 && this.health > 0) this.health = Math.min(this.maxHealth, this.health + amount);
+  }
+
   /** Fait avancer folie et santé d'une frame ; renvoie vrai si la santé vient de tomber à 0. */
   update(deltaSeconds: number, calm: boolean): boolean {
     if (calm && this.madness > 0) this.madness = THREE.MathUtils.damp(this.madness, 0, MADNESS_DECAY_LAMBDA, deltaSeconds);

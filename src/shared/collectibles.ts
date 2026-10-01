@@ -43,7 +43,8 @@ export type CollectibleKind =
   | "lighter"
   | "wallClock"
   | "vase"
-  | "compass";
+  | "compass"
+  | "marker";
 
 export type CollectibleRarity = "common" | "rare" | "legendary";
 
@@ -96,6 +97,8 @@ const KIND_DATA: Record<CollectibleKind, KindData> = {
   kettle: { rarity: "rare", nameFr: "bouilloire électrique vintage", nameEn: "vintage electric kettle" },
   lighter: { rarity: "rare", nameFr: "briquet vintage", nameEn: "vintage lighter" },
   wallClock: { rarity: "rare", nameFr: "horloge murale", nameEn: "wall clock" },
+
+  marker: { rarity: "rare", nameFr: "marqueur indélébile", nameEn: "permanent marker" },
 
   // Légendaire — ne devrait pas se trouver dans les Backrooms.
   vase: { rarity: "legendary", nameFr: "vase en céramique antique", nameEn: "antique ceramic vase" },

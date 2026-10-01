@@ -18,6 +18,8 @@ const FRAGMENT_SHADER = /* glsl */ `
   uniform float uSnow;
   uniform float uBlue;
   uniform float uVignette;
+  uniform vec3 uFadeColor;
+  uniform float uFade;
   uniform sampler2DArray uNoiseMap;
   uniform float uNoiseFrame;
   uniform sampler2D uOsd;
@@ -77,13 +79,20 @@ const FRAGMENT_SHADER = /* glsl */ `
       color = mix(color, mix(blue, vec3(0.95), osd), uBlue);
       alpha = max(alpha, uBlue);
     }
-    // Vignette de confort (voir comfortVignette.ts), composée comme un voile noir posé
-    // par-dessus l'overlay : même résultat que l'ancien quad séparé, une passe de moins. Même
-    // rayon aussi : l'ancien quad était à 1 m, celui-ci à 0,9 m (d'où le facteur 1/0,9).
-    float vignette = smoothstep(0.55, 1.0, length((vUv - 0.5) * (2.0 / 0.9))) * uVignette;
+    // Vignette de confort (voir comfortVignette.ts), composée comme un voile noir posé par-dessus
+    // l'overlay. Calculée en angle de vue (le quad est à 0,9 m : rayon/0,9 = tan(angle)) et non
+    // plus en coordonnées du quad, dont les bords débordaient du champ du casque (~100°) — la
+    // vignette n'y devenait quasiment jamais visible. L'ouverture claire se resserre avec
+    // l'intensité : de ~55° de demi-angle (à peine) à ~22° (tunnel net).
+    float viewRadius = length((vUv - 0.5) * (4.0 / 0.9));
+    float aperture = mix(1.45, 0.42, uVignette);
+    float vignette = smoothstep(aperture, aperture + 0.55, viewRadius) * smoothstep(0.0, 0.06, uVignette);
     float outAlpha = alpha + vignette - alpha * vignette;
     color = outAlpha > 0.0 ? color * alpha * (1.0 - vignette) / outAlpha : color;
-    gl_FragColor = vec4(color, outAlpha);
+    // Fondu (noir/rouge de fin de partie, voir endSequence.ts) par-dessus tout le reste.
+    float fadedAlpha = outAlpha + uFade - outAlpha * uFade;
+    vec3 fadedColor = fadedAlpha > 0.0 ? (color * outAlpha * (1.0 - uFade) + uFadeColor * uFade) / fadedAlpha : color;
+    gl_FragColor = vec4(fadedColor, fadedAlpha);
   }
 `;
 
@@ -125,6 +134,8 @@ export class VhsOverlay {
         uSnow: { value: 0 },
         uBlue: { value: 0 },
         uVignette: { value: 0 },
+        uFadeColor: { value: new THREE.Color(0, 0, 0) },
+        uFade: { value: 0 },
         uNoiseMap: { value: noiseTexture },
         uNoiseFrame: { value: 0 },
         uOsd: { value: this.osdTexture },
@@ -147,6 +158,12 @@ export class VhsOverlay {
   /** Assombrissement des bords (vignette de confort, 0..1). */
   setVignette(intensity: number): void {
     this.material.uniforms["uVignette"]!.value = intensity;
+  }
+
+  /** Fondu plein écran vers une couleur (0..1) : fin de partie (rouge puis noir). */
+  setFade(color: THREE.ColorRepresentation, amount: number): void {
+    (this.material.uniforms["uFadeColor"]!.value as THREE.Color).set(color);
+    this.material.uniforms["uFade"]!.value = THREE.MathUtils.clamp(amount, 0, 1);
   }
 
   /** Perte de tracking VHS (0..1), se dissipe d'elle-même. */

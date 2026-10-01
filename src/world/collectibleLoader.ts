@@ -40,6 +40,11 @@ import woodenSpoonUrl from "../assets/models/collectibles/woodenSpoon.glb";
 import wrenchUrl from "../assets/models/collectibles/wrench.glb";
 import type { CollectibleKind } from "../shared/collectibles";
 import { loadedTemplates, loadTemplateModel } from "./gltfLoader";
+import { createMarkerModel } from "./markerModel";
+
+/** Objets sans modèle glTF, construits en code (voir `markerModel.ts`). */
+type ProceduralKind = "marker";
+const PROCEDURAL_BUILDERS: Record<ProceduralKind, () => THREE.Object3D> = { marker: createMarkerModel };
 
 /**
  * Objets de collection (fiche projet étape 6) : vrais modèles CC0 distincts (Poly
@@ -47,7 +52,7 @@ import { loadedTemplates, loadTemplateModel } from "./gltfLoader";
  * que `propLoader.ts`. Un seul chargement par type, les instances suivantes clonent la
  * hiérarchie en partageant géométrie/matériaux.
  */
-const COLLECTIBLE_URLS: Record<CollectibleKind, string> = {
+const COLLECTIBLE_URLS: Record<Exclude<CollectibleKind, ProceduralKind>, string> = {
   photo: photoUrl,
   can: canUrl,
   toy: toyUrl,
@@ -108,8 +113,13 @@ const templateCache = new Map<CollectibleKind | SpecialModelKind, Promise<THREE.
 function loadTemplate(kind: CollectibleKind | SpecialModelKind): Promise<THREE.Object3D> {
   let cached = templateCache.get(kind);
   if (cached) return cached;
+  if (kind in PROCEDURAL_BUILDERS) {
+    cached = Promise.resolve(PROCEDURAL_BUILDERS[kind as ProceduralKind]());
+    templateCache.set(kind, cached);
+    return cached;
+  }
   cached = loadTemplateModel(
-    kind in SPECIAL_MODEL_URLS ? SPECIAL_MODEL_URLS[kind as SpecialModelKind] : COLLECTIBLE_URLS[kind as CollectibleKind],
+    kind in SPECIAL_MODEL_URLS ? SPECIAL_MODEL_URLS[kind as SpecialModelKind] : COLLECTIBLE_URLS[kind as Exclude<CollectibleKind, ProceduralKind>],
     PRESERVE_NAMES[kind as CollectibleKind],
   );
   templateCache.set(kind, cached);
@@ -124,6 +134,6 @@ export async function spawnCollectibleModel(kind: CollectibleKind | SpecialModel
 
 /** Tous les modèles d'objets (collection et spéciaux), chargés d'avance (pré-chauffage, voir `warmup.ts`). */
 export function preloadCollectibleTemplates(): Promise<Array<{ kind: CollectibleKind | SpecialModelKind; template: THREE.Object3D }>> {
-  const kinds = [...Object.keys(COLLECTIBLE_URLS), ...Object.keys(SPECIAL_MODEL_URLS)] as Array<CollectibleKind | SpecialModelKind>;
+  const kinds = [...Object.keys(COLLECTIBLE_URLS), ...Object.keys(PROCEDURAL_BUILDERS), ...Object.keys(SPECIAL_MODEL_URLS)] as Array<CollectibleKind | SpecialModelKind>;
   return loadedTemplates(kinds.map((kind) => [kind, loadTemplate(kind)]));
 }

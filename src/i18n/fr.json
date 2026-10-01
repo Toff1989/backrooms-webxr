@@ -213,7 +213,6 @@
   "scores.back": "RETOUR",
   "inv.mainMenu": "MENU PRINCIPAL",
   "inv.debug": "DEBUG",
-
   "menu.achievements": "SUCCÈS",
   "notice.achievementLabel": "SUCCÈS DÉBLOQUÉ",
   "notice.loreLabel": "NOUVELLE ARCHIVE",
@@ -226,7 +225,6 @@
   "achievements.perkSprint": "sprint",
   "achievements.perkCorruption": "corruption",
   "achievements.perkBeacon": "boussole",
-
   "achv.depth5.title": "EXPLORATEUR",
   "achv.depth5.desc": "Atteindre le niveau 5.",
   "achv.depth10.title": "SPÉLÉOLOGUE",
@@ -237,7 +235,6 @@
   "achv.depth35.desc": "Atteindre le niveau 35.",
   "achv.depth50.title": "AU-DELÀ",
   "achv.depth50.desc": "Atteindre le niveau 50.",
-
   "achv.firstDeath.title": "PREMIÈRE FOIS",
   "achv.firstDeath.desc": "Mourir pour la première fois.",
   "achv.blackoutSurvived.title": "COUPURE DE COURANT",
@@ -250,7 +247,6 @@
   "achv.runNoFlashlightOff.desc": "Terminer une run sans jamais éteindre la lampe torche.",
   "achv.depth10NoBattery.title": "ÉCONOME",
   "achv.depth10NoBattery.desc": "Atteindre le niveau 10 sans ramasser une seule batterie.",
-
   "achv.items10.title": "COLLECTIONNEUR",
   "achv.items10.desc": "Ramasser 10 objets au total.",
   "achv.items50.title": "AMASSEUR",
@@ -263,7 +259,6 @@
   "achv.legendaryFound.desc": "Trouver un objet légendaire.",
   "achv.bagFull20.title": "SAC BIEN REMPLI",
   "achv.bagFull20.desc": "Porter 20 objets en même temps.",
-
   "achv.archive1.title": "PREMIÈRE PAGE",
   "achv.archive1.desc": "Lire sa première archive.",
   "achv.archive8.title": "À MI-CHEMIN",
@@ -272,7 +267,6 @@
   "achv.archiveAll.desc": "Réunir les 16 archives.",
   "achv.archiveStreak5.title": "LECTEUR ASSIDU",
   "achv.archiveStreak5.desc": "Lire une archive à chaque niveau, 5 niveaux d'affilée.",
-
   "achv.victory.title": "SORTIE DE SECOURS",
   "achv.victory.desc": "Gagner la partie.",
   "achv.victoryNoDeath.title": "SANS FAUTE",
@@ -281,16 +275,39 @@
   "achv.fastDepth10.desc": "Atteindre le niveau 10 en moins de 10 minutes.",
   "achv.runs10.title": "HABITUÉ DES LIEUX",
   "achv.runs10.desc": "Terminer 10 runs.",
-
   "achv.paired.title": "DEUX ÉCRANS",
   "achv.paired.desc": "Jumeler un deuxième appareil.",
   "achv.pseudoChanged.title": "NOUVELLE IDENTITÉ",
   "achv.pseudoChanged.desc": "Changer de pseudo dans les paramètres.",
   "achv.recoveryCodeUsed.title": "RETOUR DE CASSETTE",
   "achv.recoveryCodeUsed.desc": "Se reconnecter via un code de cassette.",
-
   "achv.photos20.title": "PHOTOGRAPHE",
   "achv.photos20.desc": "Prendre 20 photos.",
   "achv.tapes10.title": "AUDIOPHILE",
-  "achv.tapes10.desc": "Écouter 10 cassettes."
+  "achv.tapes10.desc": "Écouter 10 cassettes.",
+  "settings.vignette": "VIGNETTE : {level}",
+  "settings.vignette.off": "NON",
+  "settings.vignette.soft": "LÉGÈRE",
+  "settings.vignette.normal": "NORMALE",
+  "settings.vignette.strong": "FORTE",
+  "settings.vignetteStatus": "Vignette : {level}.",
+  "settings.jumpscare": "SURSAUTS : {level}",
+  "settings.jumpscare.normal": "NORMAUX",
+  "settings.jumpscare.reduced": "ATTÉNUÉS",
+  "settings.jumpscare.off": "AUCUN",
+  "settings.jumpscareStatus": "Sursauts : {level}.",
+  "hud.signalExit": "SIGNAL",
+  "hud.signalCadreur": "CADREUR",
+  "hud.signalArchive": "ARCHIVE",
+  "inv.camera": "CAMÉRA",
+  "camera.title": "SIGNAL DU CAMÉSCOPE",
+  "camera.hint": "Choisis ce que le signal traque. Raccourci : X (main gauche, mains vides).",
+  "camera.exit": "SORTIE DU NIVEAU",
+  "camera.exitDesc": "Force du signal seule : plus fort près de la sortie.",
+  "camera.cadreur": "CADREUR",
+  "camera.cadreurDesc": "Flèche + distance, mais vide la pile de la lampe.",
+  "camera.archive": "ARCHIVE PERDUE",
+  "camera.archiveDesc": "Flèche + distance vers l'archive du niveau. Aucune limite.",
+  "camera.back": "RETOUR",
+  "camera.status": "Signal : {mode}."
 }

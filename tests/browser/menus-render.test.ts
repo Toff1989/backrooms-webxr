@@ -23,6 +23,8 @@ import { DeviceMenu } from "../../src/player/deviceMenu";
 import { DebugMenu } from "../../src/player/debugMenu";
 import { EndRunScreen } from "../../src/player/endRunScreen";
 import { GuideMenu } from "../../src/player/guideMenu";
+import { CameraMenu } from "../../src/player/cameraMenu";
+import { CameraTracker, TRACK_MODES } from "../../src/player/cameraTracker";
 import { InventoryMenu } from "../../src/player/inventoryMenu";
 import { Journal } from "../../src/player/journal";
 import { MainMenu } from "../../src/player/mainMenu";
@@ -214,6 +216,16 @@ function guideGroup(): Group {
   };
 }
 
+function cameraGroup(): Group {
+  let panel: AnyPanel;
+  const tracker = new CameraTracker();
+  return {
+    panel: "camera",
+    make: () => (panel = new CameraMenu(camera, parent, sfx, tracker) as AnyPanel),
+    scenarios: TRACK_MODES.map((mode) => ({ name: mode, setup: () => (tracker.mode = mode) })),
+  };
+}
+
 function deviceGroup(): Group {
   let panel: AnyPanel;
   const lore = fakeLore({ serverProfile: { recoveryCode: "K7-WWWW-WWWW", pseudo: null, loreCount: 0, bestRuns: [] } });
@@ -256,11 +268,12 @@ function scoresGroup(): Group {
 
 function settingsGroup(): Group {
   let panel: AnyPanel;
-  const state = { vignette: true, pseudo: null as string | null };
+  const state = { vignette: "normal" as "off" | "soft" | "normal" | "strong", jumpscare: "normal" as "normal" | "reduced" | "off", pseudo: null as string | null };
   const list = (setup?: () => void) => () => {
     panel["mode"] = "list";
     panel["statusUntil"] = 0;
-    state.vignette = true;
+    state.vignette = "normal";
+    state.jumpscare = "normal";
     state.pseudo = "Silencieux-Explorateur-0042";
     setDebugMenuEnabled(false);
     setup?.();
@@ -286,8 +299,10 @@ function settingsGroup(): Group {
     make: () =>
       (panel = new SettingsMenu(camera, parent, sfx, {
         recalibrateHeight() {},
-        vignetteEnabled: () => state.vignette,
-        toggleVignette: () => state.vignette,
+        vignetteLevel: () => state.vignette,
+        cycleVignette: () => state.vignette,
+        jumpscareLevel: () => state.jumpscare,
+        cycleJumpscare: () => state.jumpscare,
         currentPseudo: () => state.pseudo,
         setPseudo: async (pseudo: string) => pseudo,
         back() {},
@@ -296,11 +311,14 @@ function settingsGroup(): Group {
       { name: "liste", setup: list() },
       { name: "sans-pseudo", setup: list(() => (state.pseudo = null)) },
       { name: "pseudo-40-caracteres", setup: list(() => (state.pseudo = MAX_PSEUDO)) },
-      { name: "vignette-non", setup: list(() => (state.vignette = false)) },
+      { name: "vignette-non", setup: list(() => (state.vignette = "off")) },
+      { name: "vignette-forte", setup: list(() => (state.vignette = "strong")) },
+      { name: "sursauts-attenues", setup: list(() => (state.jumpscare = "reduced")) },
+      { name: "sursauts-aucun", setup: list(() => (state.jumpscare = "off")) },
       { name: "debug-active", setup: list(() => setDebugMenuEnabled(true)) },
       { name: "statut-langue", setup: status("inv.langStatus") },
-      { name: "statut-vignette-on", setup: status("inv.vignetteOnStatus") },
-      { name: "statut-vignette-off", setup: status("inv.vignetteOffStatus") },
+      { name: "statut-vignette", setup: status("settings.vignetteStatus", { level: "FORTE" }) },
+      { name: "statut-sursauts", setup: status("settings.jumpscareStatus", { level: "ATTÉNUÉS" }) },
       { name: "statut-hauteur", setup: status("inv.heightStatus") },
       { name: "statut-debug-on", setup: status("settings.debugOnStatus") },
       { name: "statut-debug-off", setup: status("settings.debugOffStatus") },
@@ -495,7 +513,7 @@ function inventoryGroup(): Group {
         store,
         camera,
         parent,
-        { takeOut() {}, openJournal() {}, openSettings() {}, openMainMenu() {}, isDebugEnabled: () => debugEnabled, openDebugMenu() {} },
+        { takeOut() {}, openCamera() {}, openJournal() {}, openSettings() {}, openMainMenu() {}, isDebugEnabled: () => debugEnabled, openDebugMenu() {} },
         sfx,
       ) as AnyPanel;
       return panel;
@@ -658,7 +676,7 @@ async function main(): Promise<void> {
     return { font: ctx.font, emPerChar: ctx.measureText("MMMMMMMMMM").width / 1000, narrow: ctx.measureText("iiiiiiiiii").width / 1000 };
   })();
 
-  const groups = [mainMenuGroup(), guideGroup(), deviceGroup(), scoresGroup(), settingsGroup(), inventoryGroup(), journalGroup(), endRunGroup(), debugGroup(), achievementsGroup(), modalsGroup()];
+  const groups = [mainMenuGroup(), guideGroup(), cameraGroup(), deviceGroup(), scoresGroup(), settingsGroup(), inventoryGroup(), journalGroup(), endRunGroup(), debugGroup(), achievementsGroup(), modalsGroup()];
   for (const lang of ["fr", "en"] as const) {
     setLanguage(lang);
     for (const group of groups) {

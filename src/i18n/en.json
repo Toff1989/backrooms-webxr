@@ -213,7 +213,6 @@
   "scores.back": "BACK",
   "inv.mainMenu": "MAIN MENU",
   "inv.debug": "DEBUG",
-
   "menu.achievements": "ACHIEVEMENTS",
   "notice.achievementLabel": "ACHIEVEMENT UNLOCKED",
   "notice.loreLabel": "NEW ARCHIVE",
@@ -226,7 +225,6 @@
   "achievements.perkSprint": "sprint",
   "achievements.perkCorruption": "corruption",
   "achievements.perkBeacon": "compass",
-
   "achv.depth5.title": "EXPLORER",
   "achv.depth5.desc": "Reach level 5.",
   "achv.depth10.title": "SPELUNKER",
@@ -237,7 +235,6 @@
   "achv.depth35.desc": "Reach level 35.",
   "achv.depth50.title": "BEYOND",
   "achv.depth50.desc": "Reach level 50.",
-
   "achv.firstDeath.title": "FIRST TIME",
   "achv.firstDeath.desc": "Die for the first time.",
   "achv.blackoutSurvived.title": "POWER OUTAGE",
@@ -250,7 +247,6 @@
   "achv.runNoFlashlightOff.desc": "Finish a run without ever turning off the flashlight.",
   "achv.depth10NoBattery.title": "FRUGAL",
   "achv.depth10NoBattery.desc": "Reach level 10 without picking up a single battery.",
-
   "achv.items10.title": "COLLECTOR",
   "achv.items10.desc": "Pick up 10 items in total.",
   "achv.items50.title": "HOARDER",
@@ -263,7 +259,6 @@
   "achv.legendaryFound.desc": "Find a legendary item.",
   "achv.bagFull20.title": "FULLY LOADED BAG",
   "achv.bagFull20.desc": "Carry 20 items at once.",
-
   "achv.archive1.title": "FIRST PAGE",
   "achv.archive1.desc": "Read your first archive.",
   "achv.archive8.title": "HALFWAY THERE",
@@ -272,7 +267,6 @@
   "achv.archiveAll.desc": "Collect all 16 archives.",
   "achv.archiveStreak5.title": "AVID READER",
   "achv.archiveStreak5.desc": "Read an archive on 5 consecutive levels.",
-
   "achv.victory.title": "EMERGENCY EXIT",
   "achv.victory.desc": "Win the game.",
   "achv.victoryNoDeath.title": "FLAWLESS",
@@ -281,16 +275,39 @@
   "achv.fastDepth10.desc": "Reach level 10 in under 10 minutes.",
   "achv.runs10.title": "REGULAR",
   "achv.runs10.desc": "Finish 10 runs.",
-
   "achv.paired.title": "TWO SCREENS",
   "achv.paired.desc": "Pair a second device.",
   "achv.pseudoChanged.title": "NEW IDENTITY",
   "achv.pseudoChanged.desc": "Change your nickname in settings.",
   "achv.recoveryCodeUsed.title": "TAPE RETURNS",
   "achv.recoveryCodeUsed.desc": "Sign back in with a recovery code.",
-
   "achv.photos20.title": "PHOTOGRAPHER",
   "achv.photos20.desc": "Take 20 photos.",
   "achv.tapes10.title": "AUDIOPHILE",
-  "achv.tapes10.desc": "Listen to 10 tapes."
+  "achv.tapes10.desc": "Listen to 10 tapes.",
+  "settings.vignette": "VIGNETTE: {level}",
+  "settings.vignette.off": "OFF",
+  "settings.vignette.soft": "SOFT",
+  "settings.vignette.normal": "NORMAL",
+  "settings.vignette.strong": "STRONG",
+  "settings.vignetteStatus": "Vignette: {level}.",
+  "settings.jumpscare": "JUMPSCARES: {level}",
+  "settings.jumpscare.normal": "NORMAL",
+  "settings.jumpscare.reduced": "REDUCED",
+  "settings.jumpscare.off": "NONE",
+  "settings.jumpscareStatus": "Jumpscares: {level}.",
+  "hud.signalExit": "SIGNAL",
+  "hud.signalCadreur": "CAMERAMAN",
+  "hud.signalArchive": "ARCHIVE",
+  "inv.camera": "CAMERA",
+  "camera.title": "CAMCORDER SIGNAL",
+  "camera.hint": "Choose what the signal tracks. Shortcut: X (left hand, empty hands).",
+  "camera.exit": "LEVEL EXIT",
+  "camera.exitDesc": "Signal strength only: stronger near the exit.",
+  "camera.cadreur": "CAMERAMAN",
+  "camera.cadreurDesc": "Arrow + distance, but drains the flashlight battery.",
+  "camera.archive": "LOST ARCHIVE",
+  "camera.archiveDesc": "Arrow + distance to this level's archive. No limit.",
+  "camera.back": "BACK",
+  "camera.status": "Signal: {mode}."
 }

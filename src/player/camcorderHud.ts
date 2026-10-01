@@ -34,8 +34,12 @@ export interface HudStatus {
   battery: number;
   /** Energie de sprint (0..1). */
   sprintEnergy: number;
-  /** Force du "signal" de la sortie (0..1) : monte en s'en approchant. */
+  /** Force du "signal" de la cible suivie (0..1) : monte en s'en approchant. */
   signal: number;
+  /** Libellé du mode de traque ("SIGNAL" pour la sortie, "CADREUR", "ARCHIVE"). */
+  signalLabel: string;
+  /** Flèche + distance vers la cible (modes Cadreur/Archive), "--" si introuvable, "" pour la sortie. */
+  signalAim: string;
   /** Santé du joueur (0..1), irréversible pendant la run. */
   health: number;
   /** Folie du joueur (0..1), dissipée par l'attente lampe allumée. */
@@ -59,6 +63,8 @@ export class CamcorderHud {
     battery: 1,
     sprintEnergy: 1,
     signal: 0,
+    signalLabel: "",
+    signalAim: "",
     health: 1,
     madness: 0,
     debug: null,
@@ -176,7 +182,7 @@ export class CamcorderHud {
     const bag = `${t("hud.bag")} ${this.status.items}`;
     // Signal de la sortie (façon réception du caméscope) : 5 barres, de plus en plus pleines.
     const bars = Math.round(this.status.signal * 5);
-    const signalText = `${t("hud.signal")} ${"▮".repeat(bars)}${"▯".repeat(5 - bars)}`;
+    const signalText = `${this.status.signalLabel || t("hud.signal")} ${"▮".repeat(bars)}${"▯".repeat(5 - bars)}${this.status.signalAim ? ` ${this.status.signalAim}` : ""}`;
     const flags = [this.status.crouching ? t("hud.crouch") : "", this.status.sprinting ? t("hud.sprint") : "", this.status.flashlight ? t("hud.flashlight") : ""].filter(Boolean).join("  ");
     const debug = this.status.debug ?? "";
     // Rien n'a changé depuis le dernier dessin : ni redessin, ni envoi de la texture au GPU

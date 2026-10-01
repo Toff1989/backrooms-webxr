@@ -8,6 +8,7 @@ import { createSeededNoise2D } from "../shared/noise";
 import { log } from "../debug/debugLog";
 import { perf } from "../player/perfStats";
 import { BatteryPickup } from "./batteryPickup";
+import { MedkitPickup } from "./medkitPickup";
 import { buildChunkGroup } from "./chunkMesh";
 import { spawnCollectibleModel } from "./collectibleLoader";
 import { toCollectionEntry } from "./collection";
@@ -85,6 +86,7 @@ export class ChunkStreamer {
   private readonly spawnQueue: Array<() => void> = [];
   /** Piles déjà ramassées dans ce level (ne réapparaissent pas au rechargement du chunk). */
   private readonly pickedBatteries = new Set<string>();
+  private readonly pickedMedkits = new Set<string>();
   private noise2D: NoiseFunction2D;
   private profile: LevelProfile;
   private currentChunkX = Number.NaN;
@@ -119,6 +121,10 @@ export class ChunkStreamer {
     this.pickedBatteries.add(id);
   }
 
+  markMedkitPicked(id: string): void {
+    this.pickedMedkits.add(id);
+  }
+
   /** Change de level : décharge tout le monde courant, repart à vide sur le nouveau profil/seed. */
   setProfile(profile: LevelProfile): void {
     // `skipGrabbableCleanup` : `removeAllNotHeld()` juste après nettoie l'inventaire du monde en
@@ -136,6 +142,7 @@ export class ChunkStreamer {
     // Dans la file des spawns : dans une frame à part, pas dans celle qui démonte l'ancien monde.
     this.spawnQueue.push(() => this.prepareLorePage());
     this.pickedBatteries.clear();
+    this.pickedMedkits.clear();
     this.currentChunkX = Number.NaN;
     this.currentChunkZ = Number.NaN;
     this.regenTimer = randomRegenInterval();
@@ -337,6 +344,12 @@ export class ChunkStreamer {
       .forEach((placement) => {
         const battery = new BatteryPickup(placement.id, placement.x, placement.z, placement.rotationY);
         this.grabbables.createBattery(battery);
+      });
+
+    layout.medkitPlacements
+      .filter((placement) => !this.pickedMedkits.has(placement.id))
+      .forEach((placement) => {
+        this.grabbables.createMedkit(new MedkitPickup(placement.id, placement.x, placement.z, placement.rotationY));
       });
 
     const bounds = new THREE.Box3(new THREE.Vector3(originX, 0, originZ), new THREE.Vector3(originX + CHUNK_SIZE, WALL_HEIGHT, originZ + CHUNK_SIZE));

@@ -105,6 +105,8 @@ export interface GrabbableInit {
   propKind?: PropKind;
   /** Identifiant d'une pile saisissable, consommée immédiatement au grab. */
   batteryId?: string;
+  /** Identifiant d'une trousse de soin saisissable, consommée à l'usage. */
+  medkitId?: string;
 }
 
 /** Page d'archive perdue posée dans le monde : identifiant unique par level, fragment de récit porté. */
@@ -129,6 +131,7 @@ export class Grabbable {
   /** Type de meuble ou d'objet de collection (null : page d'archive perdue). */
   readonly kind: string | null;
   readonly batteryId: string | null;
+  readonly medkitId: string | null;
   /** Centre de la boîte englobante, en espace local du corps (échelle comprise). */
   readonly localCenter: THREE.Vector3;
   /** Meuble de soutien ou trop encombrant : jamais saisissable, seulement poussable. */
@@ -152,6 +155,7 @@ export class Grabbable {
     this.lorePage = init.lorePage ?? null;
     this.kind = init.item?.kind ?? init.propKind ?? null;
     this.batteryId = init.batteryId ?? null;
+    this.medkitId = init.medkitId ?? null;
     this.fixed = init.propKind !== undefined && NON_GRABBABLE_PROPS.has(init.propKind);
     this.onDispose = init.onDispose;
     // Meuble : endormi, fortement amorti. Petit objet (collection, page) : libre, il roule.
@@ -346,6 +350,19 @@ export class GrabbableRegistry {
       mass: 0.06,
       item: null,
       batteryId: pickup.id,
+    });
+  }
+
+  createMedkit(pickup: { id: string; object: THREE.Object3D; template: THREE.Object3D }): Grabbable {
+    return this.create({
+      model: pickup.object,
+      template: pickup.template,
+      scale: 1,
+      position: pickup.object.position.clone(),
+      quaternion: pickup.object.quaternion.clone(),
+      mass: 0.5,
+      item: null,
+      medkitId: pickup.id,
     });
   }
 
