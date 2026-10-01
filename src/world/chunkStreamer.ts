@@ -16,6 +16,11 @@ import { createLoreObject, type LoreObject } from "./lorePage";
 import { spawnProp } from "./propLoader";
 import { WallTrap } from "./wallTrap";
 
+/**
+ * Labyrinthe dynamique (chunks régénérés hors champ) : désactivé — le jeu est assez difficile
+ * sans, et les repères laissés au marqueur doivent rester valables. Remettre à `true` pour le rétablir.
+ */
+const DYNAMIC_MAZE_ENABLED = false;
 const REGEN_MIN_INTERVAL_SECONDS = 6;
 const REGEN_MAX_INTERVAL_SECONDS = 12;
 /** Distance minimale (en chunks) entre le chunk régénéré et le chunk du joueur : jamais sous ses pieds. */
@@ -86,6 +91,8 @@ export class ChunkStreamer {
   /** Piles déjà ramassées dans ce level (ne réapparaissent pas au rechargement du chunk). */
   private readonly pickedBatteries = new Set<string>();
   private readonly pickedMedkits = new Set<string>();
+  /** Appelé quand un chunk vient d'être (re)chargé : ce qui était posé sur ses murs doit être revérifié (voir `MarkerSurfaces`). */
+  onChunkLoaded: ((bounds: THREE.Box3) => void) | null = null;
   private noise2D: NoiseFunction2D;
   private profile: LevelProfile;
   private currentChunkX = Number.NaN;
@@ -279,6 +286,7 @@ export class ChunkStreamer {
 
   /** Régénère périodiquement un chunk chargé mais hors champ de vision (labyrinthe dynamique). */
   private updateDynamicMaze(camera: THREE.Camera, playerPosition: THREE.Vector3, deltaSeconds: number): number {
+    if (!DYNAMIC_MAZE_ENABLED) return 0;
     this.regenTimer -= deltaSeconds;
     if (this.regenTimer > 0) return 0;
 
@@ -361,6 +369,7 @@ export class ChunkStreamer {
 
     const loadedChunk: LoadedChunk = { group, staticBody, layout, wallTraps, epoch, bounds };
     this.loaded.set(key, loadedChunk);
+    this.onChunkLoaded?.(bounds);
     log("chunk", { action: "load", key, epoch, ms: Math.round((performance.now() - startedAt) * 10) / 10, walls: layout.wallSegments.length, props: layout.propPlacements.length });
 
     for (const placement of layout.propPlacements) {

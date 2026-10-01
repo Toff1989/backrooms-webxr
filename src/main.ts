@@ -79,7 +79,8 @@ if (!appRoot) throw new Error("#app introuvable dans index.html");
  * relais pour le niveau 0 fictif du menu principal, seule fenêtre de chargement du jeu ensuite.
  */
 const htmlLoadingScreen = document.getElementById("loading-screen");
-const visualTestParams = new URLSearchParams(window.location.search);
+// Scénarios de test visuel (`?visualTest=...`) : uniquement sur le serveur de dev, jamais dans une version déployée.
+const visualTestParams = new URLSearchParams(import.meta.env.DEV ? window.location.search : "");
 const visualTest = visualTestParams.get("visualTest");
 const visualTestObject = visualTestParams.get("object");
 
@@ -593,6 +594,7 @@ grabSystem = new GrabSystem(physics, grabbables, hands, sfx, {
 const objectAudio = new ObjectAudio(scene, audioListener);
 /** Dessin au marqueur sur sol/murs/plafond : tuiles canvas, effacées à chaque niveau (voir markerSurfaces.ts). */
 const markerSurfaces = new MarkerSurfaces(scene, physics);
+levelManager.onChunkLoaded = (bounds) => markerSurfaces.queueRevalidate(bounds);
 const interactions = new InteractionSystem({
   audio: objectAudio,
   physics,
@@ -1122,6 +1124,9 @@ const TARGET_FRAME_RATE = 72;
 
 renderer.xr.addEventListener("sessionstart", () => {
   resumeAudio("sessionstart");
+  // Le menu principal avait été placé à la hauteur de l'aperçu écran : à l'entrée en VR il est replacé
+  // (une fois la hauteur recalée) à la vraie hauteur des yeux — sinon il flottait trop haut.
+  if (menuLimbo) menuRoomNeedsPlacement = true;
   ambientHum.start();
   levelManager.onSessionStart();
   vhsOverlay.showCard(2.5, [t("blue.loading"), t("blue.level", { n: levelManager.depth })]);

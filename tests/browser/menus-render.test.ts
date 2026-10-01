@@ -325,6 +325,12 @@ function settingsGroup(): Group {
       { name: "statut-pseudo-enregistre", setup: status("settings.pseudoSet", { pseudo: MAX_PSEUDO }) },
       { name: "statut-pseudo-echec", setup: status("settings.pseudoFailed") },
       { name: "choix-pseudo", setup: pseudoMode(0, 0, 42) },
+      { name: "code-debug-vide", setup: () => ((panel["mode"] = "debugCode"), (panel["codeDigits"] = ""), (panel["statusUntil"] = 0)) },
+      { name: "code-debug-saisie", setup: () => ((panel["mode"] = "debugCode"), (panel["codeDigits"] = "12"), (panel["statusUntil"] = 0)) },
+      {
+        name: "code-debug-incorrect",
+        setup: () => ((panel["mode"] = "debugCode"), (panel["codeDigits"] = ""), (panel["statusMessage"] = t("settings.debugCodeWrong")), (panel["statusUntil"] = 1)),
+      },
       { name: "confirmer-reinitialisation", setup: () => ((panel["mode"] = "resetConfirm"), (panel["statusUntil"] = 0)) },
       { name: "survol-pseudo", setup: list(() => panel["hovered"].set(fakeHand, "pseudo")) },
     ],

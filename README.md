@@ -93,7 +93,7 @@ comme un contexte sécurisé).
 | `npm run test:physics` | Simulation physique sans rendu (marcher dans un meuble, saisir/lancer, murs, saisie à distance, rangement) |
 | `python3 scripts/convert-textures.py` | Recompresse les textures sources (`assets-src/`) en KTX2 (Pillow + `toktx` de KTX-Software requis) |
 
-Mode debug : ouvrir le jeu avec `?debug=1`. En casque : FPS, draw calls, à-coups et graphe des
+Mode debug : `?debug=1` (serveur de dev uniquement — ignoré dans une version déployée) ; en jeu, le menu debug des Paramètres demande un code à 4 chiffres. En casque : FPS, draw calls, à-coups et graphe des
 frames sous le HUD. Et surtout un **journal envoyé au serveur** toutes les 5 s (erreurs, à-coups
 avec leur cause, stats par seconde, état audio, session XR, chunks...) dans
 `server/logs/debug-AAAA-MM-JJ.jsonl`, relisible via `GET /api/debug-log?token=DEBUG_LOG_TOKEN`
@@ -295,7 +295,7 @@ tests/physics.sim.ts         Simulation physique sans rendu (`npm run test:physi
 - **Tester les menaces** : en mode debug (`?debug=1`), le menu d'inventaire (Y) a une rangée
   bleue de boutons de test : lancer/arrêter la Coupure, appeler/renvoyer le Cadreur (même au
   niveau 0), passer au niveau suivant, recharger la lampe.
-- **Labyrinthe dynamique** (`chunkStreamer.ts`) : toutes les 6 à 12 secondes, un chunk chargé mais
+- **Labyrinthe dynamique (désactivé, `DYNAMIC_MAZE_ENABLED`)** (`chunkStreamer.ts`) : toutes les 6 à 12 secondes, un chunk chargé mais
   hors du champ de vision de la caméra (frustum) et à au moins 2 chunks du joueur est régénéré
   avec un agencement différent (même sortie, même couloir garanti). Déclenche un petit pic de
   corruption pour accompagner discrètement le changement.
