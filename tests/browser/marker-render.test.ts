@@ -7,7 +7,7 @@
  */
 import * as THREE from "three";
 import { MarkerSurfaces } from "../../src/world/markerSurfaces";
-import { createMarkerModel, MARKER_INKS } from "../../src/world/markerModel";
+import { MARKER_INKS } from "../../src/world/markerModel";
 import { spawnCollectibleModel } from "../../src/world/collectibleLoader";
 import type { PhysicsWorld } from "../../src/physics/physicsWorld";
 import { createLogger, createRenderer, createScene, createStageController } from "./support/harness";
@@ -43,10 +43,12 @@ async function run(): Promise<void> {
   scene.add(floor, wall, ceiling);
 
   const surfaces = new MarkerSurfaces(scene, fakePhysics);
-  const marker = createMarkerModel();
+  const { model: marker } = await spawnCollectibleModel("marker");
   marker.position.set(1.4, 0.2, 0.2);
   marker.rotation.set(0, 0, 0.4);
   scene.add(marker);
+  const mb = new THREE.Box3().setFromObject(marker).getSize(new THREE.Vector3());
+  log(`Marqueur : ${mb.x.toFixed(3)} x ${mb.y.toFixed(3)} x ${mb.z.toFixed(3)} m`);
 
   const path = (points: Array<[number, number, number]>, color: string | null): void => {
     let pen = null;
@@ -62,15 +64,20 @@ async function run(): Promise<void> {
 
   // Sol : un cercle (3 couleurs) qui traverse la frontière de tuile x = 2,5.
   const circle: Array<[number, number, number]> = Array.from({ length: 60 }, (_, i) => [2.3 + Math.cos((i / 59) * Math.PI * 2) * 0.5, 0.01, 1.2 + Math.sin((i / 59) * Math.PI * 2) * 0.5]);
-  path(circle, MARKER_INKS[1]!.color);
-  path(lerp([0.6, 0.01, 0.6], [2.7, 0.01, 2.0], 40), MARKER_INKS[2]!.color);
+  path(circle, "#c0281d");
+  path(lerp([0.6, 0.01, 0.6], [2.7, 0.01, 2.0], 40), "#254a9c");
   // Mur : une flèche et une croix à hauteur d'yeux (mine à 1 cm du plan x = 3).
   path(lerp([2.99, 1.2, 0.4], [2.99, 1.5, 1.4], 30), MARKER_INKS[0]!.color);
   path(lerp([2.99, 1.5, 1.4], [2.99, 1.4, 1.2], 8), MARKER_INKS[0]!.color);
-  path(lerp([2.99, 1.2, 1.6], [2.99, 1.8, 2.2], 30), MARKER_INKS[3]!.color);
-  path(lerp([2.99, 1.8, 1.6], [2.99, 1.2, 2.2], 30), MARKER_INKS[3]!.color);
+  path(lerp([2.99, 1.2, 1.6], [2.99, 1.8, 2.2], 30), "#2d7f45");
+  path(lerp([2.99, 1.8, 1.6], [2.99, 1.2, 2.2], 30), "#2d7f45");
+  // Hors contact : jamais de trait en l'air, derrière ou à travers la surface.
+  path(lerp([2.9, 1.0, 0.2], [2.9, 1.0, 1.0], 10), "#ff00ff");
+  path(lerp([3.1, 1.0, 0.2], [3.1, 1.0, 1.0], 10), "#ff00ff");
+  path(lerp([2.5, -0.05, 0.2], [2.5, -0.05, 1.0], 10), "#ff00ff");
+  path(lerp([2.5, 0.05, 0.2], [2.5, 0.05, 1.0], 10), "#ff00ff");
   // Plafond : un trait.
-  path(lerp([0.5, 2.69, 0.5], [2.2, 2.69, 1.6], 30), MARKER_INKS[1]!.color);
+  path(lerp([0.5, 2.69, 0.5], [2.2, 2.69, 1.6], 30), "#c0281d");
   surfaces.update(0.016, new THREE.Vector3(1.5, 1.6, 1.5));
   log(`Tuiles allouées : ${surfaces.tileCount}`);
 

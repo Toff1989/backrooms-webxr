@@ -11,6 +11,8 @@ import { applyVhsEffect } from "./vhsMaterial";
  */
 const RENDER_DISTANCE = 25;
 const FLOOR_CLEARANCE = 0.025;
+/** Échelle de la trousse de soin : le modèle fait ~52 cm, on la veut à ~25 cm. */
+const MEDKIT_SCALE = 0.48;
 
 /** Au-delà, un objet ne se soulève pas (on peut seulement le pousser) — fiche : physique réaliste. */
 export const MAX_LIFT_MASS = 32;
@@ -353,17 +355,29 @@ export class GrabbableRegistry {
     });
   }
 
-  createMedkit(pickup: { id: string; object: THREE.Object3D; template: THREE.Object3D }): Grabbable {
+  /**
+   * Trousse de soin (modèle Poly Haven « Medical Box », réduite à ~25 cm) posée au sol : naît éveillée
+   * pour se poser, consommée à l'usage. Une seule par identifiant dans le monde.
+   */
+  createMedkit(id: string, model: THREE.Object3D, template: THREE.Object3D, x: number, z: number, rotationY: number): Grabbable {
+    const quaternion = new THREE.Quaternion().setFromAxisAngle(Y_AXIS, rotationY);
+    const lowest = lowestRotatedBox(getModelShape(template).box, MEDKIT_SCALE, quaternion);
     return this.create({
-      model: pickup.object,
-      template: pickup.template,
-      scale: 1,
-      position: pickup.object.position.clone(),
-      quaternion: pickup.object.quaternion.clone(),
-      mass: 0.5,
+      model,
+      template,
+      scale: MEDKIT_SCALE,
+      position: new THREE.Vector3(x, FLOOR_CLEARANCE - lowest, z),
+      quaternion,
+      mass: 0.8,
       item: null,
-      medkitId: pickup.id,
+      awake: true,
+      medkitId: id,
     });
+  }
+
+  isMedkitAlive(id: string): boolean {
+    for (const grabbable of this.all) if (grabbable.medkitId === id) return true;
+    return false;
   }
 
   fromCollider(handle: number): Grabbable | undefined {

@@ -8,7 +8,7 @@ import type { Grabbable, GrabbableRegistry } from "./grabbable";
 import { findModelFace, type ModelFace } from "./modelFace";
 import { emitNoise } from "./noise";
 import type { MarkerSurfaces, Pen } from "./markerSurfaces";
-import { MARKER_HALF_LENGTH, MARKER_INKS, setMarkerInk } from "./markerModel";
+import { MARKER_HALF_LENGTH, MARKER_INKS } from "./markerModel";
 import type { LoopHandle, ObjectAudio } from "./objectAudio";
 
 /** Ce que les objets manipulables savent du monde et du joueur (fourni par `main.ts`). */
@@ -548,27 +548,30 @@ function comforting(base: Factory, amount: number, extra?: (g: Grabbable, w: Int
 }
 
 /**
- * Marqueur : tenu, sa mine écrit sur le sol, un mur ou le plafond qu'elle touche (voir
- * `MarkerSurfaces`) ; la gâchette change d'encre (noir, rouge, bleu, vert, gomme). On écrit toujours
- * avec le bout qui dépasse de la main : le modèle se retourne si besoin.
+ * Marqueur : tenu comme un stylo (mine vers l'avant de la manette, voir `GrabSystem`), sa mine
+ * écrit sur le sol, un mur ou le plafond quand elle est posée dessus (voir `MarkerSurfaces`) ; la
+ * gâchette bascule entre écrire et gommer (une bague claire signale la gomme).
  */
 const marker: Factory = (g, w) => {
   const tip = new THREE.Vector3();
   const axis = new THREE.Vector3();
-  const palm = new THREE.Vector3();
   let inkIndex = 0;
   let pen: Pen | null = null;
-  let tipSign = 1;
   let hapticTimer = 0;
-  const inner = g.object.getObjectByName("markerInner");
-  setMarkerInk(MARKER_INKS[inkIndex]!.color);
+  // Bague de gomme : visible seulement dans ce mode, propre à cette instance.
+  const ring = new THREE.Mesh(new THREE.CylinderGeometry(0.0062, 0.0062, 0.006, 16), new THREE.MeshBasicMaterial({ color: 0xf2efe6, toneMapped: false }));
+  ring.position.y = MARKER_HALF_LENGTH - 0.02;
+  ring.visible = false;
+  g.object.add(ring);
   return {
-    use: () => {
+    use: (hand) => {
       inkIndex = (inkIndex + 1) % MARKER_INKS.length;
       const ink = MARKER_INKS[inkIndex]!;
-      setMarkerInk(ink.color);
+      ring.visible = ink.color === null;
+      pen = null;
       w.audio.playAt("metalClick", g.object.position, 0.4, `${g.kind}:ink`);
-      log("interact", { action: "marker-ink", ink: ink.id });
+      hand.pulse(0.25, ink.color === null ? 90 : 40);
+      log("interact", { action: "marker-mode", mode: ink.id });
     },
     update: (deltaSeconds) => {
       const hand = g.heldBy as Hand | null;
@@ -576,20 +579,9 @@ const marker: Factory = (g, w) => {
         pen = null;
         return;
       }
+      // Mine = bout +Y du modèle (la prise "stylo" la dirige vers l'avant de la manette).
       axis.set(0, 1, 0).applyQuaternion(g.object.quaternion);
-      const half = MARKER_HALF_LENGTH * g.object.scale.x;
-      palm.copy(hand.palm);
-      // Le bout le plus éloigné de la paume est celui qui écrit (hystérésis : pas de bascule à l'équateur).
-      const plusEnd = tmp.copy(g.object.position).addScaledVector(axis, half).distanceTo(palm);
-      const minusEnd = tmp2.copy(g.object.position).addScaledVector(axis, -half).distanceTo(palm);
-      if (Math.abs(plusEnd - minusEnd) > 0.015) {
-        const sign = plusEnd > minusEnd ? 1 : -1;
-        if (sign !== tipSign) {
-          tipSign = sign;
-          if (inner) inner.rotation.x = sign > 0 ? 0 : Math.PI;
-        }
-      }
-      tip.copy(g.object.position).addScaledVector(axis, tipSign * half);
+      tip.copy(g.object.position).addScaledVector(axis, MARKER_HALF_LENGTH * g.object.scale.x);
       const contact = w.surfaces.probe(tip);
       if (!contact) {
         pen = null;
@@ -601,6 +593,11 @@ const marker: Factory = (g, w) => {
         hapticTimer = 0.07;
         hand.pulse(0.07, 14);
       }
+    },
+    dispose: () => {
+      ring.removeFromParent();
+      ring.geometry.dispose();
+      (ring.material as THREE.Material).dispose();
     },
   };
 };

@@ -138,7 +138,7 @@ export class EndSequence {
         audio.setVolume(level === "reduced" ? 0.5 : 0.95);
         audio.play();
       }
-      if (level === "normal") this.overlay.signalLoss(0.12);
+      if (level === "normal") this.overlay.signalLoss(0.07);
     }
     log("run", { action: "end-sequence", kind, level });
   }
@@ -184,12 +184,13 @@ export class EndSequence {
     this.head.position.set((Math.random() - 0.5) * shake, -0.02 + (Math.random() - 0.5) * shake, -(HEAD_DISTANCE + 0.35 * (1 - eased)));
     this.head.rotation.z = reduced ? 0 : (Math.random() - 0.5) * 0.05;
     this.led.visible = reduced ? this.elapsed % 0.6 < 0.4 : Math.random() < 0.8;
-    this.overlay.triggerTrackingLoss(reduced ? 0.55 : 1);
+    // Effet VHS volontairement modéré : la tête du Cadreur doit rester bien visible sous les bandes.
+    this.overlay.triggerTrackingLoss(reduced ? 0.22 : 0.42);
     if (!reduced) {
       this.glitchTimer -= deltaSeconds;
       if (this.glitchTimer <= 0) {
-        this.glitchTimer = 0.1 + Math.random() * 0.25;
-        this.overlay.signalLoss(0.04 + Math.random() * 0.08);
+        this.glitchTimer = 0.3 + Math.random() * 0.5;
+        this.overlay.signalLoss(0.025 + Math.random() * 0.04);
       }
     }
   }

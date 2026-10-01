@@ -211,7 +211,7 @@ export class CamcorderHud {
     ctx.font = "bold 34px monospace";
     this.text(depth, 20, 120, "left", "#ffe89a");
     this.text(bag, 200, 120, "left");
-    const SIGNAL_X = 380;
+    const SIGNAL_X = 335;
     // Les indicateurs passent sur leur propre ligne s'ils empiéteraient sur SIGNAL (langue plus
     // longue, ou les trois actifs à la fois) : mieux vaut deux lignes lisibles qu'un chevauchement.
     const signalEndX = SIGNAL_X + ctx.measureText(signalText).width;

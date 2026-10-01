@@ -7,7 +7,7 @@ import { DEBUG_ENABLED, installDebugLog, isDebugMenuEnabled, log } from "./debug
 import { PhysicsWorld, RAPIER } from "./physics/physicsWorld";
 import { CamcorderHud } from "./player/camcorderHud";
 import { CameraMenu } from "./player/cameraMenu";
-import { bearingArrow, CADREUR_TRACK_DRAIN_PER_SECOND, CameraTracker } from "./player/cameraTracker";
+import { CADREUR_TRACK_DRAIN_PER_SECOND, CameraTracker } from "./player/cameraTracker";
 import { ComfortVignette, type VignetteLevel, VIGNETTE_LEVELS } from "./player/comfortVignette";
 import { JUMPSCARE_LEVELS, loadJumpscareLevel, loadVignetteLevel, nextLevel, saveJumpscareLevel, saveVignetteLevel, type JumpscareLevel } from "./player/comfortSettings";
 import { EndRunScreen } from "./player/endRunScreen";
@@ -1321,7 +1321,7 @@ renderer.setAnimationLoop((timestamp) => {
   if (trackReading.draining && !menuLimbo) flashlight.drain(CADREUR_TRACK_DRAIN_PER_SECOND * deltaSeconds);
   const trackLabel = t(trackReading.mode === "exit" ? "hud.signalExit" : trackReading.mode === "cadreur" ? "hud.signalCadreur" : "hud.signalArchive");
   const trackAim =
-    trackReading.bearing === null ? "" : trackReading.distance === null ? "--" : `${bearingArrow(trackReading.bearing)}${Math.round(trackReading.distance)}m`;
+    trackReading.bearing === null ? "" : trackReading.distance === null ? "--" : `${Math.round(trackReading.distance)}m`;
   hud.status = {
     depth: levelManager.depth,
     crouching: player.crouching,
