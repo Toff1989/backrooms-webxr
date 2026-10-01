@@ -16,6 +16,11 @@ import { createLoreObject, type LoreObject } from "./lorePage";
 import { spawnProp } from "./propLoader";
 import { WallTrap } from "./wallTrap";
 
+/**
+ * Labyrinthe dynamique (chunks régénérés hors champ) : désactivé — le jeu est assez difficile
+ * sans, et les repères laissés au marqueur doivent rester valables. Remettre à `true` pour le rétablir.
+ */
+const DYNAMIC_MAZE_ENABLED = false;
 const REGEN_MIN_INTERVAL_SECONDS = 6;
 const REGEN_MAX_INTERVAL_SECONDS = 12;
 /** Distance minimale (en chunks) entre le chunk régénéré et le chunk du joueur : jamais sous ses pieds. */
@@ -281,6 +286,7 @@ export class ChunkStreamer {
 
   /** Régénère périodiquement un chunk chargé mais hors champ de vision (labyrinthe dynamique). */
   private updateDynamicMaze(camera: THREE.Camera, playerPosition: THREE.Vector3, deltaSeconds: number): number {
+    if (!DYNAMIC_MAZE_ENABLED) return 0;
     this.regenTimer -= deltaSeconds;
     if (this.regenTimer > 0) return 0;
 
