@@ -25,6 +25,23 @@ export function setDebugMenuEnabled(value: boolean): void {
   debugMenuEnabled = value;
 }
 
+/**
+ * Le menu debug ne s'active depuis les Paramètres qu'avec un code à 4 chiffres : seule l'empreinte
+ * SHA-256 (salée) en est stockée ici, jamais le code. Pour en changer, remplacer l'empreinte :
+ * `printf 'backrooms-vr:debug:CODE' | sha256sum`.
+ */
+const DEBUG_CODE_HASH = "2f9a2a93ac632b71ead2cf4af3bc7039e7d4059904df40f92ec3092b8ba4ab41";
+export const DEBUG_CODE_LENGTH = 4;
+
+/** Vrai si `code` est le bon code debug (faux aussi si le navigateur n'offre pas WebCrypto). */
+export async function verifyDebugCode(code: string): Promise<boolean> {
+  if (code.length !== DEBUG_CODE_LENGTH || !globalThis.crypto?.subtle) return false;
+  const bytes = new TextEncoder().encode(`backrooms-vr:debug:${code}`);
+  const digest = await globalThis.crypto.subtle.digest("SHA-256", bytes);
+  const hex = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+  return hex === DEBUG_CODE_HASH;
+}
+
 const FLUSH_INTERVAL_MS = 5000;
 const MAX_BUFFER = 2000;
 const MAX_MEMORY = 5000;

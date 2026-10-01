@@ -308,5 +308,8 @@
   "camera.cadreurDesc": "Affiche la distance, mais vide la pile de la lampe.",
   "camera.archive": "ARCHIVE PERDUE",
   "camera.archiveDesc": "Affiche la distance jusqu'à l'archive du niveau. Aucune limite.",
-  "camera.back": "RETOUR"
+  "camera.back": "RETOUR",
+  "settings.debugCodeTitle": "CODE DEBUG",
+  "settings.debugCodeHint": "Saisis le code à 4 chiffres.",
+  "settings.debugCodeWrong": "Code incorrect."
 }

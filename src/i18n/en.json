@@ -308,5 +308,8 @@
   "camera.cadreurDesc": "Shows the distance, but drains the flashlight battery.",
   "camera.archive": "LOST ARCHIVE",
   "camera.archiveDesc": "Shows the distance to this level's archive. No limit.",
-  "camera.back": "BACK"
+  "camera.back": "BACK",
+  "settings.debugCodeTitle": "DEBUG CODE",
+  "settings.debugCodeHint": "Enter the 4-digit code.",
+  "settings.debugCodeWrong": "Wrong code."
 }
