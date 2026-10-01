@@ -181,19 +181,25 @@ export class Grabbable {
         .setSleeping(furniture && !init.awake)
         // Meubles : fort amortissement (frottement sur la moquette) pour qu'ils se posent et
         // s'endorment vite au lieu de glisser sans fin quand un amas se chevauche au chargement.
-        .setLinearDamping(furniture ? 0.8 : 0.25)
-        .setAngularDamping(furniture ? 1.5 : 0.9),
+        .setLinearDamping(furniture ? 0.8 : init.item?.kind === "marker" ? 1 : 0.25)
+        // Le marqueur (cylindre) ne doit pas rouler loin du spawn.
+        .setAngularDamping(furniture ? 1.5 : init.item?.kind === "marker" ? 10 : 0.9),
     );
 
     // L'enveloppe convexe détaillée d'un meuble lourd oscillait sur le sol (contacts instables) ;
     // une boîte suffit pour ces formes anguleuses.
-    const hullDesc = init.boxCollider ? null : RAPIER.ColliderDesc.convexHull(scaledHull(shape, init.scale));
+    // Le marqueur (corps de révolution très fin, 1,8 cm) : son enveloppe convexe traversait le sol
+    // (contacts instables) — un cylindre, sa vraie forme, repose normalement.
+    const cylinder = init.item?.kind === "marker";
+    const hullDesc = init.boxCollider || cylinder ? null : RAPIER.ColliderDesc.convexHull(scaledHull(shape, init.scale));
     const size = shape.box.getSize(new THREE.Vector3()).multiplyScalar(init.scale * 0.5);
     const center = shape.box.getCenter(new THREE.Vector3()).multiplyScalar(init.scale);
     this.localCenter = center.clone();
     const colliderDesc =
       hullDesc ??
-      RAPIER.ColliderDesc.cuboid(Math.max(size.x, 0.01), Math.max(size.y, 0.01), Math.max(size.z, 0.01)).setTranslation(center.x, center.y, center.z);
+      (cylinder
+        ? RAPIER.ColliderDesc.cylinder(Math.max(size.y, 0.01), Math.max(size.x, size.z, 0.005)).setTranslation(center.x, center.y, center.z)
+        : RAPIER.ColliderDesc.cuboid(Math.max(size.x, 0.01), Math.max(size.y, 0.01), Math.max(size.z, 0.01)).setTranslation(center.x, center.y, center.z));
     colliderDesc.setMass(init.mass).setFriction(0.8).setRestitution(0.15).setCollisionGroups(CollisionGroups.dynamic);
     this.collider = physics.world.createCollider(colliderDesc, this.body);
     // L'ajout du collider réveille le corps : un meuble posé se rendort immédiatement.
