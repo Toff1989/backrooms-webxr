@@ -391,7 +391,7 @@ export class ChunkStreamer {
               model,
               template,
               new THREE.Vector3(placement.x, COLLECTIBLE_SPAWN_HEIGHT, placement.z),
-              new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), placement.rotationY),
+              restingQuaternion(placement.kind, placement.rotationY),
             );
           });
         })
@@ -500,6 +500,12 @@ function distanceToBox(point: THREE.Vector3, box: THREE.Box3): number {
 function parseChunkKey(key: string): [number, number] {
   const parts = key.split(",");
   return [Number(parts[0]), Number(parts[1])];
+}
+
+/** Orientation au sol : le stylo (marqueur) est modélisé debout (axe Y), on le couche à plat. */
+function restingQuaternion(kind: string, rotationY: number): THREE.Quaternion {
+  const yaw = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), rotationY);
+  return kind === "marker" ? yaw.multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), Math.PI / 2)) : yaw;
 }
 
 /** Libère les géométries du chunk. Les matériaux (et la géométrie des piles) sont partagés : jamais disposés ici. */

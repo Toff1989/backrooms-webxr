@@ -230,7 +230,7 @@ export function generateChunkLayout(
     }
   }
 
-  // Premier level de chaque run : un marqueur est posé près du spawn (dans le dégagement, hors murs
+  // Premier level de chaque run : un marqueur est posé juste devant le spawn (dans le dégagement, hors murs
   // et meubles), pour que le joueur ait de quoi laisser des repères dès le départ.
   if (profile.depth === 0 && chunkX === 0 && chunkZ === 0) {
     const lore = generateCollectibleLore("marker", 0, 0);
@@ -238,8 +238,9 @@ export function generateChunkLayout(
       id: `${profile.seed}:marker`,
       kind: "marker",
       rarity: getCollectibleRarity("marker"),
-      x: 1.9,
-      z: 1.9,
+      // À 60 cm devant le joueur au spawn (1,25 ; 1,25), qui regarde vers -Z au départ : dans son champ de vision.
+      x: 1.4,
+      z: 0.65,
       rotationY: 0.8,
       scale: 1,
       ...lore,
