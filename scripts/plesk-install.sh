@@ -3,13 +3,18 @@
 #
 #   Première installation (en SSH) :             bash scripts/plesk-install.sh
 #   Mise à jour (après un « Extraire » Git) :     bash scripts/plesk-install.sh --update
+#   Repartir de zéro (efface TOUTES les données) : bash scripts/plesk-install.sh --update --reset-data
 #
 # Ce que fait le script : choisit un Node.js assez récent, installe les paquets (front + serveur),
 # compile le front (vite) et bundle le serveur (esbuild), crée server/.env s'il n'existe pas (avec
 # une clé RUN_TOKEN_SECRET générée), donne les fichiers au bon utilisateur Plesk et déclenche le
 # redémarrage de l'application (Phusion Passenger). Peut être relancé sans risque.
 #
-# Options : --update  --skip-install  --skip-build  --domain=exemple.fr  --help
+# --reset-data : supprime la base SQLite (joueurs, sauvegardes, archives lues, succès, classements) avant le
+# redémarrage ; une copie est gardée dans server/backups/avant-reset-DATE/ (sauf avec --no-backup). Demande une
+# confirmation (taper OUI), sauf avec --yes.
+#
+# Options : --update  --skip-install  --skip-build  --domain=exemple.fr  --reset-data  --no-backup  --yes  --help
 set -euo pipefail
 
 SITE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -18,6 +23,9 @@ DOMAIN="${BACKROOMS_DOMAIN:-$(basename "$VHOST_DIR")}"
 UPDATE=0
 SKIP_INSTALL=0
 SKIP_BUILD=0
+RESET_DATA=0
+NO_BACKUP=0
+ASSUME_YES=0
 
 say() { printf '\n\033[1m== %s ==\033[0m\n' "$*"; }
 ok() { printf '  \033[32mOK\033[0m %s\n' "$*"; }
@@ -29,8 +37,11 @@ for arg in "$@"; do
     --update) UPDATE=1 ;;
     --skip-install) SKIP_INSTALL=1 ;;
     --skip-build) SKIP_BUILD=1 ;;
+    --reset-data) RESET_DATA=1 ;;
+    --no-backup) NO_BACKUP=1 ;;
+    --yes | -y) ASSUME_YES=1 ;;
     --domain=*) DOMAIN="${arg#*=}" ;;
-    -h | --help) sed -n '2,12p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h | --help) sed -n '2,18p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) fail "Option inconnue : $arg (voir --help)" ;;
   esac
 done
@@ -126,6 +137,35 @@ if ! grep -q '^DEBUG_LOG_TOKEN=' "$ENV_FILE"; then
   ok "DEBUG_LOG_TOKEN ajouté à server/.env"
 fi
 DEBUG_TOKEN="$(grep '^DEBUG_LOG_TOKEN=' "$ENV_FILE" | cut -d= -f2)"
+
+# --- 3 bis. Remise à zéro des données (--reset-data) -----------------------------------------------------------
+if [ "$RESET_DATA" = 1 ]; then
+  say "Remise à zéro des données"
+  DB_FILE="$(grep '^DB_PATH=' "$ENV_FILE" 2>/dev/null | cut -d= -f2- || true)"
+  DB_FILE="${DB_FILE:-./data/backrooms.sqlite}"
+  case "$DB_FILE" in /*) ;; *) DB_FILE="$SITE_DIR/server/${DB_FILE#./}" ;; esac
+  warn "Va supprimer la base $DB_FILE (joueurs, sauvegardes, archives, succès, classements)."
+  if [ "$ASSUME_YES" = 0 ]; then
+    [ -t 0 ] || fail "Confirmation impossible sans terminal : ajoute --yes pour confirmer."
+    printf '  Tape OUI pour confirmer : '
+    read -r answer
+    [ "$answer" = "OUI" ] || fail "Remise à zéro annulée (rien n'a été supprimé)."
+  fi
+  FOUND=0
+  for file in "$DB_FILE" "$DB_FILE-wal" "$DB_FILE-shm"; do [ -e "$file" ] && FOUND=1; done
+  if [ "$FOUND" = 0 ]; then
+    ok "aucune base à supprimer (déjà vierge)"
+  else
+    if [ "$NO_BACKUP" = 0 ]; then
+      BACKUP_DIR="$SITE_DIR/server/backups/avant-reset-$(date +%Y%m%d-%H%M%S)"
+      mkdir -p "$BACKUP_DIR"
+      for file in "$DB_FILE" "$DB_FILE-wal" "$DB_FILE-shm"; do [ -e "$file" ] && cp -p "$file" "$BACKUP_DIR/"; done
+      ok "copie de sécurité : $BACKUP_DIR"
+    fi
+    rm -f "$DB_FILE" "$DB_FILE-wal" "$DB_FILE-shm"
+    ok "base supprimée : elle sera recréée vide au redémarrage"
+  fi
+fi
 
 # --- 4. Droits et redémarrage ------------------------------------------------------------------------------------
 say "Droits des fichiers et redémarrage"

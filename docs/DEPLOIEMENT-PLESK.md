@@ -122,6 +122,12 @@ et colle cette ligne, puis un simple **Extraire** suffit :
 bash /var/www/vhosts/tondomaine.tld/backrooms.tondomaine.tld/backrooms/scripts/plesk-install.sh --update
 ```
 
+**Repartir de zéro** (efface joueurs, sauvegardes, archives lues, succès et classements) : ajoute `--reset-data`. Le script demande de taper `OUI` (ou `--yes` pour passer la confirmation) et garde une copie de la base dans `server/backups/avant-reset-DATE/` (sauf `--no-backup`).
+
+```
+bash scripts/plesk-install.sh --update --skip-install --skip-build --reset-data
+```
+
 ## Sécurité
 
 - **Ferme l'accès SSH du domaine** une fois l'installation terminée : *Accès à l'hébergement web* → *Accès au
