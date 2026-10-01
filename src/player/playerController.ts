@@ -49,6 +49,8 @@ export class PlayerController {
 
   crouching = false;
   sprinting = false;
+  /** Posé par le jeu (corruption VHS au sol) : le sprint est impossible tant qu'il est vrai. */
+  sprintBlocked = false;
   sprintEnergy = 1;
   sprintRecovery = 1;
   movementNoise = 0;
@@ -202,8 +204,8 @@ export class PlayerController {
     const y = input.left.stickY;
     const magnitude = Math.min(Math.hypot(x, y), 1);
 
-    if (input.left.stick.justPressed && !this.crouching && this.sprintEnergy > 0) this.sprinting = !this.sprinting;
-    if (magnitude < MOVE_DEADZONE) this.sprinting = false;
+    if (input.left.stick.justPressed && !this.crouching && !this.sprintBlocked && this.sprintEnergy > 0) this.sprinting = !this.sprinting;
+    if (magnitude < MOVE_DEADZONE || this.sprintBlocked) this.sprinting = false;
     if (this.sprinting && magnitude >= MOVE_DEADZONE) {
       this.sprintEnergy = Math.max(0, this.sprintEnergy - SPRINT_DRAIN_PER_SECOND * deltaSeconds);
       if (this.sprintEnergy === 0) this.sprinting = false;

@@ -41,6 +41,7 @@ import { installAccountPanel } from "./ui/accountPanel";
 import { UiPointer } from "./ui/uiPointer";
 import { Atmosphere } from "./world/atmosphere";
 import { Blackout } from "./world/blackout";
+import { CorruptionPatch, PATCH_DAMAGE_PER_SECOND, PATCH_MADNESS_PER_SECOND } from "./world/corruptionPatch";
 import { Cadreur } from "./world/cadreur";
 import { CollectionStore } from "./world/collection";
 import { computePerks } from "./world/collectionPerks";
@@ -256,6 +257,8 @@ const poltergeist = new Poltergeist(scene, audioListener, grabbables);
 /** Menaces : la Coupure (néons qui meurent en vague) et le Cadreur (il bouge quand on ne le voit pas). */
 const blackout = new Blackout(scene, audioListener);
 const cadreur = new Cadreur(scene, audioListener, physics);
+/** Corruption VHS : tache au sol qui ronge la santé, monte la folie et interdit le sprint. */
+const corruptionPatch = new CorruptionPatch(scene, audioListener);
 /** Le bruit (télé, réveil, objets lancés) attire le Cadreur, partout. */
 onNoise((event) => cadreur.hear(event, levelManager.depth));
 
@@ -395,6 +398,13 @@ const debugMenu = new DebugMenu(camera, player.body, sfx, [
     run: () => {
       blackout.toggle();
       return blackout.active ? t("debug.blackoutStarted") : t("debug.blackoutStopped");
+    },
+  },
+  {
+    label: () => (corruptionPatch.active ? t("debug.patchStop") : t("debug.patchStart")),
+    run: () => {
+      corruptionPatch.toggle(player.headWorld, camera);
+      return corruptionPatch.active ? t("debug.patchStarted") : t("debug.patchStopped");
     },
   },
   {
@@ -798,6 +808,7 @@ function respawn(): void {
   atmosphere.setDepth(levelManager.depth);
   atmosphere.triggerFlicker(0.8);
   blackout.reset(levelManager.depth);
+  corruptionPatch.reset(levelManager.depth);
   cadreur.reset(levelManager.depth);
 }
 
@@ -1288,6 +1299,19 @@ renderer.setAnimationLoop((timestamp) => {
     if (cadreurEvents.playerDamage > 0) damagedThisLevel = true;
     if (cadreurEvents.sighted) vitals.addMadness(10);
     if (cadreurEvents.watched) vitals.addMadness(deltaSeconds * 4);
+    const patchEvents = corruptionPatch.update(deltaSeconds, head, camera, levelManager.depth, elapsedSeconds);
+    if (patchEvents.announced) {
+      triggerHapticPulse(renderer, 0.3, 120);
+      atmosphere.triggerFlicker(0.25);
+      vhsOverlay.triggerTrackingLoss(0.5);
+    }
+    player.sprintBlocked = patchEvents.onPatch;
+    if (patchEvents.onPatch) {
+      damagedThisLevel = true;
+      vitals.addMadness(PATCH_MADNESS_PER_SECOND * deltaSeconds);
+      corruption.add(deltaSeconds * 0.4);
+      if (vitals.damage(PATCH_DAMAGE_PER_SECOND * deltaSeconds)) triggerGameOver("health");
+    }
     perfStats.end("menaces");
 
     if (cadreurEvents.caught) triggerGameOver("caught");

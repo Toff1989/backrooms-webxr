@@ -152,13 +152,13 @@ export function createZoomBuffer(context: BaseAudioContext): AudioBuffer {
   for (let i = 0; i < data.length; i++) {
     const t = i / sampleRate;
     const running = t < 1.05 ? 1 : 0;
-    const frequency = 820 + t * 360 + Math.sin(t * 60) * 12;
+    const frequency = 150 + t * 110 + Math.sin(t * 60) * 5;
     phase += (2 * Math.PI * frequency) / sampleRate;
     data[i] = (Math.sign(Math.sin(phase)) * 0.12 + Math.sin(phase * 0.5) * 0.2 + (Math.random() * 2 - 1) * 0.05) * running * Math.min(1, t * 30);
   }
-  addThump(data, sampleRate, 1.07, 2600, 0.01, 0.6);
-  addThump(data, sampleRate, 1.16, 2100, 0.008, 0.35);
-  bandpass(data, sampleRate, 1100, 0.8);
+  addThump(data, sampleRate, 1.07, 320, 0.02, 0.7);
+  addThump(data, sampleRate, 1.16, 240, 0.02, 0.4);
+  lowpass(data, sampleRate, 900);
   reverb(data, sampleRate, 0.2, 0.8);
   return toBuffer(context, fadeEdges(normalize(data, 0.6), sampleRate));
 }
@@ -180,7 +180,7 @@ export function createCaughtBuffer(context: BaseAudioContext): AudioBuffer {
     }
   }
   addThump(data, sampleRate, 0.68, 50, 0.12, 1);
-  lowpass(data, sampleRate, 6000);
+  lowpass(data, sampleRate, 2200);
   return toBuffer(context, fadeEdges(normalize(data, 0.85), sampleRate, 0.02));
 }
 
@@ -193,37 +193,72 @@ export function createCameraStaticBuffer(context: BaseAudioContext): AudioBuffer
   for (let i = 0; i < data.length; i++) {
     const t = i / sampleRate;
     if (i % Math.floor(sampleRate * 0.03) === 0) gate = Math.random() < 0.65 ? 1 : 0.1;
-    const whine = Math.sin(2 * Math.PI * (3100 + Math.sin(t * 40) * 200) * t) * 0.15;
+    const whine = Math.sin(2 * Math.PI * (260 + Math.sin(t * 40) * 30) * t) * 0.3;
     data[i] = ((Math.random() * 2 - 1) * 0.6 + whine) * gate * Math.sin((Math.PI * t) / seconds);
   }
-  bandpass(data, sampleRate, 2400, 0.7);
+  lowpass(data, sampleRate, 1400);
   return toBuffer(context, fadeEdges(normalize(data, 0.6), sampleRate));
 }
 
 /**
- * Sursaut de capture : choc sourd, puis hurlement de bande saturé (trois dents de scie
- * désaccordées qui glissent vers l'aigu) noyé dans la neige — bref et brutal. `soft` : même
- * enveloppe, nettement plus doux (option "sursauts atténués").
+ * Sursaut de capture : choc sourd dans la poitrine, puis rugissement grave et saturé (scies
+ * désaccordées qui descendent, sous un grondement de neige filtrée) avec un battement dissonant
+ * au milieu — rien d'aigu, tout dans le corps. `soft` : même enveloppe, nettement plus doux
+ * (option "sursauts atténués").
  */
 export function createJumpscareBuffer(context: BaseAudioContext, soft = false): AudioBuffer {
   const sampleRate = context.sampleRate;
-  const seconds = 1.9;
+  const seconds = 2.2;
   const data = createSamples(sampleRate, seconds);
-  const detunes = [1, 1.013, 0.987];
-  const phases = [0, 0, 0];
+  const detunes = [1, 1.021, 0.979, 1.5];
+  const phases = [0, 0, 0, 0];
+  let tone = 0;
   for (let i = 0; i < data.length; i++) {
     const t = i / sampleRate;
-    const envelope = Math.min(1, t / 0.012) * Math.exp(-t / 0.9);
-    const base = 620 + 900 * Math.min(1, t / 0.5) + Math.sin(t * 31) * 40;
-    let screech = 0;
+    const envelope = Math.min(1, t / 0.01) * Math.exp(-t / 1.1);
+    const base = 95 - 35 * Math.min(1, t / 1.2) + Math.sin(t * 17) * 4;
+    let roar = 0;
     for (let k = 0; k < detunes.length; k++) {
       phases[k] = (phases[k]! + (base * detunes[k]!) / sampleRate) % 1;
-      screech += (phases[k]! * 2 - 1) * 0.3;
+      roar += (phases[k]! * 2 - 1) * (k === 3 ? 0.18 : 0.3);
     }
-    const snow = (Math.random() * 2 - 1) * 0.55;
-    data[i] = (screech * (soft ? 0.5 : 1) + snow) * envelope;
+    // Battement dissonant (seconde mineure) qui tremble.
+    tone += (2 * Math.PI * (233 + Math.sin(t * 7) * 6)) / sampleRate;
+    const dissonance = (Math.sin(tone) + Math.sin(tone * 1.0595)) * 0.12 * (0.6 + 0.4 * Math.sin(t * 23));
+    const rumble = (Math.random() * 2 - 1) * 0.4;
+    data[i] = (Math.tanh(roar * 2.2) * (soft ? 0.5 : 1) + dissonance + rumble) * envelope;
   }
-  addThump(data, sampleRate, 0, 46, 0.2, soft ? 0.5 : 1.1);
-  bandpass(data, sampleRate, 2100, 0.5);
+  addThump(data, sampleRate, 0, 40, 0.25, soft ? 0.6 : 1.3);
+  lowpass(data, sampleRate, 1500);
   return toBuffer(context, fadeEdges(normalize(data, soft ? 0.45 : 0.95), sampleRate, 0.004));
+}
+
+/**
+ * Annonce de la corruption VHS : la bande « mâche » — grave qui chute en pleurage, rafales de
+ * neige hachées (bitcrush grossier) et sifflement de tête de lecture qui monte avant la bouillie.
+ */
+export function createCorruptionWarningBuffer(context: BaseAudioContext): AudioBuffer {
+  const sampleRate = context.sampleRate;
+  const seconds = 2.2;
+  const data = createSamples(sampleRate, seconds);
+  let phase = 0;
+  let whinePhase = 0;
+  let held = 0;
+  for (let i = 0; i < data.length; i++) {
+    const t = i / sampleRate;
+    const progress = t / seconds;
+    const wow = 1 + Math.sin(t * 23) * 0.08;
+    phase += (2 * Math.PI * (140 - 90 * progress) * wow) / sampleRate;
+    whinePhase += (2 * Math.PI * (200 + 500 * progress * progress)) / sampleRate;
+    // Neige échantillonnée par paliers (bitcrush), hachée par des dropouts de plus en plus longs.
+    if (i % 12 === 0) held = Math.random() * 2 - 1;
+    const gate = Math.sin(t * 41 + Math.sin(t * 9) * 3) > 0.9 - progress * 1.2 ? 1 : 0.25;
+    const body = Math.tanh(Math.sin(phase) * 3) * 0.45;
+    const whine = Math.sin(whinePhase) * 0.12 * progress;
+    data[i] = (body + held * 0.5 * gate + whine) * Math.min(1, t * 20) * (1 - 0.6 * progress * progress);
+  }
+  addThump(data, sampleRate, 0.05, 55, 0.14, 0.8);
+  addCrackle(data, sampleRate, 0.6, 1.5, 200, 0.3);
+  lowpass(data, sampleRate, 1600);
+  return toBuffer(context, fadeEdges(normalize(data, 0.85), sampleRate, 0.02));
 }
