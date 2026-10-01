@@ -9,7 +9,12 @@
  * événements (session XR, changement de niveau, chunks, audio). Aussi en mémoire : `__log`.
  */
 
-export const DEBUG_ENABLED = typeof window !== "undefined" && new URLSearchParams(window.location.search).has("debug");
+/**
+ * Réservé au développement : `?debug` n'a d'effet que sur le serveur de dev (`npm run dev`, bancs de
+ * test) — dans une version déployée (`vite build`), aucun paramètre d'URL n'active quoi que ce soit.
+ * Le menu debug en jeu, lui, ne s'ouvre qu'avec le code (voir `verifyDebugCode`).
+ */
+export const DEBUG_ENABLED = import.meta.env.DEV && typeof window !== "undefined" && new URLSearchParams(window.location.search).has("debug");
 
 /**
  * Visibilité du menu debug in-game (bouton dédié dans l'inventaire) : distincte de
