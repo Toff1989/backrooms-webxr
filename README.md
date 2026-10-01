@@ -295,7 +295,7 @@ tests/physics.sim.ts         Simulation physique sans rendu (`npm run test:physi
 - **Tester les menaces** : en mode debug (`?debug=1`), le menu d'inventaire (Y) a une rangée
   bleue de boutons de test : lancer/arrêter la Coupure, appeler/renvoyer le Cadreur (même au
   niveau 0), passer au niveau suivant, recharger la lampe.
-- **Labyrinthe dynamique** (`chunkStreamer.ts`) : toutes les 6 à 12 secondes, un chunk chargé mais
+- **Labyrinthe dynamique (désactivé, `DYNAMIC_MAZE_ENABLED`)** (`chunkStreamer.ts`) : toutes les 6 à 12 secondes, un chunk chargé mais
   hors du champ de vision de la caméra (frustum) et à au moins 2 chunks du joueur est régénéré
   avec un agencement différent (même sortie, même couloir garanti). Déclenche un petit pic de
   corruption pour accompagner discrètement le changement.

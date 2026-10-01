@@ -9,22 +9,11 @@ import * as THREE from "three";
 import { MarkerSurfaces } from "../../src/world/markerSurfaces";
 import { MARKER_INKS } from "../../src/world/markerModel";
 import { spawnCollectibleModel } from "../../src/world/collectibleLoader";
-import type { PhysicsWorld } from "../../src/physics/physicsWorld";
+import { CollisionGroups, PhysicsWorld, RAPIER } from "../../src/physics/physicsWorld";
 import { createLogger, createRenderer, createScene, createStageController } from "./support/harness";
 
 const { log } = createLogger();
-const stages = createStageController(["SURFACES", "ERASED", "HEAD"]);
-
-/** Mur plan fictif : le plan x = 3 (face tournée vers -x), sinon rien. */
-const fakePhysics = {
-  world: {
-    castRayAndGetNormal(ray: { origin: { x: number; y: number; z: number }; dir: { x: number; y: number; z: number } }, maxToi: number) {
-      if (ray.dir.x !== 1) return null;
-      const toi = 3 - ray.origin.x;
-      return toi >= 0 && toi <= maxToi ? { timeOfImpact: toi, normal: { x: -1, y: 0, z: 0 } } : null;
-    },
-  },
-} as unknown as PhysicsWorld;
+const stages = createStageController(["SURFACES", "ERASED", "ORPHAN", "HEAD"]);
 
 async function run(): Promise<void> {
   const { renderer, canvas } = createRenderer();
@@ -42,7 +31,12 @@ async function run(): Promise<void> {
   ceiling.position.set(1.5, 2.7, 1.5);
   scene.add(floor, wall, ceiling);
 
-  const surfaces = new MarkerSurfaces(scene, fakePhysics);
+  // Vraie physique : un mur plein sur le plan x = 3 (face tournée vers -x), comme les murs du jeu.
+  const physics = await PhysicsWorld.create();
+  const wallBody = physics.world.createRigidBody(RAPIER.RigidBodyDesc.fixed());
+  const wallCollider = physics.world.createCollider(RAPIER.ColliderDesc.cuboid(0.075, 1.35, 4).setTranslation(3.075, 1.35, 1.5).setCollisionGroups(CollisionGroups.static), wallBody);
+  physics.step(0.02, () => {});
+  const surfaces = new MarkerSurfaces(scene, physics);
   const { model: marker } = await spawnCollectibleModel("marker");
   marker.position.set(1.4, 0.2, 0.2);
   marker.rotation.set(0, 0, 0.4);
@@ -92,6 +86,16 @@ async function run(): Promise<void> {
   surfaces.update(0.016, new THREE.Vector3(1.5, 1.6, 1.5));
   renderer.render(scene, camera);
   await stages.enter("ERASED");
+
+  // Le labyrinthe change : le mur disparaît (chunk régénéré). Les traits qui y étaient sont effacés, ceux du sol restent.
+  physics.world.removeCollider(wallCollider, true);
+  physics.step(0.02, () => {});
+  surfaces.queueRevalidate(new THREE.Box3(new THREE.Vector3(0, 0, -2), new THREE.Vector3(8, 2.7, 5)));
+  surfaces.update(0.016, new THREE.Vector3(1.5, 1.6, 1.5));
+  log(`Tuiles après disparition du mur : ${surfaces.tileCount}`);
+  scene.remove(wall);
+  renderer.render(scene, camera);
+  await stages.enter("ORPHAN");
 
   // Gros plan de la tête du Cadreur, comme dans la séquence de capture (objectif vers l'œil).
   scene.remove(floor, wall, ceiling, marker);

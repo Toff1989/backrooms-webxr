@@ -128,6 +128,11 @@ export class LevelManager {
     this.chunkStreamer.markBatteryPicked(id);
   }
 
+  /** Abonnement au (re)chargement des chunks (murs et piliers peuvent avoir changé). */
+  set onChunkLoaded(listener: ((bounds: THREE.Box3) => void) | null) {
+    this.chunkStreamer.onChunkLoaded = listener;
+  }
+
   markMedkitPicked(id: string): void {
     this.chunkStreamer.markMedkitPicked(id);
   }
