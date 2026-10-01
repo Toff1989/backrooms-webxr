@@ -199,3 +199,31 @@ export function createCameraStaticBuffer(context: BaseAudioContext): AudioBuffer
   bandpass(data, sampleRate, 2400, 0.7);
   return toBuffer(context, fadeEdges(normalize(data, 0.6), sampleRate));
 }
+
+/**
+ * Sursaut de capture : choc sourd, puis hurlement de bande saturé (trois dents de scie
+ * désaccordées qui glissent vers l'aigu) noyé dans la neige — bref et brutal. `soft` : même
+ * enveloppe, nettement plus doux (option "sursauts atténués").
+ */
+export function createJumpscareBuffer(context: BaseAudioContext, soft = false): AudioBuffer {
+  const sampleRate = context.sampleRate;
+  const seconds = 1.9;
+  const data = createSamples(sampleRate, seconds);
+  const detunes = [1, 1.013, 0.987];
+  const phases = [0, 0, 0];
+  for (let i = 0; i < data.length; i++) {
+    const t = i / sampleRate;
+    const envelope = Math.min(1, t / 0.012) * Math.exp(-t / 0.9);
+    const base = 620 + 900 * Math.min(1, t / 0.5) + Math.sin(t * 31) * 40;
+    let screech = 0;
+    for (let k = 0; k < detunes.length; k++) {
+      phases[k] = (phases[k]! + (base * detunes[k]!) / sampleRate) % 1;
+      screech += (phases[k]! * 2 - 1) * 0.3;
+    }
+    const snow = (Math.random() * 2 - 1) * 0.55;
+    data[i] = (screech * (soft ? 0.5 : 1) + snow) * envelope;
+  }
+  addThump(data, sampleRate, 0, 46, 0.2, soft ? 0.5 : 1.1);
+  bandpass(data, sampleRate, 2100, 0.5);
+  return toBuffer(context, fadeEdges(normalize(data, soft ? 0.45 : 0.95), sampleRate, 0.004));
+}

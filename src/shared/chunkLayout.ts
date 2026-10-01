@@ -80,6 +80,8 @@ export interface ChunkLayout {
   collectiblePlacements: CollectiblePlacement[];
   /** Piles pour la lampe torche : ramassées au passage (id stable pour ne pas réapparaître). */
   batteryPlacements: Array<{ id: string; x: number; z: number; rotationY: number }>;
+  /** Trousses de soin (rendent de la santé) : même principe que les piles. */
+  medkitPlacements: Array<{ id: string; x: number; z: number; rotationY: number }>;
   /** Page d'archive perdue du level, si elle repose dans ce chunk (une par level, voir `lore.ts`). */
   lorePage: LorePageLocation | null;
 }
@@ -151,6 +153,7 @@ export function generateChunkLayout(
   const propObstacles: WallSegment[] = [];
   const collectiblePlacements: CollectiblePlacement[] = [];
   const batteryPlacements: ChunkLayout["batteryPlacements"] = [];
+  const medkitPlacements: ChunkLayout["medkitPlacements"] = [];
   const baseCellX = chunkX * CHUNK_CELLS;
   const baseCellZ = chunkZ * CHUNK_CELLS;
   const halfThickness = WALL_THICKNESS / 2;
@@ -216,8 +219,31 @@ export function generateChunkLayout(
           z: originZ + 0.4 + coordinateHash01(seedInt, cellX, cellZ, 225) * (CELL_SIZE - 0.8),
           rotationY: coordinateHash01(seedInt, cellX, cellZ, 226) * Math.PI * 2,
         });
+      } else if (!inClearance && coordinateHash01(seedInt, cellX, cellZ, 331) < profile.medkitProbability) {
+        medkitPlacements.push({
+          id: `${profile.seed}:med:${cellX}:${cellZ}`,
+          x: originX + 0.4 + coordinateHash01(seedInt, cellX, cellZ, 332) * (CELL_SIZE - 0.8),
+          z: originZ + 0.4 + coordinateHash01(seedInt, cellX, cellZ, 333) * (CELL_SIZE - 0.8),
+          rotationY: coordinateHash01(seedInt, cellX, cellZ, 334) * Math.PI * 2,
+        });
       }
     }
+  }
+
+  // Premier level de chaque run : un marqueur est posé près du spawn (dans le dégagement, hors murs
+  // et meubles), pour que le joueur ait de quoi laisser des repères dès le départ.
+  if (profile.depth === 0 && chunkX === 0 && chunkZ === 0) {
+    const lore = generateCollectibleLore("marker", 0, 0);
+    collectiblePlacements.push({
+      id: `${profile.seed}:marker`,
+      kind: "marker",
+      rarity: getCollectibleRarity("marker"),
+      x: 1.9,
+      z: 1.9,
+      rotationY: 0.8,
+      scale: 1,
+      ...lore,
+    });
   }
 
   return {
@@ -231,6 +257,7 @@ export function generateChunkLayout(
     propObstacles,
     collectiblePlacements,
     batteryPlacements,
+    medkitPlacements,
     lorePage:
       loreCellX >= baseCellX && loreCellX < baseCellX + CHUNK_CELLS && loreCellZ >= baseCellZ && loreCellZ < baseCellZ + CHUNK_CELLS ? lorePageLocation : null,
   };

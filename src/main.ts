@@ -6,8 +6,12 @@ import { runWarmupStep } from "./assets/audio/synth";
 import { DEBUG_ENABLED, installDebugLog, isDebugMenuEnabled, log } from "./debug/debugLog";
 import { PhysicsWorld, RAPIER } from "./physics/physicsWorld";
 import { CamcorderHud } from "./player/camcorderHud";
-import { ComfortVignette } from "./player/comfortVignette";
+import { CameraMenu } from "./player/cameraMenu";
+import { bearingArrow, CADREUR_TRACK_DRAIN_PER_SECOND, CameraTracker } from "./player/cameraTracker";
+import { ComfortVignette, type VignetteLevel, VIGNETTE_LEVELS } from "./player/comfortVignette";
+import { JUMPSCARE_LEVELS, loadJumpscareLevel, loadVignetteLevel, nextLevel, saveJumpscareLevel, saveVignetteLevel, type JumpscareLevel } from "./player/comfortSettings";
 import { EndRunScreen } from "./player/endRunScreen";
+import { EndSequence } from "./player/endSequence";
 import { Flashlight } from "./player/flashlight";
 import { GuideMenu } from "./player/guideMenu";
 import { GrabSystem } from "./player/grabSystem";
@@ -54,6 +58,7 @@ import { loreFormat, type LoreFormat } from "./shared/lore";
 import { LoreJournal } from "./world/loreJournal";
 import { SaveManager, type SaveData } from "./world/saveManager";
 import { configureLoreServices, updateLoreObjects } from "./world/lorePage";
+import { MarkerSurfaces } from "./world/markerSurfaces";
 import { Poltergeist } from "./world/poltergeist";
 import { spawnCollectibleModel } from "./world/collectibleLoader";
 import { spawnProp } from "./world/propLoader";
@@ -83,6 +88,24 @@ function nextPaint(): Promise<void> {
 
 // Teinte proche du noir, légèrement chaude (cohérente avec la teinte jaunâtre délavée du look VHS).
 const BACKGROUND_COLOR = 0x0a0805;
+/** Attente maximale (ms) de la synchro serveur initiale avant d'afficher le menu principal. */
+const BOOT_SERVER_WAIT_MS = 2500;
+
+/**
+ * Données serveur récupérées dès le tout début du chargement, en parallèle du moteur physique,
+ * des shaders et des textures (et non plus seulement au lancement d'une partie) : identité,
+ * archives lues, succès, sauvegarde en cours. Le local (IndexedDB) reste la source de vérité si
+ * le serveur est injoignable : rien ici ne bloque ni ne fait échouer le démarrage.
+ */
+/** Archives perdues : progression indépendante de l'inventaire, gardée d'une run à l'autre (et côté serveur). */
+const loreJournal = new LoreJournal();
+/** Succès (~30 défis permanents, voir achievements.ts) : statistiques cumulées, indépendantes de la run en cours. */
+const achievements = new AchievementTracker();
+/** Sauvegarde de la partie en cours (seed, profondeur, inventaire, vitals, position) : locale, synchronisée entre appareils jumelés (voir saveManager.ts). */
+const saveManager = new SaveManager();
+const localProgressLoaded = Promise.all([loreJournal.load(), achievements.load()]);
+const bootServerSync: Promise<unknown> = localProgressLoaded.then(() => Promise.allSettled([loreJournal.sync(), achievements.sync()]));
+let bootSavePromise: Promise<SaveData | null> | null = saveManager.load().catch(() => null);
 
 const physics = await PhysicsWorld.create();
 
@@ -134,15 +157,10 @@ camera.add(audioListener);
 
 const collectionStore = new CollectionStore();
 const grabbables = new GrabbableRegistry(scene, physics);
-/** Archives perdues : progression indépendante de l'inventaire, gardée d'une run à l'autre (et côté serveur). */
-const loreJournal = new LoreJournal();
-await loreJournal.load();
-/** Sauvegarde de la partie en cours (seed, profondeur, inventaire, vitals, position) : locale, synchronisée entre appareils jumelés (voir saveManager.ts). */
-const saveManager = new SaveManager();
-/** Succès (~30 défis permanents, voir achievements.ts) : statistiques cumulées, indépendantes de la run en cours. */
-const achievements = new AchievementTracker();
-await achievements.load();
+// La page d'archive posée dans le premier level dépend de la progression : attendre le local.
+await localProgressLoaded;
 loreJournal.onChange(() => achievements.raise("archivesRead", loreJournal.count));
+achievements.raise("archivesRead", loreJournal.count);
 
 /**
  * Seed fixe du niveau 0 fictif (voir `buildMenuRoom` plus bas) : l'espace où s'affiche le menu
@@ -170,6 +188,8 @@ const sfx = new Sfx(audioListener);
 
 const vhsOverlay = new VhsOverlay(camera);
 const comfortVignette = new ComfortVignette(vhsOverlay);
+/** Sursaut de capture (tête du Cadreur) et fondu rouge/noir de la mort par santé, avant l'écran de score. */
+const endSequence = new EndSequence(camera, audioListener, vhsOverlay);
 /** Écran de chargement unique (voir loadingGate.ts) : démarré avant même le premier rendu, pour
  * que le niveau 0 fictif du menu principal apparaisse déjà masqué par l'écran bleu. */
 const loadingGate = new LoadingGate(vhsOverlay);
@@ -177,24 +197,13 @@ loadingGate.start();
 // Laisser le navigateur peindre l'écran avant la génération synchrone des chunks initiaux.
 await nextPaint();
 levelManager.primeInitialArea();
-/** Vignette de confort : réglable dans les options (écran) et dans le menu du casque, mémorisée. */
-const VIGNETTE_KEY = "backrooms-vr:vignette";
+/** Vignette de confort (4 niveaux) et intensité des sursauts : réglables dans les options (écran) et dans le menu du casque, mémorisés. */
 const vignetteToggle = document.querySelector<HTMLInputElement>("#vignette-toggle");
-function loadVignettePreference(): boolean {
-  try {
-    return localStorage.getItem(VIGNETTE_KEY) !== "off";
-  } catch {
-    return true;
-  }
-}
-function setVignette(enabled: boolean): void {
-  comfortVignette.enabled = enabled;
-  if (vignetteToggle) vignetteToggle.checked = enabled;
-  try {
-    localStorage.setItem(VIGNETTE_KEY, enabled ? "on" : "off");
-  } catch {
-    // Stockage indisponible : réglage valable pour cette session seulement.
-  }
+let jumpscareLevel: JumpscareLevel = loadJumpscareLevel();
+function setVignetteLevel(level: VignetteLevel): void {
+  comfortVignette.level = level;
+  if (vignetteToggle) vignetteToggle.checked = level !== "off";
+  saveVignetteLevel(level);
 }
 const hud = new CamcorderHud(camera);
 /** Bandeau bien visible (succès, archive trouvée) : distinct du HUD discret, avec son propre son. */
@@ -252,7 +261,7 @@ onNoise((event) => cadreur.hear(event, levelManager.depth));
 
 /** Pré-chauffage (modèles, enveloppes physiques, shaders, textures) : voir `warmup.ts`. */
 const warmup = new Warmup(renderer, scene, camera);
-warmup.start([cadreur.ready, ...hands.map((hand) => hand.models)]);
+warmup.start([cadreur.ready, endSequence.ready, ...hands.map((hand) => hand.models)]);
 
 /** Bonus de collection : recalculés à chaque rangement/sortie d'objet. */
 /** Perks de run (inventaire, remis à zéro chaque partie) + perks permanents des succès débloqués (cumulés). */
@@ -281,7 +290,6 @@ let menuRoomNeedsPlacement = true;
 let pausedRun: SaveData | null = null;
 /** Résolution en arrière-plan (sauvegarde existante ou run neuve) pendant le tout premier
  * affichage du niveau 0 fictif au démarrage — consommée par le premier "Continuer". */
-let bootSavePromise: Promise<SaveData | null> | null = null;
 /** Paramètres ouverts directement depuis l'inventaire (aperçu léger) plutôt que depuis le menu
  * principal : "retour" referme simplement le panneau au lieu de réafficher le menu. */
 let settingsOpenedStandalone = false;
@@ -303,6 +311,7 @@ const inventoryMenu = new InventoryMenu(
       collectionStore.remove(entry.id);
       grabSystem.takeIntoHand(hand, entry, () => collectionStore.add(entry));
     },
+    openCamera: () => cameraMenu.open(),
     openJournal: () => journal.openFloating(),
     openSettings: () => {
       settingsOpenedStandalone = true;
@@ -336,13 +345,22 @@ const endRunScreen = new EndRunScreen(
 );
 
 const journal = new Journal(camera, player.body, loreJournal, sfx);
+/** Signal du caméscope : ce qu'il traque (sortie, Cadreur, archive perdue), voir cameraTracker.ts. */
+const cameraTracker = new CameraTracker();
+const cameraMenu = new CameraMenu(camera, player.body, sfx, cameraTracker);
 
 const settingsMenu = new SettingsMenu(camera, player.body, sfx, {
   recalibrateHeight: () => player.recalibrate(),
-  vignetteEnabled: () => comfortVignette.enabled,
-  toggleVignette: () => {
-    setVignette(!comfortVignette.enabled);
-    return comfortVignette.enabled;
+  vignetteLevel: () => comfortVignette.level,
+  cycleVignette: () => {
+    setVignetteLevel(nextLevel(VIGNETTE_LEVELS, comfortVignette.level));
+    return comfortVignette.level;
+  },
+  jumpscareLevel: () => jumpscareLevel,
+  cycleJumpscare: () => {
+    jumpscareLevel = nextLevel(JUMPSCARE_LEVELS, jumpscareLevel);
+    saveJumpscareLevel(jumpscareLevel);
+    return jumpscareLevel;
   },
   currentPseudo: () => loreJournal.currentPseudo,
   setPseudo: (pseudo) =>
@@ -478,8 +496,8 @@ scoresMenu = new ScoresMenu(camera, player.body, loreJournal, sfx, () => mainMen
 const achievementsMenu = new AchievementsMenu(camera, player.body, sfx, achievements, () => mainMenu.open());
 installAccountPanel(loreJournal, achievements);
 
-const pointer = new UiPointer(hands, scene, [inventoryMenu, endRunScreen, journal, mainMenu, settingsMenu, debugMenu, guideMenu, deviceMenu, scoresMenu, achievementsMenu]);
-for (const panel of [inventoryMenu, endRunScreen, journal, mainMenu, settingsMenu, debugMenu, guideMenu, deviceMenu, scoresMenu, achievementsMenu]) {
+const pointer = new UiPointer(hands, scene, [inventoryMenu, endRunScreen, journal, cameraMenu, mainMenu, settingsMenu, debugMenu, guideMenu, deviceMenu, scoresMenu, achievementsMenu]);
+for (const panel of [inventoryMenu, endRunScreen, journal, cameraMenu, mainMenu, settingsMenu, debugMenu, guideMenu, deviceMenu, scoresMenu, achievementsMenu]) {
   liveViews.hideFromOffscreen(panel.group);
   panel.prepareForDisplay(renderer, camera, scene);
 }
@@ -533,6 +551,19 @@ grabSystem = new GrabSystem(physics, grabbables, hands, sfx, {
     interactions.grabbed(grabbable.heldBy, grabbable);
   },
   onUse: (hand, grabbable) => {
+    if (grabbable.medkitId) {
+      // Trousse de soin : rend de la santé (jamais au-delà du maximum) et disparaît.
+      if (vitals.health >= vitals.maxHealth) {
+        sfx.play("denied", 0.3);
+        return;
+      }
+      levelManager.markMedkitPicked(grabbable.medkitId);
+      vitals.heal(MEDKIT_HEAL);
+      hand.pulse(0.5, 120);
+      sfx.play("unlock", 0.45);
+      grabSystem.consumeHeld(hand, grabbable);
+      return;
+    }
     if (!grabbable.batteryId) {
       interactions.use(hand, grabbable);
       return;
@@ -550,6 +581,8 @@ grabSystem = new GrabSystem(physics, grabbables, hands, sfx, {
 
 /** Objets qui s'animent : télé, réveil, lampes... (voir `interactions.ts`). */
 const objectAudio = new ObjectAudio(scene, audioListener);
+/** Dessin au marqueur sur sol/murs/plafond : tuiles canvas, effacées à chaque niveau (voir markerSurfaces.ts). */
+const markerSurfaces = new MarkerSurfaces(scene, physics);
 const interactions = new InteractionSystem({
   audio: objectAudio,
   physics,
@@ -572,7 +605,25 @@ const interactions = new InteractionSystem({
     const position = cadreur.eyeWorld;
     return position ? { position, target: player.headWorld } : null;
   },
+  surfaces: markerSurfaces,
+  comfort: (grabbable, amount) => comfortObject(grabbable, amount),
 });
+
+/** Délai (s) avant qu'un même objet réconfortant (ballon, canard...) puisse apaiser à nouveau. */
+const COMFORT_COOLDOWN_SECONDS = 45;
+const comfortUsedAt = new Map<string, number>();
+function comfortObject(grabbable: Grabbable, amount: number): boolean {
+  if (menuLimbo || gameOver || vitals.madness <= 0) return false;
+  const key = grabbable.item?.id ?? `${grabbable.kind}:${Math.round(grabbable.object.position.x)}:${Math.round(grabbable.object.position.z)}`;
+  const now = timer.getElapsed();
+  const last = comfortUsedAt.get(key);
+  if (last !== undefined && now - last < COMFORT_COOLDOWN_SECONDS) return false;
+  comfortUsedAt.set(key, now);
+  vitals.soothe(amount);
+  const hand = grabbable.heldBy;
+  if (hand instanceof Hand) hand.pulse(0.3, 140);
+  return true;
+}
 
 const DEBUG_SPAWN_UP = new THREE.Vector3(0, 1, 0);
 const debugSpawnDirection = new THREE.Vector3();
@@ -740,6 +791,7 @@ function resetRunAchievementState(): void {
 /** Place le joueur au spawn du level courant (changement de level, nouvelle run). */
 function respawn(): void {
   tapePlayer.stop();
+  markerSurfaces.clear();
   player.teleport(SPAWN_LOCAL_POSITION);
   syncHands(timer.getElapsed());
   grabSystem.onTeleport();
@@ -788,6 +840,7 @@ let gameOver = false;
 function closeAllMenus(): void {
   if (inventoryMenu.visible) inventoryMenu.close();
   if (journal.visible) journal.close();
+  if (cameraMenu.visible) cameraMenu.close();
   if (settingsMenu.visible) settingsMenu.close();
   if (debugMenu.visible) debugMenu.close();
   if (mainMenu.visible) mainMenu.close();
@@ -805,7 +858,10 @@ function triggerGameOver(reason: "health" | "caught" | "victory"): void {
   grabSystem.loseHeld();
   cadreur.reset(levelManager.depth);
   saveManager.clear();
-  endRunScreen.showGameOver(levelManager.depth, reason);
+  // Capture/santé à zéro : la séquence (sursaut ou fondu) précède l'écran de score ; la victoire l'affiche tout de suite.
+  const reasonDepth = levelManager.depth;
+  if (reason === "victory") endRunScreen.showGameOver(reasonDepth, reason);
+  else endSequence.start(reason === "caught" ? "caught" : "health", jumpscareLevel, () => endRunScreen.showGameOver(reasonDepth, reason));
   log("run", { action: reason === "victory" ? "victory" : "game-over", reason, depth: levelManager.depth });
 
   achievements.raise("depthMax", levelManager.depth);
@@ -840,6 +896,7 @@ function beginNewRun(restartLocallyOnFailure: boolean): void {
 
 /** Nouvelle partie : monde neuf, inventaire vidé, rien en main — quitte le niveau 0 fictif. */
 function restartWorld(seed: string): void {
+  endSequence.reset();
   gameOver = false;
   menuLimbo = false;
   player.paused = false;
@@ -891,6 +948,7 @@ function autosave(): void {
  * score n'est pas possible, comme hors ligne. Les archives perdues restent suivies localement dans tous les cas.
  */
 function resumeFromSave(save: SaveData, keepSession = false): void {
+  endSequence.reset();
   gameOver = false;
   if (!keepSession) {
     // Session serveur rangée dans la sauvegarde : sans elle, la fin de la run reprise ne pourrait
@@ -924,6 +982,7 @@ function resumeFromSave(save: SaveData, keepSession = false): void {
  * de fin de run, et le tout premier appel ci-dessous, au démarrage).
  */
 function buildMenuRoom(): void {
+  endSequence.reset();
   menuLimbo = true;
   menuRoomNeedsPlacement = true;
   levelManager.restartRun(MENU_ROOM_SEED, 0);
@@ -953,11 +1012,11 @@ function openMainMenu(): void {
 // Démarrage : le niveau 0 fictif (menu principal) s'affiche tout de suite, joueur figé ; la
 // sauvegarde éventuelle (ou la décision de repartir à neuf) se résout en arrière-plan et n'est
 // appliquée qu'au premier choix du joueur (voir `bootSavePromise`, consommé par "Continuer").
-bootSavePromise = saveManager.load();
+// Laisse au serveur un court délai pour répondre (archives, succès) avant d'afficher le menu :
+// passé ce délai, la synchro continue en arrière-plan et le menu se met à jour tout seul.
+await Promise.race([bootServerSync, new Promise<void>((resolve) => window.setTimeout(resolve, BOOT_SERVER_WAIT_MS))]);
 buildMenuRoom();
 htmlLoadingScreen?.classList.add("is-hidden");
-void loreJournal.sync();
-void achievements.sync();
 
 // Sauvegarde périodique (filet de sécurité) et à la mise en arrière-plan de la page (casque
 // retiré, onglet changé) — plus fiable que `beforeunload` pour un travail asynchrone (IndexedDB).
@@ -1094,8 +1153,8 @@ translateOptions();
 const buildLabel = document.querySelector<HTMLElement>("#build-id");
 if (buildLabel) buildLabel.textContent = `build ${__BUILD_ID__}`;
 
-vignetteToggle?.addEventListener("change", () => setVignette(vignetteToggle.checked));
-setVignette(loadVignettePreference());
+vignetteToggle?.addEventListener("change", () => setVignetteLevel(vignetteToggle.checked ? (comfortVignette.level === "off" ? "normal" : comfortVignette.level) : "off"));
+setVignetteLevel(loadVignetteLevel());
 
 window.addEventListener("resize", () => {
   camera.aspect = window.innerWidth / window.innerHeight;
@@ -1113,7 +1172,11 @@ const WALL_TRAP_WARNING_HAPTIC_DURATION_MS = 90;
 const WALL_TRAP_POP_HAPTIC_INTENSITY = 1;
 const WALL_TRAP_POP_HAPTIC_DURATION_MS = 180;
 const BATTERY_RECHARGE = 0.45;
+/** Santé rendue par une trousse de soin (sur 100). */
+const MEDKIT_HEAL = 35;
 const bouncePosition = new THREE.Vector3();
+const trackForward = { x: 0, z: -1 };
+const trackDirection = new THREE.Vector3();
 let playerNoiseTimer = 0;
 
 renderer.setAnimationLoop((timestamp) => {
@@ -1129,6 +1192,12 @@ renderer.setAnimationLoop((timestamp) => {
   // Y : inventaire, B : lampe (contrôles type Saints & Sinners, voir README) — indisponibles
   // pendant un game over ou dans le niveau 0 fictif (rien d'autre que le menu n'y est interactif).
   if (!gameOver && !menuLimbo && input.left.secondary.justPressed) inventoryMenu.toggle();
+  // X (main gauche, mains vides) : change la cible du signal du caméscope (voir cameraMenu.ts).
+  if (!gameOver && !menuLimbo && input.left.primary.justPressed && !hands[0]!.holding) {
+    cameraTracker.cycle();
+    cameraMenu.refreshMode();
+    sfx.play("click", 0.3);
+  }
   if (!gameOver && !menuLimbo && input.right.secondary.justPressed) {
     const toggled = flashlight.toggle();
     sfx.play(toggled ? "click" : "denied", 0.3);
@@ -1172,6 +1241,7 @@ renderer.setAnimationLoop((timestamp) => {
   grabbables.sync(player.headWorld);
   grabSystem.updateVisuals();
   interactions.update(deltaSeconds);
+  markerSurfaces.update(deltaSeconds, player.headWorld);
   perfStats.end("physique");
 
   perfStats.begin("monde");
@@ -1231,6 +1301,27 @@ renderer.setAnimationLoop((timestamp) => {
     corruption.update(deltaSeconds);
   }
 
+  camera.getWorldDirection(trackDirection);
+  trackDirection.y = 0;
+  if (trackDirection.lengthSq() > 1e-6) {
+    trackDirection.normalize();
+    trackForward.x = trackDirection.x;
+    trackForward.z = trackDirection.z;
+  }
+  const trackReading = cameraTracker.read({
+    head: player.headWorld,
+    forward: trackForward,
+    exit: levelManager.exitPosition,
+    cadreur: cadreur.worldPosition,
+    archive: loreJournal.nextFragment !== null && !archiveReadThisLevel ? levelManager.lorePagePosition : null,
+    battery: flashlight.battery,
+    noise: corruption.value,
+  });
+  // Suivre le Cadreur vide la pile de la lampe (jamais dans le niveau 0 fictif du menu).
+  if (trackReading.draining && !menuLimbo) flashlight.drain(CADREUR_TRACK_DRAIN_PER_SECOND * deltaSeconds);
+  const trackLabel = t(trackReading.mode === "exit" ? "hud.signalExit" : trackReading.mode === "cadreur" ? "hud.signalCadreur" : "hud.signalArchive");
+  const trackAim =
+    trackReading.bearing === null ? "" : trackReading.distance === null ? "--" : `${bearingArrow(trackReading.bearing)}${Math.round(trackReading.distance)}m`;
   hud.status = {
     depth: levelManager.depth,
     crouching: player.crouching,
@@ -1241,12 +1332,14 @@ renderer.setAnimationLoop((timestamp) => {
     sprintEnergy: player.sprintEnergy,
     health: vitals.health / vitals.maxHealth,
     madness: vitals.madness / vitals.maxMadness,
-    // Plein à moins de 5 m, vide au-delà de 60 m ; brouillé par la corruption.
-    signal: THREE.MathUtils.clamp(1 - (levelUpdate.exitDistance - 5) / 55, 0, 1) * (1 - corruption.value * 0.6 * Math.random()),
+    signal: trackReading.unavailable ? 0 : trackReading.signal,
+    signalLabel: trackLabel,
+    signalAim: trackAim,
     debug: perfStats.readAndReset(),
   };
   perfStats.begin("effets");
   comfortVignette.update(player.movementIntensity, deltaSeconds);
+  endSequence.update(deltaSeconds);
   vhsOverlay.update(elapsedSeconds, corruption.value, deltaSeconds);
   tapePlayer.update(deltaSeconds);
   updateLoreObjects(deltaSeconds);

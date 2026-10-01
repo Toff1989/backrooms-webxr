@@ -15,8 +15,19 @@ const TRAIL_MAX = 400;
 /** Il apparaît sur la trace du joueur, entre 14 et 26 m derrière lui (en suivant le chemin). */
 const SPAWN_MIN_BEHIND = 14;
 const SPAWN_MAX_BEHIND = 26;
-/** Si le joueur le distance de plus de 50 m de chemin, il le perd (et reviendra plus tard). */
+/**
+ * Si le joueur le distance de plus de 34 m de chemin hors de vue, il ne disparaît pas : il se
+ * "recale" sur la trace, un peu plus près et toujours hors de vue (voir `relocate`).
+ */
 const LOSE_BEHIND = 34;
+/** Distance (m) de chemin derrière le joueur où il se recale. */
+const RELOCATE_MIN_BEHIND = 15;
+const RELOCATE_MAX_BEHIND = 22;
+/** Délai minimal (s) entre deux recalages, pour qu'il ne "téléporte" pas en boucle. */
+const RELOCATE_COOLDOWN = 8;
+/** Au-delà de cette avance (m de chemin), il accélère hors de vue pour rattraper le joueur. */
+const CATCH_UP_START = 22;
+const CATCH_UP_MAX_FACTOR = 2.2;
 const CATCH_DISTANCE = 0.75;
 /** Ligne directe vers le joueur quand il est proche et que rien ne les sépare. */
 const DIRECT_CHASE_DISTANCE = 9;
@@ -130,6 +141,7 @@ export class Cadreur {
   private lure: { x: number; z: number; seconds: number; searching: number } | null = null;
   private lastSeenSeconds = 0;
   private lastNearEffect = -Infinity;
+  private lastRelocation = -Infinity;
   /** Étourdi (tapette à souris) : figé, la caméra grésille. */
   private stunnedSeconds = 0;
   /** Modèle chargé et ajouté (caché) à la scène — ou échec journalisé : ne rejette jamais. */
@@ -227,6 +239,7 @@ export class Cadreur {
     this.despawn();
     this.trail.length = 0;
     this.manual = false;
+    this.lastRelocation = -Infinity;
     this.timer = Math.max(35, 70 + Math.random() * 50 - depth * 4);
   }
 
@@ -287,7 +300,10 @@ export class Cadreur {
     }
     this.updateLure(deltaSeconds, context.head);
     const searching = this.lure !== null && this.lure.searching > 0;
-    const speed = stunned || searching ? 0 : watched ? WATCHED_SPEED * (sight.flashlit ? FLASHLIGHT_SPEED_FACTOR : 1) : hunting;
+    // Hors de vue et loin derrière : il force l'allure (jamais sous les yeux du joueur).
+    const gap = this.pathBehind();
+    const catchUp = watched ? 1 : THREE.MathUtils.clamp(1 + (gap - CATCH_UP_START) / 14, 1, CATCH_UP_MAX_FACTOR);
+    const speed = stunned || searching ? 0 : watched ? WATCHED_SPEED * (sight.flashlit ? FLASHLIGHT_SPEED_FACTOR : 1) : hunting * catchUp;
     this.advance(deltaSeconds, speed, watched, context);
     if (sight.flashlit) {
       // Pris dans la lampe : la caméra grésille par salves.
@@ -318,12 +334,8 @@ export class Cadreur {
       this.timer = 60 + Math.random() * 40;
       return events;
     }
-    if (this.pathBehind() > LOSE_BEHIND && !sight.seen) {
-      log("cadreur", { action: "lost" });
-      this.despawn();
-      this.timer = 25 + Math.random() * 25;
-      return events;
-    }
+    // Distancé : il ne renonce jamais, il se recale sur la trace (hors de vue) pour reprendre la chasse.
+    if (gap > LOSE_BEHIND && !sight.seen && !this.lure && this.elapsed - this.lastRelocation > RELOCATE_COOLDOWN) this.relocate(context);
 
     const rig = this.rig;
     rig.root.visible = distance < MAX_SEE_DISTANCE + 5 || sight.seen;
@@ -406,6 +418,40 @@ export class Cadreur {
     }
     // Pas encore assez de chemin parcouru (ou tout est sous les yeux) : on réessaie bientôt.
     this.timer = 3;
+  }
+
+  /**
+   * Distancé de plus de `LOSE_BEHIND` m : se replace plus près sur la trace du joueur, hors de
+   * son champ de vision. Sans emplacement valide (tout est sous ses yeux), il réessaiera au
+   * prochain tour — il ne disparaît jamais de lui-même.
+   */
+  private relocate(context: CadreurContext): void {
+    this.lastRelocation = this.elapsed;
+    context.camera.getWorldDirection(this.forward);
+    context.camera.getWorldPosition(this.cameraPosition);
+    const saved = this.position.clone();
+    const wanted = RELOCATE_MIN_BEHIND + Math.random() * (RELOCATE_MAX_BEHIND - RELOCATE_MIN_BEHIND);
+    let length = 0;
+    for (let i = this.trail.length - 1; i > 0; i--) {
+      const a = this.trail[i]!;
+      const b = this.trail[i - 1]!;
+      length += Math.hypot(a.x - b.x, a.z - b.z);
+      if (length < wanted) continue;
+      if (length > RELOCATE_MAX_BEHIND + 10) break;
+      this.position.set(b.x, 0, b.z);
+      if (this.sight(context).seen) continue;
+      this.trailIndex = i;
+      this.lastSeenSeconds = 0;
+      this.stuckSeconds = 0;
+      this.placeBody();
+      this.rig!.root.position.copy(this.position);
+      const next = this.trail[i] ?? b;
+      this.rig!.root.rotation.y = Math.atan2(next.x - b.x, next.z - b.z);
+      log("cadreur", { action: "relocated", behind: Math.round(length) });
+      return;
+    }
+    this.position.copy(saved);
+    log("cadreur", { action: "relocate-failed" });
   }
 
   private despawn(): void {

@@ -25,6 +25,8 @@ export interface LevelProfile {
   collectibleProbability: number;
   /** Probabilité [0..1] qu'une cellule porte une pile pour la lampe torche. */
   batteryProbability: number;
+  /** Probabilité [0..1] qu'une cellule porte une trousse de soin (rare : la santé ne se régénère pas). */
+  medkitProbability: number;
 }
 
 const BASE_WALL_DENSITY = 0.24;
@@ -55,6 +57,11 @@ const BASE_BATTERY_PROBABILITY = 0.01;
 const BATTERY_PROBABILITY_PER_DEPTH = 0.0015;
 const MAX_BATTERY_PROBABILITY = 0.022;
 
+/** Trousses de soin : plus rares que les piles, un peu plus fréquentes en profondeur (la santé est irréversible). */
+const BASE_MEDKIT_PROBABILITY = 0.005;
+const MEDKIT_PROBABILITY_PER_DEPTH = 0.0004;
+const MAX_MEDKIT_PROBABILITY = 0.011;
+
 /**
  * Construit le profil du level à une profondeur donnée : seed dérivée + difficulté
  * croissante. `runSeed` vient du serveur (`POST /run/start`, étape 7) — signée et
@@ -74,5 +81,6 @@ export function createLevelProfile(depth: number, runSeed: string): LevelProfile
     propClusterProbability: PROP_CLUSTER_PROBABILITY,
     collectibleProbability: COLLECTIBLE_PROBABILITY,
     batteryProbability: Math.min(MAX_BATTERY_PROBABILITY, BASE_BATTERY_PROBABILITY + depth * BATTERY_PROBABILITY_PER_DEPTH),
+    medkitProbability: Math.min(MAX_MEDKIT_PROBABILITY, BASE_MEDKIT_PROBABILITY + depth * MEDKIT_PROBABILITY_PER_DEPTH),
   };
 }

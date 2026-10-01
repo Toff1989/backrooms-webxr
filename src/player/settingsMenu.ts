@@ -3,6 +3,8 @@ import { isDebugMenuEnabled, setDebugMenuEnabled } from "../debug/debugLog";
 import { getLanguage, onLanguageChange, setLanguage, t } from "../i18n";
 import { generatePseudoSuggestion, PSEUDO_ADJECTIVE_COUNT, PSEUDO_NOUN_COUNT } from "../shared/pseudoGenerator";
 import { drawButton, drawPanelBackground, inRect, UiPanel, wrapText, type PressButton, type Rect } from "../ui/uiPanel";
+import type { JumpscareLevel } from "./comfortSettings";
+import type { VignetteLevel } from "./comfortVignette";
 import type { Hand } from "./hand";
 import type { Sfx } from "./sfx";
 
@@ -11,19 +13,20 @@ const HEIGHT = 0.5;
 const PX_PER_M = 1600;
 const DISTANCE = 0.7;
 
-type ListButtonId = "lang" | "vignette" | "height" | "pseudo" | "debug" | "reset" | "back";
+type ListButtonId = "lang" | "vignette" | "jumpscare" | "height" | "pseudo" | "debug" | "reset" | "back";
 type PseudoButtonId = "adjective" | "noun" | "confirm" | "cancel";
 type ResetButtonId = "confirm" | "cancel";
 type ButtonId = ListButtonId | PseudoButtonId | ResetButtonId;
 
 const LIST_BUTTONS: Record<ListButtonId, Rect> = {
-  lang: { x: 100, y: 150, w: 600, h: 66 },
-  vignette: { x: 100, y: 228, w: 600, h: 66 },
-  height: { x: 100, y: 306, w: 600, h: 66 },
-  pseudo: { x: 100, y: 384, w: 600, h: 66 },
-  debug: { x: 100, y: 462, w: 600, h: 66 },
-  reset: { x: 100, y: 540, w: 600, h: 66 },
-  back: { x: 100, y: 630, w: 600, h: 66 },
+  lang: { x: 100, y: 130, w: 600, h: 60 },
+  vignette: { x: 100, y: 200, w: 600, h: 60 },
+  jumpscare: { x: 100, y: 270, w: 600, h: 60 },
+  height: { x: 100, y: 340, w: 600, h: 60 },
+  pseudo: { x: 100, y: 410, w: 600, h: 60 },
+  debug: { x: 100, y: 480, w: 600, h: 60 },
+  reset: { x: 100, y: 550, w: 600, h: 60 },
+  back: { x: 100, y: 635, w: 600, h: 62 },
 };
 
 const PSEUDO_BUTTONS: Record<PseudoButtonId, Rect> = {
@@ -40,8 +43,12 @@ const RESET_BUTTONS: Record<ResetButtonId, Rect> = {
 
 export interface SettingsMenuActions {
   recalibrateHeight(): void;
-  vignetteEnabled(): boolean;
-  toggleVignette(): boolean;
+  vignetteLevel(): VignetteLevel;
+  /** Passe au niveau de vignette suivant (désactivée, légère, normale, forte) et le renvoie. */
+  cycleVignette(): VignetteLevel;
+  jumpscareLevel(): JumpscareLevel;
+  /** Passe à l'intensité de sursaut suivante (normale, atténuée, désactivée) et la renvoie. */
+  cycleJumpscare(): JumpscareLevel;
   /** Pseudo actuel (null si jamais choisi — pas encore soumis de score). */
   currentPseudo(): string | null;
   /** Choisit/change le pseudo persistant (voir playerIdentity.ts). */
@@ -136,7 +143,10 @@ export class SettingsMenu extends UiPanel {
         this.showStatus(t("inv.langStatus"));
         break;
       case "vignette":
-        this.showStatus(this.actions.toggleVignette() ? t("inv.vignetteOnStatus") : t("inv.vignetteOffStatus"));
+        this.showStatus(t("settings.vignetteStatus", { level: t(`settings.vignette.${this.actions.cycleVignette()}`) }));
+        break;
+      case "jumpscare":
+        this.showStatus(t("settings.jumpscareStatus", { level: t(`settings.jumpscare.${this.actions.cycleJumpscare()}`) }));
         break;
       case "height":
         this.actions.recalibrateHeight();
@@ -246,7 +256,8 @@ export class SettingsMenu extends UiPanel {
     }
 
     drawButton(ctx, LIST_BUTTONS.lang, t("inv.lang"), { hovered: hovered.has("lang") });
-    drawButton(ctx, LIST_BUTTONS.vignette, this.actions.vignetteEnabled() ? t("inv.vignetteOn") : t("inv.vignetteOff"), { hovered: hovered.has("vignette") });
+    drawButton(ctx, LIST_BUTTONS.vignette, t("settings.vignette", { level: t(`settings.vignette.${this.actions.vignetteLevel()}`) }), { hovered: hovered.has("vignette") });
+    drawButton(ctx, LIST_BUTTONS.jumpscare, t("settings.jumpscare", { level: t(`settings.jumpscare.${this.actions.jumpscareLevel()}`) }), { hovered: hovered.has("jumpscare") });
     drawButton(ctx, LIST_BUTTONS.height, t("inv.height"), { hovered: hovered.has("height") });
     const pseudo = this.actions.currentPseudo();
     drawButton(ctx, LIST_BUTTONS.pseudo, pseudo ? t("settings.pseudo", { pseudo }) : t("settings.pseudoNone"), { hovered: hovered.has("pseudo") });
@@ -260,7 +271,7 @@ export class SettingsMenu extends UiPanel {
     if (this.statusUntil) {
       ctx.font = "20px monospace";
       ctx.fillStyle = "#9fe39f";
-      wrapText(ctx, this.statusMessage, width / 2, 728, width - 100, 24, 2);
+      wrapText(ctx, this.statusMessage, width / 2, 738, width - 100, 24, 2);
     }
   }
 }
