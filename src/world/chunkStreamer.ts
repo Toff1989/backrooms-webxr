@@ -8,7 +8,6 @@ import { createSeededNoise2D } from "../shared/noise";
 import { log } from "../debug/debugLog";
 import { perf } from "../player/perfStats";
 import { BatteryPickup } from "./batteryPickup";
-import { MedkitPickup } from "./medkitPickup";
 import { buildChunkGroup } from "./chunkMesh";
 import { spawnCollectibleModel } from "./collectibleLoader";
 import { toCollectionEntry } from "./collection";
@@ -346,11 +345,17 @@ export class ChunkStreamer {
         this.grabbables.createBattery(battery);
       });
 
-    layout.medkitPlacements
-      .filter((placement) => !this.pickedMedkits.has(placement.id))
-      .forEach((placement) => {
-        this.grabbables.createMedkit(new MedkitPickup(placement.id, placement.x, placement.z, placement.rotationY));
-      });
+    for (const placement of layout.medkitPlacements) {
+      if (this.pickedMedkits.has(placement.id)) continue;
+      spawnCollectibleModel("medkit")
+        .then(({ model, template }) => {
+          this.spawnQueue.push(() => {
+            if (this.loaded.get(key) !== loadedChunk || this.pickedMedkits.has(placement.id) || this.grabbables.isMedkitAlive(placement.id)) return;
+            this.grabbables.createMedkit(placement.id, model, template, placement.x, placement.z, placement.rotationY);
+          });
+        })
+        .catch(() => {});
+    }
 
     const bounds = new THREE.Box3(new THREE.Vector3(originX, 0, originZ), new THREE.Vector3(originX + CHUNK_SIZE, WALL_HEIGHT, originZ + CHUNK_SIZE));
 

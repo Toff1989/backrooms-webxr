@@ -16,11 +16,20 @@ import { applyVhsEffect } from "./vhsMaterial";
 const TILE_SIZE = CELL_SIZE;
 const TILE_PIXELS = 512;
 const MAX_TILES = 40;
-/** Distance (m) de la mine à la surface en dessous de laquelle elle écrit. */
-const CONTACT_DISTANCE = 0.028;
-/** Décalage (m) du décalque devant la surface : le relief des murs (displacement) ne doit pas l'enfouir. */
-const WALL_OFFSET = 0.02;
-const FLAT_OFFSET = 0.004;
+/**
+ * La mine n'écrit qu'au contact de la surface, côté libre : à moins de `CONTACT_DISTANCE` en avant,
+ * et jamais au-delà de `CONTACT_PENETRATION` de l'autre côté (traversée, derrière) — sinon rien.
+ */
+const CONTACT_DISTANCE = 0.012;
+const CONTACT_PENETRATION = 0.004;
+/**
+ * Décalage (m) du décalque devant la surface physique. Les murs sont de simples plans (la carte de
+ * relief est uniforme : la surface visible est 2,4 mm EN RETRAIT du plan de collision) ; quelques
+ * millimètres d'avance suffisent, avec le polygonOffset, pour éviter tout scintillement sans que le
+ * trait flotte devant le mur.
+ */
+const WALL_OFFSET = 0.0015;
+const FLAT_OFFSET = 0.002;
 /** Largeur du trait (m) et de la gomme. */
 const INK_WIDTH = 0.02;
 const ERASER_WIDTH = 0.09;
@@ -96,14 +105,15 @@ export class MarkerSurfaces {
    * courts le long des quatre axes horizontaux). Rien si la mine est en l'air.
    */
   probe(tip: THREE.Vector3): SurfaceContact | null {
-    if (tip.y < CONTACT_DISTANCE && tip.y > -0.1) {
+    if (tip.y > -CONTACT_PENETRATION && tip.y < CONTACT_DISTANCE) {
       return { plane: "floor", point: new THREE.Vector3(tip.x, 0, tip.z), normal: new THREE.Vector3(0, 1, 0) };
     }
-    if (tip.y > WALL_HEIGHT - CONTACT_DISTANCE && tip.y < WALL_HEIGHT + 0.1) {
+    if (tip.y < WALL_HEIGHT + CONTACT_PENETRATION && tip.y > WALL_HEIGHT - CONTACT_DISTANCE) {
       return { plane: "ceiling", point: new THREE.Vector3(tip.x, WALL_HEIGHT, tip.z), normal: new THREE.Vector3(0, -1, 0) };
     }
     let best: { distance: number; dir: { x: number; z: number }; normal: { x: number; y: number; z: number } } | null = null;
-    // Rayon lancé depuis un peu en retrait de la mine : tolère une mine légèrement enfoncée dans le mur.
+    // Rayon lancé depuis un peu en retrait de la mine : `distance` > 0 = la mine est encore en avant de la
+    // face (côté libre), < 0 = elle l'a dépassée. Une mine plus enfoncée que `back` démarre dans le mur : toi = 0, rejetée.
     const back = 0.02;
     for (const dir of WALL_DIRECTIONS) {
       queryRay.origin = { x: tip.x - dir.x * back, y: tip.y, z: tip.z - dir.z * back };
@@ -111,6 +121,7 @@ export class MarkerSurfaces {
       const hit = this.physics.world.castRayAndGetNormal(queryRay, back + CONTACT_DISTANCE, true, undefined, CollisionGroups.queryWalls);
       if (!hit) continue;
       const distance = hit.timeOfImpact - back;
+      if (distance < -CONTACT_PENETRATION) continue;
       if (!best || distance < best.distance) best = { distance, dir, normal: hit.normal };
     }
     if (!best) return null;
@@ -118,7 +129,8 @@ export class MarkerSurfaces {
     // Normale ramenée à l'axe dominant (les murs sont alignés sur la grille), orientée vers la mine.
     if (Math.abs(normal.x) >= Math.abs(normal.z)) normal.set(Math.sign(normal.x || -best.dir.x), 0, 0);
     else normal.set(0, 0, Math.sign(normal.z || -best.dir.z));
-    const point = new THREE.Vector3(tip.x + best.dir.x * Math.max(0, best.distance), tip.y, tip.z + best.dir.z * Math.max(0, best.distance));
+    // Le point est ramené sur la face elle-même : le trait ne suit jamais la mine quand elle s'en écarte.
+    const point = new THREE.Vector3(tip.x + best.dir.x * best.distance, tip.y, tip.z + best.dir.z * best.distance);
     const axis = normal.x !== 0 ? "x" : "z";
     const coordinate = Math.round((axis === "x" ? point.x : point.z) * 100);
     return { plane: `wall:${axis}:${normal.x + normal.z > 0 ? "+" : "-"}:${coordinate}`, point, normal };

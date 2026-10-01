@@ -5,6 +5,7 @@ import type { UiPointer } from "../ui/uiPointer";
 import { spawnCollectibleModel } from "../world/collectibleLoader";
 import type { CollectionEntry } from "../world/collection";
 import { MAX_LIFT_MASS, type Grabbable, type GrabbableRegistry } from "../world/grabbable";
+import { MARKER_GRIP_OFFSET } from "../world/markerModel";
 import type { Hand } from "./hand";
 import type { Sfx } from "./sfx";
 
@@ -37,6 +38,8 @@ const MAX_HOLD_ANGULAR_SPEED = 28;
 /** Objet coincé (derrière un mur) trop loin de la main pendant trop longtemps : il est lâché. */
 const BREAK_DISTANCE = 0.45;
 const BREAK_SECONDS = 0.25;
+/** Stylo (marqueur) : distance de décrochage plus grande, il s'appuie contre les surfaces pour écrire. */
+const PEN_BREAK_DISTANCE = 1.1;
 const THROW_BOOST = 1.3;
 const MAX_THROW_ANGULAR_SPEED = 25;
 /** Juste après un lâcher, l'objet ne percute pas encore le corps du joueur (il en sort). */
@@ -560,7 +563,14 @@ export class GrabSystem {
     const bodyInverse = tmpCurrentQuat.clone().invert();
 
     let grabPointLocal: THREE.Vector3;
-    if (mode === "centered") {
+    let heldQuaternion = offsetQuaternion;
+    if (grabbable.kind === "marker") {
+      // Prise "stylo" : la mine (+Y du modèle) pointe toujours vers l'avant de la manette, quelle que
+      // soit la façon dont l'objet gisait — jamais retourné dans le mauvais sens — et on le tient au tiers arrière.
+      const aimLocal = tmpVec.copy(hand.aimDirection).applyQuaternion(handInverse);
+      heldQuaternion = new THREE.Quaternion().setFromUnitVectors(Y_AXIS, aimLocal);
+      grabPointLocal = new THREE.Vector3(0, MARKER_GRIP_OFFSET * grabbable.object.scale.x, 0);
+    } else if (mode === "centered") {
       grabPointLocal = grabbable.localCenter.clone();
     } else {
       // Point de la surface réelle le plus proche de la paume : c'est lui qui vient dans la main.
@@ -569,7 +579,7 @@ export class GrabSystem {
       grabPointLocal = surface.sub(tmpCurrentPos).applyQuaternion(bodyInverse);
     }
 
-    this.held.set(hand, { grabbable, grabPointLocal, offsetQuaternion, stretchSeconds: 0 });
+    this.held.set(hand, { grabbable, grabPointLocal, offsetQuaternion: heldQuaternion, stretchSeconds: 0 });
     hand.holding = grabbable;
     grabbable.heldBy = hand;
     grabbable.setHighlight(0);
@@ -634,7 +644,8 @@ export class GrabSystem {
 
     tmpVec.subVectors(tmpTargetPos, tmpCurrentPos);
     const distance = tmpVec.length();
-    if (this.checkStretch(holders, distance, stepSeconds)) return;
+    // Le stylo appuyé contre un mur reste en main bien plus loin que les autres objets (la main passe, lui bute).
+    if (this.checkStretch(holders, distance, stepSeconds, grabbable.kind === "marker" ? PEN_BREAK_DISTANCE : BREAK_DISTANCE)) return;
 
     tmpVec.multiplyScalar(strength / stepSeconds);
     if (tmpVec.length() > MAX_HOLD_SPEED) tmpVec.setLength(MAX_HOLD_SPEED);

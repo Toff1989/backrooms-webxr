@@ -35,7 +35,7 @@ export interface TrackReading {
   signal: number;
   /** Distance (m) à la cible, null si introuvable. */
   distance: number | null;
-  /** Angle (rad) de la cible par rapport au regard, + à droite ; null pour la sortie (pas de direction : signal seul). */
+  /** Angle (rad) de la cible par rapport au regard, + à droite ; null pour la sortie (signal seul, sans distance). Non affiché pour l'instant : le HUD ne montre que la distance. */
   bearing: number | null;
   /** Mode qui consomme la pile et pile vide / cible absente : rien à afficher. */
   unavailable: boolean;
@@ -85,12 +85,4 @@ function aim(mode: TrackMode, inputs: TrackInputs, target: { x: number; z: numbe
   const dot = inputs.forward.x * dx + inputs.forward.z * dz;
   const bearing = Math.atan2(cross, dot);
   return { mode, signal: strength(distance, near, range) * jitter, distance, bearing, unavailable: false, draining: false };
-}
-
-const ARROWS = ["↑", "↗", "→", "↘", "↓", "↙", "←", "↖"];
-
-/** Flèche (8 directions) pointant vers la cible, relative au regard. */
-export function bearingArrow(bearing: number): string {
-  const index = Math.round(bearing / (Math.PI / 4));
-  return ARROWS[((index % 8) + 8) % 8]!;
 }
