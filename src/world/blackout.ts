@@ -188,7 +188,7 @@ export class Blackout {
       if (this.breakerVoice.isPlaying) this.breakerVoice.stop();
       this.breakerVoice.position.set(this.state.originX, 2.4, this.state.originZ);
       this.breakerVoice.setBuffer(this.breaker);
-      this.breakerVoice.setVolume(1);
+      this.breakerVoice.setVolume(0.7);
       this.breakerVoice.play();
     }
   }

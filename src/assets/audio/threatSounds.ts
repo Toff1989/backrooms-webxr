@@ -1,4 +1,4 @@
-import { bandpass, brownNoise, createSamples, fadeEdges, highpass, lowpass, makeLoopable, normalize, reverb, toBuffer } from "./synth";
+import { brownNoise, createSamples, fadeEdges, highpass, lowpass, makeLoopable, normalize, reverb, toBuffer } from "./synth";
 
 /**
  * Sons des menaces (Coupure, Cadreur), synthétisés comme le reste de l'ambiance : pas de
@@ -109,22 +109,31 @@ export function createTubeStartBuffer(context: BaseAudioContext): AudioBuffer {
   return toBuffer(context, fadeEdges(normalize(data, 0.7), sampleRate));
 }
 
-/** Moteur de cassette d'un caméscope qui tourne : ronronnement fin, pleurage, cliquetis de mécanique. */
+/**
+ * Présence du Cadreur : un souffle très grave et discret, ponctué de deux petits servos de caméra
+ * (glissando bas, filtré) — jamais un ronronnement continu et aigu. Boucle de 6 s, à jouer très bas.
+ */
 export function createTapeMotorBuffer(context: BaseAudioContext): AudioBuffer {
   const sampleRate = context.sampleRate;
-  const seconds = 3;
-  const data = createSamples(sampleRate, seconds);
-  let phase = 0;
+  const seconds = 6;
+  const data = brownNoise(createSamples(sampleRate, seconds), 0.35);
   for (let i = 0; i < data.length; i++) {
     const t = i / sampleRate;
-    const wow = 1 + Math.sin(2 * Math.PI * (1 / seconds) * t) * 0.02 + Math.sin(2 * Math.PI * (4 / seconds) * t) * 0.006;
-    phase += (2 * Math.PI * 180 * wow) / sampleRate;
-    data[i] = Math.sin(phase) * 0.25 + Math.sin(phase * 2.01) * 0.12 + Math.sin(phase * 7.3) * 0.05 + (Math.random() * 2 - 1) * 0.06;
-    // Cliquetis du cabestan, un par tour.
-    if (Math.sin(2 * Math.PI * (9 / seconds) * t) > 0.995) data[i] = data[i]! + (Math.random() * 2 - 1) * 0.3;
+    // Le souffle monte et descend lentement (respiration de la machine).
+    data[i] = data[i]! * (0.55 + 0.45 * Math.sin((2 * Math.PI * t) / seconds - Math.PI / 2));
   }
-  bandpass(data, sampleRate, 700, 0.6);
-  return toBuffer(context, normalize(makeLoopable(data, sampleRate, 0.3), 0.7));
+  for (const at of [1.3, 4.1]) {
+    const start = Math.floor(at * sampleRate);
+    const length = Math.floor(0.55 * sampleRate);
+    let phase = 0;
+    for (let i = 0; i < length && start + i < data.length; i++) {
+      const t = i / length;
+      phase += (2 * Math.PI * (95 + 70 * t)) / sampleRate;
+      data[start + i] = data[start + i]! + Math.sin(phase) * 0.22 * Math.sin(Math.PI * t) ** 2;
+    }
+  }
+  lowpass(data, sampleRate, 420);
+  return toBuffer(context, normalize(makeLoopable(data, sampleRate, 0.5), 0.6));
 }
 
 /** Pas feutré sur la moquette humide. */
@@ -234,31 +243,23 @@ export function createJumpscareBuffer(context: BaseAudioContext, soft = false): 
 }
 
 /**
- * Annonce de la corruption VHS : la bande « mâche » — grave qui chute en pleurage, rafales de
- * neige hachées (bitcrush grossier) et sifflement de tête de lecture qui monte avant la bouillie.
+ * Annonce de la corruption VHS : la bande ralentit — un grave doux qui chute en pleurage, sous un
+ * souffle filtré qui gonfle puis retombe. Rien d'aigu, pas de neige ni de craquements.
  */
 export function createCorruptionWarningBuffer(context: BaseAudioContext): AudioBuffer {
   const sampleRate = context.sampleRate;
-  const seconds = 2.2;
-  const data = createSamples(sampleRate, seconds);
+  const seconds = 2;
+  const data = brownNoise(createSamples(sampleRate, seconds), 0.3);
   let phase = 0;
-  let whinePhase = 0;
-  let held = 0;
   for (let i = 0; i < data.length; i++) {
     const t = i / sampleRate;
     const progress = t / seconds;
-    const wow = 1 + Math.sin(t * 23) * 0.08;
-    phase += (2 * Math.PI * (140 - 90 * progress) * wow) / sampleRate;
-    whinePhase += (2 * Math.PI * (200 + 500 * progress * progress)) / sampleRate;
-    // Neige échantillonnée par paliers (bitcrush), hachée par des dropouts de plus en plus longs.
-    if (i % 12 === 0) held = Math.random() * 2 - 1;
-    const gate = Math.sin(t * 41 + Math.sin(t * 9) * 3) > 0.9 - progress * 1.2 ? 1 : 0.25;
-    const body = Math.tanh(Math.sin(phase) * 3) * 0.45;
-    const whine = Math.sin(whinePhase) * 0.12 * progress;
-    data[i] = (body + held * 0.5 * gate + whine) * Math.min(1, t * 20) * (1 - 0.6 * progress * progress);
+    const wow = 1 + Math.sin(t * 9) * 0.05;
+    phase += (2 * Math.PI * (120 - 60 * progress) * wow) / sampleRate;
+    const envelope = Math.min(1, t / 0.25) * Math.pow(1 - progress, 1.2);
+    data[i] = (data[i]! * (0.4 + 0.6 * Math.sin(Math.PI * progress)) + (Math.sin(phase) * 0.4 + Math.sin(phase * 2.01) * 0.1)) * envelope;
   }
-  addThump(data, sampleRate, 0.05, 55, 0.14, 0.8);
-  addCrackle(data, sampleRate, 0.6, 1.5, 200, 0.3);
-  lowpass(data, sampleRate, 1600);
-  return toBuffer(context, fadeEdges(normalize(data, 0.85), sampleRate, 0.02));
+  lowpass(data, sampleRate, 520);
+  reverb(data, sampleRate, 0.25, 1);
+  return toBuffer(context, fadeEdges(normalize(data, 0.6), sampleRate, 0.03));
 }

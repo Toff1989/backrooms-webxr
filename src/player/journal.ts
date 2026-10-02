@@ -32,9 +32,17 @@ const FLOAT_DISTANCE = 0.55;
 const DISPLAY_CENTER = { x: RIGHT_PAGE.x + RIGHT_PAGE.w / 2, y: 300 };
 const DISPLAY_SIZE = 0.14;
 const DISPLAY_DEPTH = 0.05;
+/** Zone de la vitrine (px du panneau) : viser dedans + grip ou gâchette prend l'objet. */
+const DISPLAY_RECT: Rect = { x: DISPLAY_CENTER.x - 190, y: DISPLAY_CENTER.y - 190, w: 380, h: 380 };
 /** Main tendue vers l'objet (sans viser) + grip : on le prend aussi directement. */
-const REACH_RADIUS = 0.1;
-const HINT_Y = 498;
+const REACH_RADIUS = 0.14;
+/** Objet visé ou main tendue : il grossit un peu, comme une case d'inventaire survolée. */
+const HOVER_SCALE = 1.2;
+/** Lumière d'appoint de la vitrine : lointaine et douce, sinon le papier blanc brûle et le texte devient illisible. */
+const DISPLAY_LIGHT_DEPTH = 0.3;
+const DISPLAY_LIGHT_INTENSITY = 0.2;
+/** Papier et photo ont déjà leur texture en émission : en vitrine, on la baisse pour qu'ils ne brûlent pas. */
+const DISPLAY_PRINT_EMISSIVE = 0.12;
 /** Vitesse de rattrapage (position, rotation, taille) : l'objet vole vers la main, puis revient dans sa vitrine. */
 const FOLLOW_LAMBDA = 16;
 
@@ -47,6 +55,10 @@ interface Display {
   fragment: number;
   object: LoreObject;
   pivot: THREE.Group;
+  /** Orientation de repos : le recto (face de lecture) vers le lecteur, haut du contenu vers le haut. */
+  restOrientation: THREE.Quaternion;
+  /** Feuille/photo (recto +Y, haut -Z) ou objet debout comme la cassette (face +Z, haut +Y). */
+  flat: boolean;
   restScale: number;
   materials: THREE.Material[];
 }
@@ -68,12 +80,18 @@ export class Journal extends UiPanel {
   private display: Display | null = null;
   private displayToken = 0;
   private heldBy: Hand | null = null;
+  /** Touche qui tient l'objet (il est lâché quand elle l'est). */
+  private heldWith: "grip" | "trigger" = "grip";
   private heldOffset = new THREE.Quaternion();
   private time = 0;
-  private readonly displayLight = new THREE.PointLight(0xffe6bd, 0.9, 0.9, 2);
+  private readonly displayLight = new THREE.PointLight(0xffe6bd, DISPLAY_LIGHT_INTENSITY, 1.2, 2);
   private readonly scratchPosition = new THREE.Vector3();
   private readonly scratchQuaternion = new THREE.Quaternion();
   private readonly scratchGroupQuaternion = new THREE.Quaternion();
+  private readonly scratchUp = new THREE.Vector3();
+  private readonly scratchTop = new THREE.Vector3();
+  private readonly scratchSide = new THREE.Vector3();
+  private readonly scratchMatrix = new THREE.Matrix4();
 
   constructor(
     private readonly camera: THREE.Camera,
@@ -91,7 +109,7 @@ export class Journal extends UiPanel {
     onLorePhotoChange(() => {
       if (loreFormat(this.display?.fragment ?? 0) === "polaroid") this.refreshDisplay(true);
     });
-    this.displayLight.position.set(...this.displayPoint(0.12));
+    this.displayLight.position.set(...this.displayPoint(DISPLAY_LIGHT_DEPTH));
     this.group.add(this.displayLight);
   }
 
@@ -142,9 +160,9 @@ export class Journal extends UiPanel {
   }
 
   onPress(hand: Hand, px: number, py: number, button: PressButton): boolean {
-    if (button === "grip") {
-      // Grip sur la vitrine : l'objet vient dans la main.
-      if (this.display && inRect(RIGHT_PAGE, px, py) && py < HINT_Y + 10) this.grab(hand);
+    // Grip ou gâchette sur la vitrine : l'objet vient dans la main.
+    if (this.display && inRect(DISPLAY_RECT, px, py)) {
+      this.grab(hand, button);
       return true;
     }
     if (button !== "trigger") return true;
@@ -197,7 +215,7 @@ export class Journal extends UiPanel {
       const clones = source.map((material: THREE.Material) => {
         const clone = material.clone();
         if (clone instanceof THREE.MeshStandardMaterial) {
-          clone.emissiveIntensity = Math.max(clone.emissiveIntensity, 0.08);
+          clone.emissiveIntensity = clone.emissiveMap ? Math.min(clone.emissiveIntensity, DISPLAY_PRINT_EMISSIVE) : Math.max(clone.emissiveIntensity, 0.08);
           applyVhsEffect(clone, { zoneLighting: false });
         }
         materials.push(clone);
@@ -211,19 +229,31 @@ export class Journal extends UiPanel {
     const restScale = DISPLAY_SIZE / Math.max(size.x, size.y, size.z, 0.01);
     pivot.position.set(...this.displayPoint(DISPLAY_DEPTH));
     pivot.scale.setScalar(restScale);
-    pivot.quaternion.copy(FACE_FORWARD);
+    // Face de lecture = l'axe le plus fin de l'objet : Y pour une feuille couchée, Z pour la cassette debout.
+    const flat = size.y <= size.z;
+    const restOrientation = flat ? FACE_FORWARD : new THREE.Quaternion();
+    pivot.quaternion.copy(restOrientation);
     this.group.add(pivot);
-    this.display = { fragment, object, pivot, restScale, materials };
+    this.display = { fragment, object, pivot, restOrientation, flat, restScale, materials };
   }
 
   /** Saisie de l'objet de la vitrine : il vient dans la main (sans physique : il ne peut jamais tomber). */
-  private grab(hand: Hand): void {
+  private grab(hand: Hand, button: PressButton): void {
     const display = this.display;
     if (!display || this.heldBy || hand.holding || !hand.tracked) return;
-    this.group.updateWorldMatrix(true, false);
-    this.group.getWorldQuaternion(this.scratchGroupQuaternion);
-    this.scratchQuaternion.copy(this.scratchGroupQuaternion).multiply(display.pivot.quaternion);
+    // Pose de lecture : le recto face à la tête, le haut du contenu vers le haut ; elle suit ensuite le poignet.
+    this.camera.getWorldPosition(this.scratchPosition);
+    const normal = this.scratchPosition.sub(hand.palm).normalize();
+    const up = this.scratchUp.set(0, 1, 0).addScaledVector(normal, -normal.y);
+    if (up.lengthSq() < 1e-4) up.set(0, 0, -1).applyQuaternion(this.camera.quaternion);
+    up.normalize();
+    const side = this.scratchSide.crossVectors(up, normal);
+    // Feuille : recto = Y du modèle, haut = -Z. Objet debout : face = Z du modèle, haut = Y.
+    if (display.flat) this.scratchMatrix.makeBasis(side, normal, this.scratchTop.copy(up).negate());
+    else this.scratchMatrix.makeBasis(side, up, normal);
+    this.scratchQuaternion.setFromRotationMatrix(this.scratchMatrix);
     this.heldOffset.copy(hand.quaternion).invert().multiply(this.scratchQuaternion);
+    this.heldWith = button === "trigger" ? "trigger" : "grip";
     this.heldBy = hand;
     hand.pulse(0.35, 30);
     this.sfx.play("grab", 0.35);
@@ -242,18 +272,21 @@ export class Journal extends UiPanel {
     this.group.updateWorldMatrix(true, false);
     const pivot = display.pivot;
 
+    let hot = [...this.hovered.values()].includes("display");
     if (!this.heldBy) {
       pivot.getWorldPosition(this.scratchPosition);
       for (const hand of hands) {
-        if (!hand.tracked || hand.holding || !hand.input.squeeze.justPressed) continue;
-        if (this.scratchPosition.distanceTo(hand.palm) < REACH_RADIUS) {
-          this.grab(hand);
+        if (!hand.tracked || hand.holding) continue;
+        const near = this.scratchPosition.distanceTo(hand.palm) < REACH_RADIUS;
+        if (near) hot = true;
+        if (near && hand.input.squeeze.justPressed) {
+          this.grab(hand, "grip");
           break;
         }
       }
     }
     const held = this.heldBy;
-    if (held && (!held.tracked || !held.input.squeeze.pressed)) {
+    if (held && (!held.tracked || !(this.heldWith === "trigger" ? held.input.trigger.pressed : held.input.squeeze.pressed))) {
       this.heldBy = null;
       this.sfx.play("click", 0.2);
     }
@@ -269,17 +302,17 @@ export class Journal extends UiPanel {
       pivot.quaternion.slerp(this.scratchQuaternion, blend);
       pivot.scale.setScalar(THREE.MathUtils.lerp(pivot.scale.x, 1, blend));
     } else {
-      const sway = Math.sin(this.time * 0.9) * 0.5;
-      this.scratchQuaternion.setFromAxisAngle(AXIS_Y, sway).multiply(FACE_FORWARD);
+      const sway = Math.sin(this.time * (hot ? 2.2 : 0.9)) * (hot ? 0.35 : 0.5);
+      this.scratchQuaternion.setFromAxisAngle(AXIS_Y, sway).multiply(display.restOrientation);
       this.scratchPosition.set(...this.displayPoint(DISPLAY_DEPTH));
       pivot.position.lerp(this.scratchPosition, blend);
       pivot.quaternion.slerp(this.scratchQuaternion, blend);
-      pivot.scale.setScalar(THREE.MathUtils.lerp(pivot.scale.x, display.restScale, blend));
+      pivot.scale.setScalar(THREE.MathUtils.lerp(pivot.scale.x, display.restScale * (hot ? HOVER_SCALE : 1), blend));
     }
   }
 
   private hitAt(px: number, py: number): string | null {
-    return this.hitRects.find((hit) => inRect(hit.rect, px, py))?.id ?? null;
+    return this.hitRects.find((hit) => inRect(hit.rect, px, py))?.id ?? (this.display && inRect(DISPLAY_RECT, px, py) ? "display" : null);
   }
 
   private activate(id: string): void {

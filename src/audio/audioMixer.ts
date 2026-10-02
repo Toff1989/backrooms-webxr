@@ -12,7 +12,7 @@ export const VOLUME_CHANNELS: readonly VolumeChannel[] = ["master", "music", "am
 export const VOLUME_STEP = 10;
 
 /** Volumes de départ : volontairement bas, le jeu se joue au casque, de près. */
-const DEFAULT_VOLUME: Record<VolumeChannel, number> = { master: 60, music: 50, ambient: 70, effects: 80, threats: 80 };
+const DEFAULT_VOLUME: Record<VolumeChannel, number> = { master: 50, music: 50, ambient: 60, effects: 70, threats: 55 };
 const SETTING_KEY: Record<VolumeChannel, SettingKey> = {
   master: "volMaster",
   music: "volMusic",

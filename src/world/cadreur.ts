@@ -244,7 +244,7 @@ export class Cadreur {
     if (!this.stalking) return;
     log("cadreur", { action: "stunned", seconds });
     this.stunnedSeconds = Math.max(this.stunnedSeconds, seconds);
-    this.play(this.staticBuffer, 0.9);
+    this.play(this.staticBuffer, 0.4);
   }
 
   /** Nouveau niveau (ou nouvelle run) : il disparaît, la trace repart de zéro. */
@@ -292,7 +292,7 @@ export class Cadreur {
     if (sight.seen) {
       if (this.elapsed - this.lastObserved > SIGHTING_COOLDOWN) {
         events.sighted = true;
-        this.play(this.zoomBuffer, 0.9);
+        this.play(this.zoomBuffer, 0.45);
         log("cadreur", { action: "sighted", distance: Math.round(this.distanceTo(context.head) * 10) / 10 });
       }
       this.lastObserved = this.elapsed;
@@ -321,7 +321,7 @@ export class Cadreur {
     const closeBy = this.distanceTo(context.head) < SNEAK_RANGE;
     if (closeBy && !this.announced) {
       this.announced = true;
-      this.play(this.zoomBuffer, 1);
+      this.play(this.zoomBuffer, 0.5);
     } else if (!closeBy && this.distanceTo(context.head) > SNEAK_RANGE + 6) this.announced = false;
     this.advance(deltaSeconds, closeBy && !stunned && !searching ? Math.min(speed, SNEAK_SPEED) : speed, watched, context);
     if (sight.flashlit) {
@@ -329,7 +329,7 @@ export class Cadreur {
       this.staticTimer -= deltaSeconds;
       if (this.staticTimer <= 0) {
         this.staticTimer = 0.5 + Math.random() * 0.9;
-        this.play(this.staticBuffer, 0.7);
+        this.play(this.staticBuffer, 0.35);
       }
     } else this.staticTimer = 0;
 
@@ -429,7 +429,7 @@ export class Cadreur {
       this.rig!.root.visible = true;
       if (this.motorBuffer && this.motor.context.state === "running") {
         this.motor.setBuffer(this.motorBuffer);
-        this.motor.setVolume(0.55);
+        this.motor.setVolume(0.28);
         this.motor.play();
       }
       log("cadreur", { action: "spawn", behind: Math.round(length), depth: context.depth });
@@ -571,7 +571,7 @@ export class Cadreur {
     const rig = this.rig!;
     const head = context.head;
     const step = rig.update(deltaSeconds, speed, head);
-    if (step.footstep) this.play(this.steps[Math.floor(Math.random() * this.steps.length)] ?? null, watched ? 0.8 : 0.55);
+    if (step.footstep) this.play(this.steps[Math.floor(Math.random() * this.steps.length)] ?? null, watched ? 0.45 : 0.3);
     let budget = step.distance;
     if (budget <= 0) return;
     const lure = this.lure;

@@ -14,11 +14,16 @@ import { spawn } from "node:child_process";
 import { createRequire } from "node:module";
 import fs from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const require = createRequire(import.meta.url);
-const playwrightPath = require.resolve("playwright", { paths: ["/opt/node22/lib/node_modules"] });
-const { chromium } = (await import(playwrightPath)).default;
+let playwrightPath;
+try {
+  playwrightPath = require.resolve("playwright", { paths: ["/opt/node22/lib/node_modules"] });
+} catch {
+  playwrightPath = require.resolve("playwright");
+}
+const { chromium } = (await import(pathToFileURL(playwrightPath).href)).default;
 
 const [, , pageName, outDirArg, prefixArg] = process.argv;
 if (!pageName) {
@@ -38,7 +43,7 @@ let hash = 0;
 for (const c of pageName) hash = (hash * 31 + c.charCodeAt(0)) | 0;
 const port = 5300 + (Math.abs(hash) % 400);
 const base = `http://127.0.0.1:${port}`;
-const vite = spawn("npx", ["vite", "--config", "tests/browser/vite.test.config.mjs", "--port", String(port), "--strictPort"], { cwd: root, stdio: ["ignore", "pipe", "pipe"] });
+const vite = spawn("npx", ["vite", "--config", "tests/browser/vite.test.config.mjs", "--port", String(port), "--host", "127.0.0.1", "--strictPort"], { cwd: root, stdio: ["ignore", "pipe", "pipe"], shell: process.platform === "win32" });
 let viteOutput = "";
 vite.stdout.on("data", (d) => (viteOutput += d));
 vite.stderr.on("data", (d) => (viteOutput += d));

@@ -251,7 +251,7 @@ export class CorruptionPatch {
     if (!this.warningBuffer || this.warningVoice.context.state !== "running") return;
     if (this.warningVoice.isPlaying) this.warningVoice.stop();
     this.warningVoice.setBuffer(this.warningBuffer);
-    this.warningVoice.setVolume(0.7);
+    this.warningVoice.setVolume(0.45);
     this.warningVoice.play();
   }
 

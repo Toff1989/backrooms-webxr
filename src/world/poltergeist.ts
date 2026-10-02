@@ -92,7 +92,7 @@ export class Poltergeist {
       if (this.sound.isPlaying) this.sound.stop();
       this.sound.position.copy(target.object.position);
       this.sound.setBuffer(buffers[Math.floor(Math.random() * buffers.length)]!);
-      this.sound.setVolume(0.8);
+      this.sound.setVolume(0.5);
       this.sound.play();
     }
   }
