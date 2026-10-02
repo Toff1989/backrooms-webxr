@@ -9,6 +9,7 @@ import { CamcorderHud } from "./player/camcorderHud";
 import { CameraMenu } from "./player/cameraMenu";
 import { CADREUR_TRACK_DRAIN_PER_SECOND, CameraTracker } from "./player/cameraTracker";
 import { ComfortVignette, type VignetteLevel, VIGNETTE_LEVELS } from "./player/comfortVignette";
+import { DIFFICULTIES, getDifficulty, setDifficulty, tuning } from "./player/difficulty";
 import { JUMPSCARE_LEVELS, loadJumpscareLevel, loadVignetteLevel, nextLevel, saveJumpscareLevel, saveVignetteLevel, type JumpscareLevel } from "./player/comfortSettings";
 import { EndRunScreen } from "./player/endRunScreen";
 import { EndSequence } from "./player/endSequence";
@@ -360,6 +361,11 @@ const settingsMenu = new SettingsMenu(camera, player.body, sfx, {
     setVignetteLevel(nextLevel(VIGNETTE_LEVELS, comfortVignette.level));
     return comfortVignette.level;
   },
+  difficulty: () => getDifficulty(),
+  cycleDifficulty: () => {
+    setDifficulty(nextLevel(DIFFICULTIES, getDifficulty()));
+    return getDifficulty();
+  },
   jumpscareLevel: () => jumpscareLevel,
   cycleJumpscare: () => {
     jumpscareLevel = nextLevel(JUMPSCARE_LEVELS, jumpscareLevel);
@@ -580,7 +586,7 @@ grabSystem = new GrabSystem(physics, grabbables, hands, sfx, {
       return;
     }
     levelManager.markBatteryPicked(grabbable.batteryId);
-    flashlight.recharge(BATTERY_RECHARGE);
+    flashlight.recharge(BATTERY_RECHARGE * tuning().batteryRecharge);
     achievements.bump("batteriesPicked");
     batteriesPickedThisRun++;
     hand.pulse(0.45, 70);
@@ -1190,6 +1196,8 @@ const WALL_TRAP_POP_HAPTIC_DURATION_MS = 180;
 const BATTERY_RECHARGE = 0.45;
 /** Santé rendue par une trousse de soin (sur 100). */
 const MEDKIT_HEAL = 35;
+/** Part de l'apaisement de la lampe en marchant (à l'arrêt : 1). */
+const WALKING_SOOTHE_FACTOR = 0.4;
 const bouncePosition = new THREE.Vector3();
 const trackForward = { x: 0, z: -1 };
 const trackDirection = new THREE.Vector3();
@@ -1315,7 +1323,7 @@ renderer.setAnimationLoop((timestamp) => {
       damagedThisLevel = true;
       vitals.addMadness(PATCH_MADNESS_PER_SECOND * deltaSeconds);
       corruption.add(deltaSeconds * 0.4);
-      if (vitals.damage(PATCH_DAMAGE_PER_SECOND * deltaSeconds)) triggerGameOver("health");
+      if (vitals.damage(PATCH_DAMAGE_PER_SECOND * tuning().hazardDamage * deltaSeconds)) triggerGameOver("health");
     }
     perfStats.end("menaces");
 
@@ -1325,7 +1333,7 @@ renderer.setAnimationLoop((timestamp) => {
     if (levelUpdate.wallTrapJustPopped) vitals.addMadness(12);
     if (blackoutEvents.reachedPlayer) vitals.addMadness(8);
     const healthBeforeVitalsUpdate = vitals.health;
-    if (vitals.update(deltaSeconds, flashlight.shining && player.movementIntensity < 0.1)) triggerGameOver("health");
+    if (vitals.update(deltaSeconds, flashlight.shining ? (player.movementIntensity < 0.1 ? 1 : WALKING_SOOTHE_FACTOR) : 0)) triggerGameOver("health");
     if (vitals.health < healthBeforeVitalsUpdate) damagedThisLevel = true;
     corruption.update(deltaSeconds);
   }

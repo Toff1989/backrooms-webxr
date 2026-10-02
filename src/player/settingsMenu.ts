@@ -3,6 +3,7 @@ import { DEBUG_CODE_LENGTH, isDebugMenuEnabled, setDebugMenuEnabled, verifyDebug
 import { getLanguage, onLanguageChange, setLanguage, t } from "../i18n";
 import { generatePseudoSuggestion, PSEUDO_ADJECTIVE_COUNT, PSEUDO_NOUN_COUNT } from "../shared/pseudoGenerator";
 import { drawButton, drawPanelBackground, inRect, UiPanel, wrapText, type PressButton, type Rect } from "../ui/uiPanel";
+import type { Difficulty } from "./difficulty";
 import type { JumpscareLevel } from "./comfortSettings";
 import type { VignetteLevel } from "./comfortVignette";
 import type { Hand } from "./hand";
@@ -13,21 +14,22 @@ const HEIGHT = 0.5;
 const PX_PER_M = 1600;
 const DISTANCE = 0.7;
 
-type ListButtonId = "lang" | "vignette" | "jumpscare" | "height" | "pseudo" | "debug" | "reset" | "back";
+type ListButtonId = "lang" | "vignette" | "jumpscare" | "difficulty" | "height" | "pseudo" | "debug" | "reset" | "back";
 type PseudoButtonId = "adjective" | "noun" | "confirm" | "cancel";
 type ResetButtonId = "confirm" | "cancel";
 type CodeButtonId = "cancel" | `key:${string}`;
 type ButtonId = ListButtonId | PseudoButtonId | ResetButtonId | CodeButtonId;
 
 const LIST_BUTTONS: Record<ListButtonId, Rect> = {
-  lang: { x: 100, y: 130, w: 600, h: 60 },
-  vignette: { x: 100, y: 200, w: 600, h: 60 },
-  jumpscare: { x: 100, y: 270, w: 600, h: 60 },
-  height: { x: 100, y: 340, w: 600, h: 60 },
-  pseudo: { x: 100, y: 410, w: 600, h: 60 },
-  debug: { x: 100, y: 480, w: 600, h: 60 },
-  reset: { x: 100, y: 550, w: 600, h: 60 },
-  back: { x: 100, y: 635, w: 600, h: 62 },
+  lang: { x: 100, y: 120, w: 600, h: 54 },
+  vignette: { x: 100, y: 182, w: 600, h: 54 },
+  jumpscare: { x: 100, y: 244, w: 600, h: 54 },
+  difficulty: { x: 100, y: 306, w: 600, h: 54 },
+  height: { x: 100, y: 368, w: 600, h: 54 },
+  pseudo: { x: 100, y: 430, w: 600, h: 54 },
+  debug: { x: 100, y: 492, w: 600, h: 54 },
+  reset: { x: 100, y: 554, w: 600, h: 54 },
+  back: { x: 100, y: 640, w: 600, h: 58 },
 };
 
 const PSEUDO_BUTTONS: Record<PseudoButtonId, Rect> = {
@@ -54,6 +56,9 @@ export interface SettingsMenuActions {
   vignetteLevel(): VignetteLevel;
   /** Passe au niveau de vignette suivant (désactivée, légère, normale, forte) et le renvoie. */
   cycleVignette(): VignetteLevel;
+  difficulty(): Difficulty;
+  /** Passe à la difficulté suivante (facile, normale, difficile) et la renvoie. */
+  cycleDifficulty(): Difficulty;
   jumpscareLevel(): JumpscareLevel;
   /** Passe à l'intensité de sursaut suivante (normale, atténuée, désactivée) et la renvoie. */
   cycleJumpscare(): JumpscareLevel;
@@ -159,6 +164,9 @@ export class SettingsMenu extends UiPanel {
         break;
       case "jumpscare":
         this.showStatus(t("settings.jumpscareStatus", { level: t(`settings.jumpscare.${this.actions.cycleJumpscare()}`) }));
+        break;
+      case "difficulty":
+        this.showStatus(t("settings.difficultyStatus", { level: t(`settings.difficulty.${this.actions.cycleDifficulty()}`) }));
         break;
       case "height":
         this.actions.recalibrateHeight();
@@ -343,6 +351,7 @@ export class SettingsMenu extends UiPanel {
     drawButton(ctx, LIST_BUTTONS.lang, t("inv.lang"), { hovered: hovered.has("lang") });
     drawButton(ctx, LIST_BUTTONS.vignette, t("settings.vignette", { level: t(`settings.vignette.${this.actions.vignetteLevel()}`) }), { hovered: hovered.has("vignette") });
     drawButton(ctx, LIST_BUTTONS.jumpscare, t("settings.jumpscare", { level: t(`settings.jumpscare.${this.actions.jumpscareLevel()}`) }), { hovered: hovered.has("jumpscare") });
+    drawButton(ctx, LIST_BUTTONS.difficulty, t("settings.difficulty", { level: t(`settings.difficulty.${this.actions.difficulty()}`) }), { hovered: hovered.has("difficulty") });
     drawButton(ctx, LIST_BUTTONS.height, t("inv.height"), { hovered: hovered.has("height") });
     const pseudo = this.actions.currentPseudo();
     drawButton(ctx, LIST_BUTTONS.pseudo, pseudo ? t("settings.pseudo", { pseudo }) : t("settings.pseudoNone"), { hovered: hovered.has("pseudo") });

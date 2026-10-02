@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { tuning } from "./difficulty";
 
 const ON_INTENSITY = 9;
 const LIGHT_COLOR = 0xfff1d6;
@@ -91,7 +92,7 @@ export class Flashlight {
 
   update(deltaSeconds: number, corruption: number): void {
     if (this.on) {
-      this.battery = Math.max(0, this.battery - deltaSeconds / (BATTERY_SECONDS * this.capacity));
+      this.battery = Math.max(0, this.battery - deltaSeconds / (BATTERY_SECONDS * this.capacity * tuning().batteryLife));
       if (this.battery === 0) this.on = false;
     }
     const low = this.battery < LOW_BATTERY ? 1 - this.battery / LOW_BATTERY : 0;

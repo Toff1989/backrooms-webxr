@@ -8,7 +8,7 @@ export interface ExitLocation {
 }
 
 /** Amplitude aléatoire (en cellules) ajoutée à `exitMinDistanceCells` pour éviter une distance fixe. */
-const EXIT_DISTANCE_JITTER_CELLS = 6;
+const EXIT_DISTANCE_JITTER_CELLS = 10;
 
 /**
  * Position de la sortie du level (en coordonnées de cellule globales), dérivée uniquement

@@ -4,6 +4,7 @@ import { queueWarmup } from "../assets/audio/synth";
 import { log } from "../debug/debugLog";
 import { CollisionGroups, RAPIER, type PhysicsWorld } from "../physics/physicsWorld";
 import { loadCadreur, type CadreurRig } from "./cadreurModel";
+import { tuning } from "../player/difficulty";
 import type { NoiseEvent } from "./noise";
 
 /** Profondeur à partir de laquelle le Cadreur peut apparaître (le niveau 0 reste sûr). */
@@ -315,7 +316,7 @@ export class Cadreur {
     // Hors de vue et loin derrière : il force l'allure (jamais sous les yeux du joueur).
     const gap = this.pathBehind();
     const catchUp = watched ? 1 : THREE.MathUtils.clamp(1 + (gap - CATCH_UP_START) / 14, 1, CATCH_UP_MAX_FACTOR);
-    const speed = stunned || searching ? 0 : watched ? WATCHED_SPEED * (sight.flashlit ? FLASHLIGHT_SPEED_FACTOR : 1) : hunting * catchUp;
+    const speed = stunned || searching ? 0 : watched ? WATCHED_SPEED * (sight.flashlit ? FLASHLIGHT_SPEED_FACTOR : 1) : hunting * catchUp * tuning().cadreurSpeed;
     // Jamais d'embuscade : près du joueur qui ne l'a pas vu, il ralentit, et s'annonce une fois.
     const closeBy = this.distanceTo(context.head) < SNEAK_RANGE;
     if (closeBy && !this.announced) {
@@ -336,7 +337,7 @@ export class Cadreur {
     events.nearby = distance < NEAR_EFFECT_DISTANCE && this.elapsed - this.lastNearEffect > NEAR_EFFECT_COOLDOWN;
     if (events.nearby) this.lastNearEffect = this.elapsed;
     const proximity = THREE.MathUtils.clamp(1 - distance / PLAYER_DAMAGE_DISTANCE, 0, 1);
-    events.playerDamage = PLAYER_DAMAGE_MAX_PER_SECOND * proximity * deltaSeconds;
+    events.playerDamage = PLAYER_DAMAGE_MAX_PER_SECOND * tuning().cadreurDamage * proximity * deltaSeconds;
     events.watched = sight.seen;
     if (distance < CATCH_DISTANCE) {
       events.caught = true;

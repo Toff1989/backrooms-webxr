@@ -66,8 +66,8 @@ export function loreFormat(fragment: number): LoreFormat {
   return LORE_FRAGMENTS[fragment]?.format ?? "journal";
 }
 
-/** Distance minimale (cellules) entre le spawn et l'archive : ~50 m. */
-const LORE_MIN_DISTANCE_CELLS = 20;
+/** Distance minimale (cellules) entre le spawn et l'archive : ~90 m. */
+const LORE_MIN_DISTANCE_CELLS = 36;
 
 export interface LorePageLocation {
   cellX: number;
@@ -92,7 +92,7 @@ export function getLorePageLocation(profile: LevelProfile): LorePageLocation {
   const exitDistance = Math.hypot(exit.cellX, exit.cellZ);
   const side = coordinateHash01(seedInt, 0, 0, 1) < 0.5 ? -1 : 1;
   const angle = exitAngle + side * (0.6 + coordinateHash01(seedInt, 0, 0, 2) * 1.2);
-  const minDistance = Math.max(LORE_MIN_DISTANCE_CELLS, exitDistance + 2);
+  const minDistance = Math.max(LORE_MIN_DISTANCE_CELLS, exitDistance + 6);
   const distance = minDistance + coordinateHash01(seedInt, 0, 0, 3) * (exitDistance * 0.6 + 8);
   let cellX = Math.round(Math.cos(angle) * distance);
   let cellZ = Math.round(Math.sin(angle) * distance);

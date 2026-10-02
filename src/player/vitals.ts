@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { tuning } from "./difficulty";
 
 const MADNESS_DECAY_LAMBDA = 0.45;
 /** Au-delà de ce seuil de folie (%), elle ronge directement la santé. */
@@ -22,7 +23,7 @@ export class PlayerVitals {
   }
 
   addMadness(amount: number): void {
-    if (amount > 0) this.madness = Math.min(this.maxMadness, this.madness + amount);
+    if (amount > 0) this.madness = Math.min(this.maxMadness, this.madness + amount * tuning().madnessGain);
   }
 
   /** Apaisement (objet réconfortant : ballon, canard...) : fait redescendre la folie. */
@@ -32,12 +33,13 @@ export class PlayerVitals {
 
   /** Soin (trousse de soin) : rend de la santé, sans dépasser le maximum. */
   heal(amount: number): void {
-    if (amount > 0 && this.health > 0) this.health = Math.min(this.maxHealth, this.health + amount);
+    if (amount > 0 && this.health > 0) this.health = Math.min(this.maxHealth, this.health + amount * tuning().heal);
   }
 
   /** Fait avancer folie et santé d'une frame ; renvoie vrai si la santé vient de tomber à 0. */
-  update(deltaSeconds: number, calm: boolean): boolean {
-    if (calm && this.madness > 0) this.madness = THREE.MathUtils.damp(this.madness, 0, MADNESS_DECAY_LAMBDA, deltaSeconds);
+  /** `soothing` : part [0..1] de l'apaisement de la lampe (1 à l'arrêt, partiel en marchant, 0 lampe éteinte). */
+  update(deltaSeconds: number, soothing: number): boolean {
+    if (soothing > 0 && this.madness > 0) this.madness = THREE.MathUtils.damp(this.madness, 0, MADNESS_DECAY_LAMBDA * soothing, deltaSeconds);
     // Passé 80 % de folie, elle ronge la santé ; le rythme grimpe linéairement jusqu'à son
     // maximum à 95 % (au lieu d'un seuil brutal tout-ou-rien).
     const ramp = THREE.MathUtils.clamp((this.madness - MADNESS_DAMAGE_THRESHOLD) / (MADNESS_DAMAGE_MAX - MADNESS_DAMAGE_THRESHOLD), 0, 1);
