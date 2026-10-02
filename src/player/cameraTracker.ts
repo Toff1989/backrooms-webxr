@@ -4,9 +4,9 @@ import * as THREE from "three";
 export type TrackMode = "exit" | "cadreur" | "archive";
 export const TRACK_MODES: readonly TrackMode[] = ["exit", "cadreur", "archive"];
 
-/** Plein à moins de 5 m, vide au-delà de 60 m (comportement historique du signal de sortie). */
+/** Plein à moins de 5 m ; la sortie est à 65-150 m du spawn (voir `levelProfile.ts`) : le signal ne s'éteint qu'au-delà. */
 const EXIT_NEAR = 5;
-const EXIT_RANGE = 55;
+const EXIT_RANGE = 150;
 const CADREUR_NEAR = 3;
 const CADREUR_RANGE = 37;
 const ARCHIVE_NEAR = 4;
@@ -35,7 +35,7 @@ export interface TrackReading {
   signal: number;
   /** Distance (m) à la cible, null si introuvable. */
   distance: number | null;
-  /** Angle (rad) de la cible par rapport au regard, + à droite ; null pour la sortie (signal seul, sans distance). Non affiché pour l'instant : le HUD ne montre que la distance. */
+  /** Angle (rad) de la cible par rapport au regard, + à droite ; null pour la sortie (distance seule). Non affiché pour l'instant : le HUD ne montre que la distance. */
   bearing: number | null;
   /** Mode qui consomme la pile et pile vide / cible absente : rien à afficher. */
   unavailable: boolean;

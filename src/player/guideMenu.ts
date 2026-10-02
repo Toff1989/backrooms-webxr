@@ -24,7 +24,7 @@ const BUTTONS: Record<ButtonId, Rect> = {
 const PAGE_LINES: Record<Page, string[]> = {
   controls: Array.from({ length: 8 }, (_, index) => `guide.controls.${index + 1}`),
   systems: Array.from({ length: 8 }, (_, index) => `guide.systems.${index + 1}`),
-  credits: Array.from({ length: 5 }, (_, index) => `guide.credits.${index + 1}`),
+  credits: Array.from({ length: 8 }, (_, index) => `guide.credits.${index + 1}`),
 };
 
 export class GuideMenu extends UiPanel {

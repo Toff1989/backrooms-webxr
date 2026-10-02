@@ -1215,8 +1215,11 @@ const BATTERY_RECHARGE = 0.45;
 const MEDKIT_HEAL = 35;
 /** Part de l'apaisement de la lampe en marchant (à l'arrêt : 1). */
 const WALKING_SOOTHE_FACTOR = 0.4;
-/** Danger perçu [0..1] (Cadreur en vue ou collé à nous) : la musique s'efface, puis revient doucement. */
-let musicThreat = 0;
+/** Secondes restantes de musique de poursuite : relancées tant que le Cadreur nous voit ou nous colle. */
+const CHASE_MUSIC_HOLD_SECONDS = 12;
+let chaseMusicSeconds = 0;
+/** Folie (%) à partir de laquelle la musique de tension prend le relais de l'exploration. */
+const TENSION_MUSIC_MADNESS = 60;
 const bouncePosition = new THREE.Vector3();
 const trackForward = { x: 0, z: -1 };
 const trackDirection = new THREE.Vector3();
@@ -1330,7 +1333,7 @@ renderer.setAnimationLoop((timestamp) => {
     if (cadreurEvents.nearby) vhsOverlay.triggerTrackingLoss(0.45);
     if (cadreurEvents.playerDamage > 0 && vitals.damage(cadreurEvents.playerDamage)) triggerGameOver("health");
     if (cadreurEvents.playerDamage > 0) damagedThisLevel = true;
-    musicThreat = cadreurEvents.watched || cadreurEvents.playerDamage > 0 ? 1 : Math.max(0, musicThreat - deltaSeconds * 0.25);
+    if (cadreurEvents.watched || cadreurEvents.playerDamage > 0 || cadreurEvents.nearby) chaseMusicSeconds = CHASE_MUSIC_HOLD_SECONDS;
     if (cadreurEvents.sighted) vitals.addMadness(10);
     if (cadreurEvents.watched) vitals.addMadness(deltaSeconds * 4);
     const patchEvents = corruptionPatch.update(deltaSeconds, head, camera, levelManager.depth, elapsedSeconds);
@@ -1378,8 +1381,7 @@ renderer.setAnimationLoop((timestamp) => {
   // Suivre le Cadreur vide la pile de la lampe (jamais dans le niveau 0 fictif du menu).
   if (trackReading.draining && !menuLimbo) flashlight.drain(CADREUR_TRACK_DRAIN_PER_SECOND * deltaSeconds);
   const trackLabel = t(trackReading.mode === "exit" ? "hud.signalExit" : trackReading.mode === "cadreur" ? "hud.signalCadreur" : "hud.signalArchive");
-  const trackAim =
-    trackReading.bearing === null ? "" : trackReading.distance === null ? "--" : `${Math.round(trackReading.distance)}m`;
+  const trackAim = trackReading.unavailable ? "" : trackReading.distance === null ? "--" : `${Math.round(trackReading.distance)}m`;
   hud.status = {
     depth: levelManager.depth,
     crouching: player.crouching,
@@ -1400,7 +1402,17 @@ renderer.setAnimationLoop((timestamp) => {
   endSequence.update(deltaSeconds);
   vhsOverlay.update(elapsedSeconds, corruption.value, deltaSeconds);
   tapePlayer.update(deltaSeconds);
-  musicPlayer.update(deltaSeconds, menuLimbo || gameOver ? 0 : musicThreat);
+  chaseMusicSeconds = Math.max(0, chaseMusicSeconds - deltaSeconds);
+  musicPlayer.update(
+    deltaSeconds,
+    menuLimbo || gameOver
+      ? "menu"
+      : chaseMusicSeconds > 0
+        ? "chase"
+        : blackout.active || blackout.warning || vitals.madness >= TENSION_MUSIC_MADNESS
+          ? "tension"
+          : "explore",
+  );
   updateLoreObjects(deltaSeconds);
   hud.update(deltaSeconds);
   noticeModal.update(deltaSeconds);
