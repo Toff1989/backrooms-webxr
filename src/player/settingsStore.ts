@@ -11,7 +11,7 @@ import { apiCall, ensureIdentity, onIdentityChange } from "../world/playerIdenti
  * avant de s'en servir (voir le début de `main.ts`), puis `onSettingsChange` signale un changement
  * venu du serveur.
  */
-export type SettingKey = "lang" | "vignette" | "jumpscare" | "difficulty";
+export type SettingKey = "lang" | "vignette" | "jumpscare" | "difficulty" | "volMaster" | "volMusic" | "volAmbient" | "volEffects" | "volThreats";
 
 const SETTINGS_KEY = "backrooms-vr:settings";
 

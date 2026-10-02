@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { getVolume, setVolume, VOLUME_CHANNELS, VOLUME_STEP, type VolumeChannel } from "../audio/audioMixer";
 import { DEBUG_CODE_LENGTH, isDebugMenuEnabled, setDebugMenuEnabled, verifyDebugCode } from "../debug/debugLog";
 import { getLanguage, onLanguageChange, setLanguage, t } from "../i18n";
 import { generatePseudoSuggestion, PSEUDO_ADJECTIVE_COUNT, PSEUDO_NOUN_COUNT } from "../shared/pseudoGenerator";
@@ -14,23 +15,38 @@ const HEIGHT = 0.5;
 const PX_PER_M = 1600;
 const DISTANCE = 0.7;
 
-type ListButtonId = "lang" | "vignette" | "jumpscare" | "difficulty" | "height" | "pseudo" | "debug" | "reset" | "back";
+type ListButtonId = "lang" | "vignette" | "jumpscare" | "difficulty" | "audio" | "height" | "pseudo" | "debug" | "reset" | "back";
 type PseudoButtonId = "adjective" | "noun" | "confirm" | "cancel";
 type ResetButtonId = "confirm" | "cancel";
 type CodeButtonId = "cancel" | `key:${string}`;
-type ButtonId = ListButtonId | PseudoButtonId | ResetButtonId | CodeButtonId;
+type AudioButtonId = "audioBack" | `${VolumeChannel}:${"down" | "up" | "bar"}`;
+type ButtonId = ListButtonId | PseudoButtonId | ResetButtonId | CodeButtonId | AudioButtonId;
 
 const LIST_BUTTONS: Record<ListButtonId, Rect> = {
-  lang: { x: 100, y: 120, w: 600, h: 54 },
-  vignette: { x: 100, y: 182, w: 600, h: 54 },
-  jumpscare: { x: 100, y: 244, w: 600, h: 54 },
-  difficulty: { x: 100, y: 306, w: 600, h: 54 },
-  height: { x: 100, y: 368, w: 600, h: 54 },
-  pseudo: { x: 100, y: 430, w: 600, h: 54 },
-  debug: { x: 100, y: 492, w: 600, h: 54 },
-  reset: { x: 100, y: 554, w: 600, h: 54 },
-  back: { x: 100, y: 640, w: 600, h: 58 },
+  lang: { x: 100, y: 112, w: 600, h: 50 },
+  vignette: { x: 100, y: 169, w: 600, h: 50 },
+  jumpscare: { x: 100, y: 226, w: 600, h: 50 },
+  difficulty: { x: 100, y: 283, w: 600, h: 50 },
+  audio: { x: 100, y: 340, w: 600, h: 50 },
+  height: { x: 100, y: 397, w: 600, h: 50 },
+  pseudo: { x: 100, y: 454, w: 600, h: 50 },
+  debug: { x: 100, y: 511, w: 600, h: 50 },
+  reset: { x: 100, y: 568, w: 600, h: 50 },
+  back: { x: 100, y: 646, w: 600, h: 54 },
 };
+
+/** Réglage du son : une ligne par canal (− barre +), cliquer la barre fixe directement le niveau. */
+const AUDIO_ROW_TOP = 130;
+const AUDIO_ROW_STEP = 92;
+const AUDIO_ROW_HEIGHT = 70;
+const AUDIO_BAR = { x: 205, w: 390 };
+const AUDIO_BACK: Rect = { x: 100, y: 622, w: 600, h: 70 };
+function audioRect(channel: VolumeChannel, part: "down" | "up" | "bar"): Rect {
+  const y = AUDIO_ROW_TOP + VOLUME_CHANNELS.indexOf(channel) * AUDIO_ROW_STEP;
+  if (part === "down") return { x: 100, y, w: 95, h: AUDIO_ROW_HEIGHT };
+  if (part === "up") return { x: 605, y, w: 95, h: AUDIO_ROW_HEIGHT };
+  return { x: AUDIO_BAR.x, y, w: AUDIO_BAR.w, h: AUDIO_ROW_HEIGHT };
+}
 
 const PSEUDO_BUTTONS: Record<PseudoButtonId, Rect> = {
   adjective: { x: 60, y: 290, w: 340, h: 68 },
@@ -87,7 +103,7 @@ export class SettingsMenu extends UiPanel {
   private statusMessage = "";
   private statusUntil = 0;
   private time = 0;
-  private mode: "list" | "pseudo" | "resetConfirm" | "debugCode" = "list";
+  private mode: "list" | "pseudo" | "resetConfirm" | "debugCode" | "audio" = "list";
   private codeDigits = "";
   private verifying = false;
   private adjectiveIndex = 0;
@@ -148,6 +164,7 @@ export class SettingsMenu extends UiPanel {
     if (this.mode === "pseudo") this.pressPseudoButton(id as PseudoButtonId);
     else if (this.mode === "resetConfirm") this.pressResetButton(id as ResetButtonId);
     else if (this.mode === "debugCode") this.pressCodeButton(id as CodeButtonId);
+    else if (this.mode === "audio") this.pressAudioButton(id as AudioButtonId, px);
     else this.pressListButton(id as ListButtonId);
     this.invalidate();
     return true;
@@ -167,6 +184,9 @@ export class SettingsMenu extends UiPanel {
         break;
       case "difficulty":
         this.showStatus(t("settings.difficultyStatus", { level: t(`settings.difficulty.${this.actions.cycleDifficulty()}`) }));
+        break;
+      case "audio":
+        this.mode = "audio";
         break;
       case "height":
         this.actions.recalibrateHeight();
@@ -196,6 +216,18 @@ export class SettingsMenu extends UiPanel {
         this.actions.back();
         break;
     }
+  }
+
+  private pressAudioButton(id: AudioButtonId, px: number): void {
+    if (id === "audioBack") {
+      this.mode = "list";
+      return;
+    }
+    const [channel, part] = id.split(":") as [VolumeChannel, "down" | "up" | "bar"];
+    const current = getVolume(channel);
+    if (part === "down") setVolume(channel, current - VOLUME_STEP);
+    else if (part === "up") setVolume(channel, current + VOLUME_STEP);
+    else setVolume(channel, ((px - AUDIO_BAR.x) / AUDIO_BAR.w) * 100);
   }
 
   private pressPseudoButton(id: PseudoButtonId): void {
@@ -282,6 +314,13 @@ export class SettingsMenu extends UiPanel {
   }
 
   private buttonAt(px: number, py: number): ButtonId | null {
+    if (this.mode === "audio") {
+      if (inRect(AUDIO_BACK, px, py)) return "audioBack";
+      for (const channel of VOLUME_CHANNELS) {
+        for (const part of ["down", "up", "bar"] as const) if (inRect(audioRect(channel, part), px, py)) return `${channel}:${part}`;
+      }
+      return null;
+    }
     if (this.mode === "debugCode") {
       if (inRect(CODE_CANCEL, px, py)) return "cancel";
       for (const [id, rect] of CODE_KEY_RECTS) if (inRect(rect, px, py)) return id as CodeButtonId;
@@ -302,7 +341,7 @@ export class SettingsMenu extends UiPanel {
     ctx.fillStyle = "#ff6b5a";
     ctx.font = "bold 38px monospace";
     ctx.fillText(
-      t(this.mode === "pseudo" ? "settings.pseudoTitle" : this.mode === "resetConfirm" ? "settings.resetTitle" : this.mode === "debugCode" ? "settings.debugCodeTitle" : "settings.title"),
+      t(this.mode === "audio" ? "settings.audioTitle" : this.mode === "pseudo" ? "settings.pseudoTitle" : this.mode === "resetConfirm" ? "settings.resetTitle" : this.mode === "debugCode" ? "settings.debugCodeTitle" : "settings.title"),
       width / 2,
       90,
     );
@@ -323,6 +362,39 @@ export class SettingsMenu extends UiPanel {
         ctx.fillStyle = "#e06a5a";
         ctx.fillText(this.statusMessage, width / 2, 728);
       }
+      return;
+    }
+
+    if (this.mode === "audio") {
+      for (const channel of VOLUME_CHANNELS) {
+        const volume = getVolume(channel);
+        const bar = audioRect(channel, "bar");
+        drawButton(ctx, audioRect(channel, "down"), "−", { hovered: hovered.has(`${channel}:down`), disabled: volume <= 0 });
+        drawButton(ctx, audioRect(channel, "up"), "+", { hovered: hovered.has(`${channel}:up`), disabled: volume >= 100 });
+        ctx.beginPath();
+        ctx.roundRect(bar.x, bar.y, bar.w, bar.h, 12);
+        ctx.fillStyle = hovered.has(`${channel}:bar`) ? "rgba(255, 232, 170, 0.16)" : "rgba(255, 244, 214, 0.06)";
+        ctx.fill();
+        if (volume > 0) {
+          ctx.beginPath();
+          ctx.roundRect(bar.x, bar.y, Math.max(24, (bar.w * volume) / 100), bar.h, 12);
+          ctx.fillStyle = channel === "master" ? "rgba(232, 195, 74, 0.45)" : "rgba(159, 227, 159, 0.35)";
+          ctx.fill();
+        }
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = "rgba(255, 244, 214, 0.25)";
+        ctx.beginPath();
+        ctx.roundRect(bar.x, bar.y, bar.w, bar.h, 12);
+        ctx.stroke();
+        ctx.fillStyle = "#f2e8cf";
+        ctx.font = "bold 24px monospace";
+        ctx.textAlign = "left";
+        ctx.fillText(t(`settings.vol.${channel}`), bar.x + 16, bar.y + bar.h / 2);
+        ctx.textAlign = "right";
+        ctx.fillText(`${volume} %`, bar.x + bar.w - 16, bar.y + bar.h / 2);
+        ctx.textAlign = "center";
+      }
+      drawButton(ctx, AUDIO_BACK, t("settings.back"), { hovered: hovered.has("audioBack") });
       return;
     }
 
@@ -352,6 +424,7 @@ export class SettingsMenu extends UiPanel {
     drawButton(ctx, LIST_BUTTONS.vignette, t("settings.vignette", { level: t(`settings.vignette.${this.actions.vignetteLevel()}`) }), { hovered: hovered.has("vignette") });
     drawButton(ctx, LIST_BUTTONS.jumpscare, t("settings.jumpscare", { level: t(`settings.jumpscare.${this.actions.jumpscareLevel()}`) }), { hovered: hovered.has("jumpscare") });
     drawButton(ctx, LIST_BUTTONS.difficulty, t("settings.difficulty", { level: t(`settings.difficulty.${this.actions.difficulty()}`) }), { hovered: hovered.has("difficulty") });
+    drawButton(ctx, LIST_BUTTONS.audio, t("settings.audio"), { hovered: hovered.has("audio") });
     drawButton(ctx, LIST_BUTTONS.height, t("inv.height"), { hovered: hovered.has("height") });
     const pseudo = this.actions.currentPseudo();
     drawButton(ctx, LIST_BUTTONS.pseudo, pseudo ? t("settings.pseudo", { pseudo }) : t("settings.pseudoNone"), { hovered: hovered.has("pseudo") });

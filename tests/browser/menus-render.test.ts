@@ -311,6 +311,7 @@ function settingsGroup(): Group {
       }) as AnyPanel),
     scenarios: [
       { name: "liste", setup: list() },
+      { name: "son", setup: list(() => (panel["mode"] = "audio")) },
       { name: "sans-pseudo", setup: list(() => (state.pseudo = null)) },
       { name: "pseudo-40-caracteres", setup: list(() => (state.pseudo = MAX_PSEUDO)) },
       { name: "vignette-non", setup: list(() => (state.vignette = "off")) },

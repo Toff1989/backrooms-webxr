@@ -9,6 +9,8 @@ import { CamcorderHud } from "./player/camcorderHud";
 import { CameraMenu } from "./player/cameraMenu";
 import { CADREUR_TRACK_DRAIN_PER_SECOND, CameraTracker } from "./player/cameraTracker";
 import { ComfortVignette, type VignetteLevel, VIGNETTE_LEVELS } from "./player/comfortVignette";
+import { AudioMixer } from "./audio/audioMixer";
+import { MusicPlayer } from "./audio/musicPlayer";
 import { DIFFICULTIES, getDifficulty, setDifficulty, tuning } from "./player/difficulty";
 import { loadSettings, onSettingsChange, syncSettings } from "./player/settingsStore";
 import { JUMPSCARE_LEVELS, loadJumpscareLevel, loadVignetteLevel, nextLevel, saveJumpscareLevel, saveVignetteLevel, type JumpscareLevel } from "./player/comfortSettings";
@@ -162,6 +164,9 @@ scene.add(hemisphere, ambient);
 
 const audioListener = new THREE.AudioListener();
 camera.add(audioListener);
+// Volume général + canaux (musique, ambiance, effets, menaces), réglables dans les paramètres.
+const mixer = new AudioMixer(audioListener);
+const musicPlayer = new MusicPlayer(mixer.music);
 
 const collectionStore = new CollectionStore();
 const grabbables = new GrabbableRegistry(scene, physics);
@@ -179,7 +184,7 @@ achievements.raise("archivesRead", loreJournal.count);
 const MENU_ROOM_SEED = "menu-room";
 const levelManager = new LevelManager(
   scene,
-  audioListener,
+  mixer.ambient,
   physics,
   grabbables,
   (id) => collectionStore.has(id),
@@ -192,12 +197,12 @@ const timer = new THREE.Timer();
 
 const input = new XrInput(renderer, player.body);
 const hands = [new Hand(input.left, physics), new Hand(input.right, physics)];
-const sfx = new Sfx(audioListener);
+const sfx = new Sfx(mixer.effects);
 
 const vhsOverlay = new VhsOverlay(camera);
 const comfortVignette = new ComfortVignette(vhsOverlay);
 /** Sursaut de capture (tête du Cadreur) et fondu rouge/noir de la mort par santé, avant l'écran de score. */
-const endSequence = new EndSequence(camera, audioListener, vhsOverlay);
+const endSequence = new EndSequence(camera, mixer.threats, vhsOverlay);
 /** Écran de chargement unique (voir loadingGate.ts) : démarré avant même le premier rendu, pour
  * que le niveau 0 fictif du menu principal apparaisse déjà masqué par l'écran bleu. */
 const loadingGate = new LoadingGate(vhsOverlay);
@@ -220,7 +225,7 @@ achievements.onUnlock((def) => noticeModal.show("achievement", t(def.titleKey)))
 const vitals = new PlayerVitals();
 /** Archives perdues : cassettes lues dans un modal dédié (signal + transcription), polaroids photographiés derrière le joueur. */
 const tapeSignalModal = new TapeSignalModal(camera);
-const tapePlayer = new TapePlayer(audioListener, tapeSignalModal);
+const tapePlayer = new TapePlayer(mixer.effects, tapeSignalModal);
 const capturePhoto = createPhotoCapture(renderer, scene, camera, physics);
 const captureObject = createObjectCapture(renderer, scene, camera);
 /** Vues en direct (télé, caméra de surveillance, jumelles, loupe, caméscope). */
@@ -236,7 +241,7 @@ configureLoreServices({
     achievements.bump("tapesPlayed");
   },
 });
-const ambientHum = new AmbientHum(audioListener, scene);
+const ambientHum = new AmbientHum(mixer.ambient, scene);
 const flashlight = new Flashlight(camera);
 const perfStats = new PerfStats(renderer, camera);
 setPerf(perfStats);
@@ -260,12 +265,12 @@ perfStats.extra = () => {
   };
 };
 const atmosphere = new Atmosphere(scene, hemisphere, ambient);
-const poltergeist = new Poltergeist(scene, audioListener, grabbables);
+const poltergeist = new Poltergeist(scene, mixer.threats, grabbables);
 /** Menaces : la Coupure (néons qui meurent en vague) et le Cadreur (il bouge quand on ne le voit pas). */
-const blackout = new Blackout(scene, audioListener);
-const cadreur = new Cadreur(scene, audioListener, physics);
+const blackout = new Blackout(scene, mixer.threats);
+const cadreur = new Cadreur(scene, mixer.threats, physics);
 /** Corruption VHS : tache au sol qui ronge la santé, monte la folie et interdit le sprint. */
-const corruptionPatch = new CorruptionPatch(scene, audioListener);
+const corruptionPatch = new CorruptionPatch(scene, mixer.threats);
 /** Le bruit (télé, réveil, objets lancés) attire le Cadreur, partout. */
 onNoise((event) => cadreur.hear(event, levelManager.depth));
 
@@ -603,7 +608,7 @@ grabSystem = new GrabSystem(physics, grabbables, hands, sfx, {
 }, scene);
 
 /** Objets qui s'animent : télé, réveil, lampes... (voir `interactions.ts`). */
-const objectAudio = new ObjectAudio(scene, audioListener);
+const objectAudio = new ObjectAudio(scene, mixer.effects);
 /** Dessin au marqueur sur sol/murs/plafond : tuiles canvas, effacées à chaque niveau (voir markerSurfaces.ts). */
 const markerSurfaces = new MarkerSurfaces(scene, physics);
 levelManager.onChunkLoaded = (bounds) => markerSurfaces.queueRevalidate(bounds);
@@ -1210,6 +1215,8 @@ const BATTERY_RECHARGE = 0.45;
 const MEDKIT_HEAL = 35;
 /** Part de l'apaisement de la lampe en marchant (à l'arrêt : 1). */
 const WALKING_SOOTHE_FACTOR = 0.4;
+/** Danger perçu [0..1] (Cadreur en vue ou collé à nous) : la musique s'efface, puis revient doucement. */
+let musicThreat = 0;
 const bouncePosition = new THREE.Vector3();
 const trackForward = { x: 0, z: -1 };
 const trackDirection = new THREE.Vector3();
@@ -1323,6 +1330,7 @@ renderer.setAnimationLoop((timestamp) => {
     if (cadreurEvents.nearby) vhsOverlay.triggerTrackingLoss(0.45);
     if (cadreurEvents.playerDamage > 0 && vitals.damage(cadreurEvents.playerDamage)) triggerGameOver("health");
     if (cadreurEvents.playerDamage > 0) damagedThisLevel = true;
+    musicThreat = cadreurEvents.watched || cadreurEvents.playerDamage > 0 ? 1 : Math.max(0, musicThreat - deltaSeconds * 0.25);
     if (cadreurEvents.sighted) vitals.addMadness(10);
     if (cadreurEvents.watched) vitals.addMadness(deltaSeconds * 4);
     const patchEvents = corruptionPatch.update(deltaSeconds, head, camera, levelManager.depth, elapsedSeconds);
@@ -1392,6 +1400,7 @@ renderer.setAnimationLoop((timestamp) => {
   endSequence.update(deltaSeconds);
   vhsOverlay.update(elapsedSeconds, corruption.value, deltaSeconds);
   tapePlayer.update(deltaSeconds);
+  musicPlayer.update(deltaSeconds, menuLimbo || gameOver ? 0 : musicThreat);
   updateLoreObjects(deltaSeconds);
   hud.update(deltaSeconds);
   noticeModal.update(deltaSeconds);
