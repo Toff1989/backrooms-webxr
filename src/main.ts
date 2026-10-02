@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import { VRButton } from "three/addons/webxr/VRButton.js";
 import { AmbientHum } from "./assets/audio/ambientHum";
-import { getLanguage, onLanguageChange, setLanguage, t, type Language, type TranslationKey } from "./i18n";
+import { applyStoredLanguage, getLanguage, onLanguageChange, setLanguage, t, type Language, type TranslationKey } from "./i18n";
 import { runWarmupStep } from "./assets/audio/synth";
 import { DEBUG_ENABLED, installDebugLog, isDebugMenuEnabled, log } from "./debug/debugLog";
 import { PhysicsWorld, RAPIER } from "./physics/physicsWorld";
@@ -10,6 +10,7 @@ import { CameraMenu } from "./player/cameraMenu";
 import { CADREUR_TRACK_DRAIN_PER_SECOND, CameraTracker } from "./player/cameraTracker";
 import { ComfortVignette, type VignetteLevel, VIGNETTE_LEVELS } from "./player/comfortVignette";
 import { DIFFICULTIES, getDifficulty, setDifficulty, tuning } from "./player/difficulty";
+import { loadSettings, onSettingsChange, syncSettings } from "./player/settingsStore";
 import { JUMPSCARE_LEVELS, loadJumpscareLevel, loadVignetteLevel, nextLevel, saveJumpscareLevel, saveVignetteLevel, type JumpscareLevel } from "./player/comfortSettings";
 import { EndRunScreen } from "./player/endRunScreen";
 import { EndSequence } from "./player/endSequence";
@@ -58,6 +59,7 @@ import { COLLECTIBLE_KINDS, generateCollectibleLore, getCollectibleRarity, type 
 import { PROP_HALF_EXTENTS, type PropKind } from "./shared/props";
 import { loreFormat, type LoreFormat } from "./shared/lore";
 import { LoreJournal } from "./world/loreJournal";
+import { resetLorePhotos, syncLorePhotos } from "./world/loreArt";
 import { SaveManager, type SaveData } from "./world/saveManager";
 import { configureLoreServices, updateLoreObjects } from "./world/lorePage";
 import { MarkerSurfaces } from "./world/markerSurfaces";
@@ -106,8 +108,11 @@ const loreJournal = new LoreJournal();
 const achievements = new AchievementTracker();
 /** Sauvegarde de la partie en cours (seed, profondeur, inventaire, vitals, position) : locale, synchronisée entre appareils jumelés (voir saveManager.ts). */
 const saveManager = new SaveManager();
+// Réglages (langue, vignette, sursauts, difficulté) : lus avant tout affichage, lecteurs synchrones.
+await loadSettings();
+applyStoredLanguage();
 const localProgressLoaded = Promise.all([loreJournal.load(), achievements.load()]);
-const bootServerSync: Promise<unknown> = localProgressLoaded.then(() => Promise.allSettled([loreJournal.sync(), achievements.sync()]));
+const bootServerSync: Promise<unknown> = localProgressLoaded.then(() => Promise.allSettled([loreJournal.sync(), achievements.sync(), syncSettings(), syncLorePhotos()]));
 let bootSavePromise: Promise<SaveData | null> | null = saveManager.load().catch(() => null);
 
 const physics = await PhysicsWorld.create();
@@ -388,6 +393,7 @@ const settingsMenu = new SettingsMenu(camera, player.body, sfx, {
     saveManager.clear();
     loreJournal.reset();
     achievements.reset();
+    void resetLorePhotos();
     return resetProgress();
   },
   // Ouverts depuis l'inventaire en jeu (aperçu léger, sans figer le joueur), "retour" referme
@@ -1177,6 +1183,12 @@ if (buildLabel) buildLabel.textContent = `build ${__BUILD_ID__}`;
 
 vignetteToggle?.addEventListener("change", () => setVignetteLevel(vignetteToggle.checked ? (comfortVignette.level === "off" ? "normal" : comfortVignette.level) : "off"));
 setVignetteLevel(loadVignetteLevel());
+// Réglages changés depuis un autre appareil (synchro serveur) : appliqués sans les réécrire.
+onSettingsChange(() => {
+  jumpscareLevel = loadJumpscareLevel();
+  comfortVignette.level = loadVignetteLevel();
+  if (vignetteToggle) vignetteToggle.checked = comfortVignette.level !== "off";
+});
 
 window.addEventListener("resize", () => {
   camera.aspect = window.innerWidth / window.innerHeight;
@@ -1244,6 +1256,7 @@ renderer.setAnimationLoop((timestamp) => {
 
   pointer.update();
   inventoryMenu.update(deltaSeconds, hands, (hand) => pointer.frame(hand).target === inventoryMenu);
+  journal.update(deltaSeconds, hands);
   endRunScreen.update(hands);
   settingsMenu.update(deltaSeconds);
   mainMenu.update(deltaSeconds);

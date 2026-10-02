@@ -1,3 +1,5 @@
+import { getSetting, setSetting } from "./settingsStore";
+
 /**
  * Difficulté : multiplicateurs appliqués aux menaces (Cadreur, folie, zones corrompues) et aux
  * ressources (pile, soin). Elle ne touche pas la génération des niveaux (sortie, archives) : la
@@ -29,33 +31,16 @@ const TUNING: Record<Difficulty, DifficultyTuning> = {
   hard: { cadreurSpeed: 1.08, cadreurDamage: 1.1, madnessGain: 1.15, hazardDamage: 1.15, batteryLife: 0.85, batteryRecharge: 0.8, heal: 0.8 },
 };
 
-const KEY = "backrooms-vr:difficulty";
-
-function load(): Difficulty {
-  try {
-    const stored = localStorage.getItem(KEY);
-    if ((DIFFICULTIES as readonly string[]).includes(stored ?? "")) return stored as Difficulty;
-  } catch {
-    // Stockage indisponible : difficulté normale.
-  }
-  return "normal";
-}
-
-let current: Difficulty = load();
-
+/** Mémorisée avec les autres réglages (IndexedDB + serveur, voir `settingsStore.ts`). */
 export function getDifficulty(): Difficulty {
-  return current;
+  const stored = getSetting("difficulty");
+  return (DIFFICULTIES as readonly string[]).includes(stored ?? "") ? (stored as Difficulty) : "normal";
 }
 
 export function setDifficulty(difficulty: Difficulty): void {
-  current = difficulty;
-  try {
-    localStorage.setItem(KEY, difficulty);
-  } catch {
-    // Valable pour cette session seulement.
-  }
+  setSetting("difficulty", difficulty);
 }
 
 export function tuning(): DifficultyTuning {
-  return TUNING[current];
+  return TUNING[getDifficulty()];
 }

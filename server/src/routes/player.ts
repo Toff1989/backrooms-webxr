@@ -3,6 +3,7 @@ import { LORE_FRAGMENT_COUNT } from "../../../src/shared/lore.js";
 import { mergeAchievements, resetAchievements, syncAchievements } from "../achievements.js";
 import { completePairing, pendingPairing, pollPairing, startPairing } from "../pairing.js";
 import { deleteSave, mergeSaves } from "../saves.js";
+import { deletePhotos, mergeSettingsAndPhotos } from "../settings.js";
 import { authenticate, bestRuns, findPlayerByRecoveryCode, issueDevice, loreCount, mergePlayers, normalizeRecoveryCode, raiseLoreCount, registerPlayer, resetLore, setPseudo } from "../players.js";
 import { sanitizePseudo } from "../wordFilter.js";
 
@@ -99,6 +100,7 @@ export function registerPlayerRoutes(app: FastifyInstance): void {
     if (current) {
       mergePlayers(current.id, target.id);
       mergeSaves(current.id, target.id);
+      mergeSettingsAndPhotos(current.id, target.id);
       mergeAchievements(current.id, target.id);
     }
     return issueDevice(target);
@@ -128,6 +130,7 @@ export function registerPlayerRoutes(app: FastifyInstance): void {
     if (pending.fromPlayerId) {
       mergePlayers(pending.fromPlayerId, player.id);
       mergeSaves(pending.fromPlayerId, player.id);
+      mergeSettingsAndPhotos(pending.fromPlayerId, player.id);
       mergeAchievements(pending.fromPlayerId, player.id);
     }
     completePairing(code, issueDevice(player));
@@ -159,6 +162,7 @@ export function registerPlayerRoutes(app: FastifyInstance): void {
     if (!player) return reply.code(401).send({ error: "appareil inconnu" });
     resetLore(player.id);
     deleteSave(player.id);
+    deletePhotos(player.id);
     resetAchievements(player.id);
     return { ok: true };
   });

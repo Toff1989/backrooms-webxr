@@ -301,6 +301,8 @@ function settingsGroup(): Group {
         recalibrateHeight() {},
         vignetteLevel: () => state.vignette,
         cycleVignette: () => state.vignette,
+        difficulty: () => "normal" as const,
+        cycleDifficulty: () => "normal" as const,
         jumpscareLevel: () => state.jumpscare,
         cycleJumpscare: () => state.jumpscare,
         currentPseudo: () => state.pseudo,

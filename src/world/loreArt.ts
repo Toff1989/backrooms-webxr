@@ -1,6 +1,7 @@
-import { get, set } from "idb-keyval";
+import { del, get, set } from "idb-keyval";
 import { loreFragment, t } from "../i18n";
 import { LORE_FRAGMENT_COUNT, LORE_FRAGMENTS, loreFormat } from "../shared/lore";
+import { apiCall, ensureIdentity, onIdentityChange } from "./playerIdentity";
 
 /**
  * Dessin des archives perdues sur canvas, commun aux objets du monde (feuille, polaroid) et au
@@ -375,6 +376,15 @@ const photos = new Map<number, CanvasImageSource>();
 const photoRequests = new Set<number>();
 const photoListeners = new Set<() => void>();
 
+function showPhoto(fragment: number, dataUrl: string): void {
+  const image = new Image();
+  image.onload = () => {
+    photos.set(fragment, image);
+    for (const listener of photoListeners) listener();
+  };
+  image.src = dataUrl;
+}
+
 export function onLorePhotoChange(listener: () => void): void {
   photoListeners.add(listener);
 }
@@ -387,13 +397,7 @@ export function getLorePhoto(fragment: number): CanvasImageSource | null {
     photoRequests.add(fragment);
     get<string>(PHOTO_KEY(fragment))
       .then((dataUrl) => {
-        if (!dataUrl || photos.has(fragment)) return;
-        const image = new Image();
-        image.onload = () => {
-          photos.set(fragment, image);
-          for (const listener of photoListeners) listener();
-        };
-        image.src = dataUrl;
+        if (dataUrl && !photos.has(fragment)) showPhoto(fragment, dataUrl);
       })
       .catch(() => {});
   }
@@ -404,6 +408,59 @@ export function getLorePhoto(fragment: number): CanvasImageSource | null {
 export function saveLorePhoto(fragment: number, canvas: HTMLCanvasElement): void {
   photos.set(fragment, canvas);
   photoRequests.add(fragment);
-  void set(PHOTO_KEY(fragment), canvas.toDataURL("image/jpeg", 0.82)).catch(() => {});
+  const dataUrl = canvas.toDataURL("image/jpeg", 0.82);
+  void set(PHOTO_KEY(fragment), dataUrl).catch(() => {});
+  void pushPhoto(fragment, dataUrl);
   for (const listener of photoListeners) listener();
 }
+
+async function pushPhoto(fragment: number, image: string): Promise<void> {
+  if (!(await ensureIdentity())) return;
+  await apiCall("POST", `/photos/${fragment}`, { image, updatedAt: Date.now() }).catch(() => {});
+}
+
+let photoSync: Promise<void> | null = null;
+
+/**
+ * Photos des polaroïds, synchronisées avec le serveur : celles qu'on n'a pas encore sont reprises,
+ * celles que le serveur n'a pas lui sont envoyées. Une photo présente des deux côtés n'est pas
+ * échangée (c'est la même scène développée, voir `saveLorePhoto`).
+ */
+export function syncLorePhotos(): Promise<void> {
+  photoSync ??= (async () => {
+    if (!(await ensureIdentity())) return;
+    let remote: Array<{ fragment: number; image: string }>;
+    try {
+      remote = (await apiCall<{ photos: Array<{ fragment: number; image: string }> }>("GET", "/photos")).photos;
+    } catch {
+      return;
+    }
+    const remoteFragments = new Set(remote.map((photo) => photo.fragment));
+    for (const { fragment, image } of remote) {
+      if (await get<string>(PHOTO_KEY(fragment)).catch(() => undefined)) continue;
+      await set(PHOTO_KEY(fragment), image).catch(() => {});
+      if (!photos.has(fragment)) showPhoto(fragment, image);
+    }
+    for (let fragment = 0; fragment < LORE_FRAGMENT_COUNT; fragment++) {
+      if (remoteFragments.has(fragment)) continue;
+      const local = await get<string>(PHOTO_KEY(fragment)).catch(() => undefined);
+      if (local) await pushPhoto(fragment, local);
+    }
+  })().finally(() => {
+    photoSync = null;
+  });
+  return photoSync;
+}
+
+/** Recommencer à zéro : les photos développées vont avec les archives (le serveur les efface aussi). */
+export async function resetLorePhotos(): Promise<void> {
+  photos.clear();
+  photoRequests.clear();
+  for (let fragment = 0; fragment < LORE_FRAGMENT_COUNT; fragment++) await del(PHOTO_KEY(fragment)).catch(() => {});
+  for (const listener of photoListeners) listener();
+}
+
+// Jumelage ou restauration par code : les photos du joueur retrouvé arrivent ici.
+onIdentityChange((identity) => {
+  if (identity) void syncLorePhotos();
+});

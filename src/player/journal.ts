@@ -1,9 +1,12 @@
 import * as THREE from "three";
 import { log } from "../debug/debugLog";
-import { loreFragment, onLanguageChange, t } from "../i18n";
+import { onLanguageChange, t } from "../i18n";
+import { getModelShape } from "../physics/modelShape";
 import { LORE_FRAGMENT_COUNT, loreFormat, type LoreFormat } from "../shared/lore";
-import { drawButton, drawPanelBackground, inRect, UiPanel, wrapText, type PressButton, type Rect } from "../ui/uiPanel";
-import { playLoreTape } from "../world/lorePage";
+import { drawButton, drawPanelBackground, inRect, UiPanel, type PressButton, type Rect } from "../ui/uiPanel";
+import { onLorePhotoChange } from "../world/loreArt";
+import { createLoreObject, playLoreTape, type LoreObject } from "../world/lorePage";
+import { applyVhsEffect } from "../world/vhsMaterial";
 import type { LoreJournal } from "../world/loreJournal";
 import type { Hand } from "./hand";
 import type { Sfx } from "./sfx";
@@ -25,6 +28,29 @@ const PLAY_BUTTON: Rect = { x: CANVAS_W - 30 - 488 + 30, y: 30 + 570 - 84, w: 25
 
 const FLOAT_DISTANCE = 0.55;
 
+/** Vitrine de l'archive sur la page de droite : centre (px du panneau), taille (m) et avancée devant le panneau. */
+const DISPLAY_CENTER = { x: RIGHT_PAGE.x + RIGHT_PAGE.w / 2, y: 300 };
+const DISPLAY_SIZE = 0.14;
+const DISPLAY_DEPTH = 0.05;
+/** Main tendue vers l'objet (sans viser) + grip : on le prend aussi directement. */
+const REACH_RADIUS = 0.1;
+const HINT_Y = 498;
+/** Vitesse de rattrapage (position, rotation, taille) : l'objet vole vers la main, puis revient dans sa vitrine. */
+const FOLLOW_LAMBDA = 16;
+
+/** Face vers le lecteur, haut du contenu vers le haut (le recto des objets est +Y, son haut -Z). */
+const FACE_FORWARD = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), Math.PI / 2);
+const AXIS_Y = new THREE.Vector3(0, 1, 0);
+
+/** Archive exposée dans la vitrine : l'objet ramassé, que la main peut saisir puis qui y revient toujours. */
+interface Display {
+  fragment: number;
+  object: LoreObject;
+  pivot: THREE.Group;
+  restScale: number;
+  materials: THREE.Material[];
+}
+
 
 /**
  * Journal des archives perdues : un carnet qu'on ouvre depuis le menu d'inventaire (bouton
@@ -39,6 +65,15 @@ export class Journal extends UiPanel {
   private readonly hovered = new Map<Hand, string | null>();
   private hitRects: Array<{ id: string; rect: Rect }> = [];
   private hasInitialPlacement = false;
+  private display: Display | null = null;
+  private displayToken = 0;
+  private heldBy: Hand | null = null;
+  private heldOffset = new THREE.Quaternion();
+  private time = 0;
+  private readonly displayLight = new THREE.PointLight(0xffe6bd, 0.9, 0.9, 2);
+  private readonly scratchPosition = new THREE.Vector3();
+  private readonly scratchQuaternion = new THREE.Quaternion();
+  private readonly scratchGroupQuaternion = new THREE.Quaternion();
 
   constructor(
     private readonly camera: THREE.Camera,
@@ -49,7 +84,20 @@ export class Journal extends UiPanel {
     super(WIDTH, HEIGHT, PX_PER_M);
     this.group.name = "journal";
     onLanguageChange(() => this.invalidate());
-    lore.onChange(() => this.invalidate());
+    lore.onChange(() => {
+      this.invalidate();
+      this.refreshDisplay();
+    });
+    onLorePhotoChange(() => {
+      if (loreFormat(this.display?.fragment ?? 0) === "polaroid") this.refreshDisplay(true);
+    });
+    this.displayLight.position.set(...this.displayPoint(0.12));
+    this.group.add(this.displayLight);
+  }
+
+  /** Point de la vitrine dans le repère du panneau (m). */
+  private displayPoint(depth: number): [number, number, number] {
+    return [(DISPLAY_CENTER.x / CANVAS_W - 0.5) * WIDTH, HEIGHT / 2 - (DISPLAY_CENTER.y / CANVAS_H) * HEIGHT, depth];
   }
 
   /** Depuis le menu : le journal flotte devant le joueur. */
@@ -69,6 +117,7 @@ export class Journal extends UiPanel {
 
   close(): void {
     if (!this.visible) return;
+    this.heldBy = null;
     this.group.visible = false;
     this.sfx.play("click", 0.25);
   }
@@ -78,6 +127,7 @@ export class Journal extends UiPanel {
     this.group.visible = true;
     // Ouvert sur la dernière archive lue (la plus récente), sinon sur la première à trouver.
     this.selected = Math.max(0, Math.min(this.lore.count, LORE_FRAGMENT_COUNT) - 1);
+    this.refreshDisplay();
     this.sfx.play("take", 0.35);
     this.invalidate();
     void this.lore.sync();
@@ -91,7 +141,12 @@ export class Journal extends UiPanel {
     this.invalidate();
   }
 
-  onPress(_hand: Hand, px: number, py: number, button: PressButton): boolean {
+  onPress(hand: Hand, px: number, py: number, button: PressButton): boolean {
+    if (button === "grip") {
+      // Grip sur la vitrine : l'objet vient dans la main.
+      if (this.display && inRect(RIGHT_PAGE, px, py) && py < HINT_Y + 10) this.grab(hand);
+      return true;
+    }
     if (button !== "trigger") return true;
     const id = this.hitAt(px, py);
     if (!id) return true;
@@ -99,6 +154,128 @@ export class Journal extends UiPanel {
     this.activate(id);
     this.invalidate();
     return true;
+  }
+
+  /**
+   * Met en vitrine l'objet de l'archive choisie (feuille, polaroïd, cassette), à la manière d'une
+   * case d'inventaire. Sans effet si c'est déjà lui ; `force` le recrée (photo qui vient d'arriver).
+   */
+  private refreshDisplay(force = false): void {
+    const known = Math.min(this.lore.count, LORE_FRAGMENT_COUNT);
+    const wanted = this.visible && this.selected < known ? this.selected : null;
+    if (!force && (this.display?.fragment ?? null) === wanted) return;
+    const token = ++this.displayToken;
+    this.clearDisplay();
+    if (wanted === null) return;
+    createLoreObject(wanted)
+      .then((object) => {
+        if (token !== this.displayToken) object.dispose();
+        else this.mountDisplay(wanted, object);
+      })
+      .catch(() => {});
+  }
+
+  private clearDisplay(): void {
+    const display = this.display;
+    if (!display) return;
+    this.heldBy = null;
+    this.display = null;
+    display.pivot.removeFromParent();
+    for (const material of display.materials) material.dispose();
+    display.object.dispose();
+  }
+
+  private mountDisplay(fragment: number, object: LoreObject): void {
+    const shape = getModelShape(object.template);
+    const size = shape.box.getSize(new THREE.Vector3());
+    const center = shape.box.getCenter(new THREE.Vector3());
+    const materials: THREE.Material[] = [];
+    // Même traitement que les miniatures de l'inventaire : lisible quelle que soit la lumière de la zone.
+    object.model.traverse((child) => {
+      if (!(child instanceof THREE.Mesh)) return;
+      const source = Array.isArray(child.material) ? child.material : [child.material];
+      const clones = source.map((material: THREE.Material) => {
+        const clone = material.clone();
+        if (clone instanceof THREE.MeshStandardMaterial) {
+          clone.emissiveIntensity = Math.max(clone.emissiveIntensity, 0.08);
+          applyVhsEffect(clone, { zoneLighting: false });
+        }
+        materials.push(clone);
+        return clone;
+      });
+      child.material = Array.isArray(child.material) ? clones : clones[0]!;
+    });
+    object.model.position.copy(center).negate();
+    const pivot = new THREE.Group();
+    pivot.add(object.model);
+    const restScale = DISPLAY_SIZE / Math.max(size.x, size.y, size.z, 0.01);
+    pivot.position.set(...this.displayPoint(DISPLAY_DEPTH));
+    pivot.scale.setScalar(restScale);
+    pivot.quaternion.copy(FACE_FORWARD);
+    this.group.add(pivot);
+    this.display = { fragment, object, pivot, restScale, materials };
+  }
+
+  /** Saisie de l'objet de la vitrine : il vient dans la main (sans physique : il ne peut jamais tomber). */
+  private grab(hand: Hand): void {
+    const display = this.display;
+    if (!display || this.heldBy || hand.holding || !hand.tracked) return;
+    this.group.updateWorldMatrix(true, false);
+    this.group.getWorldQuaternion(this.scratchGroupQuaternion);
+    this.scratchQuaternion.copy(this.scratchGroupQuaternion).multiply(display.pivot.quaternion);
+    this.heldOffset.copy(hand.quaternion).invert().multiply(this.scratchQuaternion);
+    this.heldBy = hand;
+    hand.pulse(0.35, 30);
+    this.sfx.play("grab", 0.35);
+    log("journal", { action: "grab", fragment: display.fragment });
+    if (loreFormat(display.fragment) === "audio") playLoreTape(display.fragment);
+  }
+
+  /**
+   * Chaque frame : l'objet balance doucement dans sa vitrine ; saisi, il suit la main à taille réelle
+   * (pour le lire, le retourner) ; lâché — ou main perdue — il revient toujours dans sa vitrine.
+   */
+  update(deltaSeconds: number, hands: Hand[]): void {
+    this.time += deltaSeconds;
+    const display = this.display;
+    if (!this.visible || !display) return;
+    this.group.updateWorldMatrix(true, false);
+    const pivot = display.pivot;
+
+    if (!this.heldBy) {
+      pivot.getWorldPosition(this.scratchPosition);
+      for (const hand of hands) {
+        if (!hand.tracked || hand.holding || !hand.input.squeeze.justPressed) continue;
+        if (this.scratchPosition.distanceTo(hand.palm) < REACH_RADIUS) {
+          this.grab(hand);
+          break;
+        }
+      }
+    }
+    const held = this.heldBy;
+    if (held && (!held.tracked || !held.input.squeeze.pressed)) {
+      this.heldBy = null;
+      this.sfx.play("click", 0.2);
+    }
+
+    const blend = 1 - Math.exp(-FOLLOW_LAMBDA * deltaSeconds);
+    if (this.heldBy) {
+      this.group.getWorldQuaternion(this.scratchGroupQuaternion);
+      this.scratchQuaternion.copy(this.heldBy.quaternion).multiply(this.heldOffset);
+      this.scratchPosition.copy(this.heldBy.palm);
+      this.group.worldToLocal(this.scratchPosition);
+      this.scratchQuaternion.premultiply(this.scratchGroupQuaternion.invert());
+      pivot.position.lerp(this.scratchPosition, blend);
+      pivot.quaternion.slerp(this.scratchQuaternion, blend);
+      pivot.scale.setScalar(THREE.MathUtils.lerp(pivot.scale.x, 1, blend));
+    } else {
+      const sway = Math.sin(this.time * 0.9) * 0.5;
+      this.scratchQuaternion.setFromAxisAngle(AXIS_Y, sway).multiply(FACE_FORWARD);
+      this.scratchPosition.set(...this.displayPoint(DISPLAY_DEPTH));
+      pivot.position.lerp(this.scratchPosition, blend);
+      pivot.quaternion.slerp(this.scratchQuaternion, blend);
+      pivot.scale.setScalar(THREE.MathUtils.lerp(pivot.scale.x, display.restScale, blend));
+    }
   }
 
   private hitAt(px: number, py: number): string | null {
@@ -112,6 +289,7 @@ export class Journal extends UiPanel {
     }
     if (id.startsWith("tape:")) {
       this.selected = Number(id.slice(5));
+      this.refreshDisplay();
       return;
     }
     if (id === "audio:play") {
@@ -193,7 +371,7 @@ export class Journal extends UiPanel {
 
     if (this.selected < count) {
       this.heading(ctx, RIGHT_PAGE, t("lore.title", { n: this.selected + 1 }));
-      this.note(ctx, RIGHT_PAGE, loreFragment(this.selected) ?? "", 100, "#d8cfb6", 22);
+      // L'archive elle-même est l'objet en vitrine (voir `mountDisplay`) : rien à écrire ici.
       if (loreFormat(this.selected) === "audio") {
         drawButton(ctx, PLAY_BUTTON, t("audio.play"), { hovered: hovered.has("audio:play"), accent: "#e8a44a" });
         this.hitRects.push({ id: "audio:play", rect: PLAY_BUTTON });
@@ -205,12 +383,5 @@ export class Journal extends UiPanel {
       ctx.textAlign = "left";
       ctx.fillText(t("journal.empty"), RIGHT_PAGE.x + 34, RIGHT_PAGE.y + 110);
     }
-  }
-
-  private note(ctx: CanvasRenderingContext2D, page: Rect, text: string, y: number, color = "#a79d86", size = 21): void {
-    ctx.fillStyle = color;
-    ctx.font = `${size}px monospace`;
-    ctx.textAlign = "left";
-    wrapText(ctx, text, page.x + 34, page.y + y, page.w - 68, Math.round(size * 1.3), 12);
   }
 }

@@ -1,4 +1,5 @@
 import { LORE_FRAGMENT_COUNT } from "../shared/lore";
+import { getSetting, onSettingsChange, setSetting } from "../player/settingsStore";
 import en from "./en.json";
 import fr from "./fr.json";
 
@@ -12,20 +13,29 @@ type Dictionary = typeof fr;
 export type TranslationKey = { [K in keyof Dictionary]: Dictionary[K] extends string ? K : never }[keyof Dictionary];
 
 const DICTIONARIES: Record<Language, Dictionary> = { fr, en };
-const STORAGE_KEY = "backrooms-vr:lang";
 const listeners = new Set<() => void>();
 
+/** Langue mémorisée (IndexedDB, voir `settingsStore.ts`), sinon celle du navigateur. */
 function detectLanguage(): Language {
-  try {
-    const stored = localStorage.getItem(STORAGE_KEY);
-    if (stored === "fr" || stored === "en") return stored;
-  } catch {
-    // Stockage indisponible (navigation privée) : langue du navigateur.
-  }
+  const stored = getSetting("lang");
+  if (stored === "fr" || stored === "en") return stored;
   return typeof navigator !== "undefined" && navigator.language.toLowerCase().startsWith("fr") ? "fr" : "en";
 }
 
 let current: Language = typeof window === "undefined" ? "fr" : detectLanguage();
+
+/**
+ * Les réglages se chargent après l'évaluation de ce module (IndexedDB est asynchrone) : à appeler
+ * une fois `loadSettings()` terminé, et automatiquement quand le serveur apporte une autre langue.
+ */
+export function applyStoredLanguage(): void {
+  const language = detectLanguage();
+  if (language === current) return;
+  current = language;
+  document.documentElement.lang = language;
+  for (const listener of listeners) listener();
+}
+onSettingsChange(applyStoredLanguage);
 
 export function getLanguage(): Language {
   return current;
@@ -34,11 +44,7 @@ export function getLanguage(): Language {
 export function setLanguage(language: Language): void {
   if (language === current) return;
   current = language;
-  try {
-    localStorage.setItem(STORAGE_KEY, language);
-  } catch {
-    // Pas grave : la langue ne sera simplement pas mémorisée.
-  }
+  setSetting("lang", language);
   document.documentElement.lang = language;
   for (const listener of listeners) listener();
 }
