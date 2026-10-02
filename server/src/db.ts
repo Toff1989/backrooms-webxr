@@ -63,6 +63,15 @@ const leaderboardStmt = db.prepare<{ limit: number }, { pseudo: string; depth: n
   `SELECT pseudo, depth, ended_at FROM runs WHERE status = 'ended' AND pseudo IS NOT NULL ORDER BY depth DESC, ended_at ASC LIMIT @limit`,
 );
 
+const deleteRunLevelsStmt = db.prepare<{ playerId: string }>(`DELETE FROM levels WHERE run_id IN (SELECT id FROM runs WHERE player_id = @playerId)`);
+const deleteRunsStmt = db.prepare<{ playerId: string }>(`DELETE FROM runs WHERE player_id = @playerId`);
+
+/** Efface l'historique des parties de ce joueur (et donc ses entrées au classement) : jamais celles des autres. */
+export const deletePlayerRuns = db.transaction((playerId: string): void => {
+  deleteRunLevelsStmt.run({ playerId });
+  deleteRunsStmt.run({ playerId });
+});
+
 export function createRun(playerId: string, seed: string): RunRow {
   const id = randomUUID();
   const startedAt = Date.now();

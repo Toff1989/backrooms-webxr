@@ -17,7 +17,7 @@ const DISTANCE = 0.7;
 
 type ListButtonId = "lang" | "vignette" | "jumpscare" | "difficulty" | "audio" | "height" | "pseudo" | "debug" | "reset" | "back";
 type PseudoButtonId = "adjective" | "noun" | "confirm" | "cancel";
-type ResetButtonId = "confirm" | "cancel";
+type ResetButtonId = "confirm" | "all" | "cancel";
 type CodeButtonId = "cancel" | `key:${string}`;
 type AudioButtonId = "audioBack" | `${VolumeChannel}:${"down" | "up" | "bar"}`;
 type ButtonId = ListButtonId | PseudoButtonId | ResetButtonId | CodeButtonId | AudioButtonId;
@@ -56,8 +56,9 @@ const PSEUDO_BUTTONS: Record<PseudoButtonId, Rect> = {
 };
 
 const RESET_BUTTONS: Record<ResetButtonId, Rect> = {
-  confirm: { x: 100, y: 420, w: 600, h: 76 },
-  cancel: { x: 100, y: 520, w: 600, h: 68 },
+  confirm: { x: 100, y: 380, w: 600, h: 76 },
+  all: { x: 100, y: 470, w: 600, h: 76 },
+  cancel: { x: 100, y: 580, w: 600, h: 68 },
 };
 
 /** Pavé numérique de saisie du code debug : 3 colonnes × 4 lignes (⌫ 0 OK en bas). */
@@ -87,7 +88,7 @@ export interface SettingsMenuActions {
    * l'identité/le pseudo/le code de cassette. Renvoie faux si le serveur était injoignable
    * (l'état local est quand même remis à zéro par l'appelant, voir main.ts).
    */
-  resetProgress(): Promise<boolean>;
+  resetProgress(includeScores: boolean): Promise<boolean>;
   /** Retour à l'écran qui a ouvert les paramètres (toujours le menu principal, voir mainMenu.ts). */
   back(): void;
 }
@@ -299,7 +300,7 @@ export class SettingsMenu extends UiPanel {
     }
     this.mode = "list";
     this.actions
-      .resetProgress()
+      .resetProgress(id === "all")
       .then((ok) => this.showStatus(ok ? t("settings.resetDone") : t("settings.resetOffline")))
       .catch(() => this.showStatus(t("settings.resetOffline")));
   }
@@ -416,6 +417,7 @@ export class SettingsMenu extends UiPanel {
       wrapText(ctx, t("settings.resetWarning"), 60, 230, width - 120, 30, 4);
       ctx.textAlign = "center";
       drawButton(ctx, RESET_BUTTONS.confirm, t("settings.resetConfirm"), { hovered: hovered.has("confirm"), accent: "#e06a5a" });
+      drawButton(ctx, RESET_BUTTONS.all, t("settings.resetAll"), { hovered: hovered.has("all"), accent: "#e06a5a" });
       drawButton(ctx, RESET_BUTTONS.cancel, t("settings.back"), { hovered: hovered.has("cancel") });
       return;
     }

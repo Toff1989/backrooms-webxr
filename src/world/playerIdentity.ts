@@ -152,10 +152,10 @@ export async function syncLoreCount(count: number): Promise<number | null> {
  * code de cassette. Renvoie faux hors ligne (rien à effacer côté serveur dans ce cas ; l'appelant
  * efface quand même son état local, voir `LoreJournal.reset`/`SaveManager.clear`).
  */
-export async function resetProgress(): Promise<boolean> {
+export async function resetProgress(includeScores = false): Promise<boolean> {
   if (!(await ensureIdentity())) return false;
   try {
-    await apiCall("POST", "/player/reset-progress", {});
+    await apiCall("POST", "/player/reset-progress", includeScores ? { scores: true } : {});
     return true;
   } catch {
     return false;

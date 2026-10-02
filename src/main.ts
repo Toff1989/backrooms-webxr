@@ -393,13 +393,13 @@ const settingsMenu = new SettingsMenu(camera, player.body, sfx, {
     }),
   // Efface toujours l'état local (même hors ligne) ; l'appel serveur (archives, sauvegarde,
   // succès) est best-effort, comme le reste de la synchro — voir `resetProgress` dans playerIdentity.ts.
-  resetProgress: async () => {
+  resetProgress: async (includeScores) => {
     pausedRun = null;
     saveManager.clear();
     loreJournal.reset();
     achievements.reset();
     void resetLorePhotos();
-    return resetProgress();
+    return resetProgress(includeScores);
   },
   // Ouverts depuis l'inventaire en jeu (aperçu léger, sans figer le joueur), "retour" referme
   // simplement le panneau ; ouverts depuis le menu principal (niveau 0 fictif, joueur déjà figé),

@@ -2,6 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { LORE_FRAGMENT_COUNT } from "../../../src/shared/lore.js";
 import { mergeAchievements, resetAchievements, syncAchievements } from "../achievements.js";
 import { completePairing, pendingPairing, pollPairing, startPairing } from "../pairing.js";
+import { deletePlayerRuns } from "../db.js";
 import { deleteSave, mergeSaves } from "../saves.js";
 import { deletePhotos, mergeSettingsAndPhotos } from "../settings.js";
 import { authenticate, bestRuns, findPlayerByRecoveryCode, issueDevice, loreCount, mergePlayers, normalizeRecoveryCode, raiseLoreCount, registerPlayer, resetLore, setPseudo } from "../players.js";
@@ -155,15 +156,17 @@ export function registerPlayerRoutes(app: FastifyInstance): void {
    * Réinitialisation complète de la progression (paramètres, "recommencer à zéro") : efface les
    * archives lues, la sauvegarde en cours et les succès/statistiques côté serveur — pas
    * l'identité/le pseudo/le code de cassette (compte, pas progression), pas l'historique du
-   * classement (`runs`). Le client efface en plus son état local (voir `resetProgress` côté client).
+   * classement (`runs`), sauf si le client demande `scores: true` (ses propres parties seulement). Le client efface en plus son état local (voir `resetProgress` côté client).
    */
-  app.post("/player/reset-progress", strict(5), async (request, reply) => {
+  app.post<{ Body: { scores?: unknown } }>("/player/reset-progress", strict(5), async (request, reply) => {
     const player = authenticate(request);
     if (!player) return reply.code(401).send({ error: "appareil inconnu" });
     resetLore(player.id);
     deleteSave(player.id);
     deletePhotos(player.id);
     resetAchievements(player.id);
+    // Option "scores compris" : seulement les parties de ce joueur, jamais celles des autres.
+    if (request.body?.scores === true) deletePlayerRuns(player.id);
     return { ok: true };
   });
 
