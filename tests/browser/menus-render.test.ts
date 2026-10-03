@@ -268,12 +268,13 @@ function scoresGroup(): Group {
 
 function settingsGroup(): Group {
   let panel: AnyPanel;
-  const state = { vignette: "normal" as "off" | "soft" | "normal" | "strong", jumpscare: "normal" as "normal" | "reduced" | "off", pseudo: null as string | null };
+  const state = { vignette: "normal" as "off" | "soft" | "normal" | "strong", jumpscare: "normal" as "normal" | "reduced" | "off", vhs: "normal" as "normal" | "reduced" | "off", pseudo: null as string | null };
   const list = (setup?: () => void) => () => {
     panel["mode"] = "list";
     panel["statusUntil"] = 0;
     state.vignette = "normal";
     state.jumpscare = "normal";
+    state.vhs = "normal";
     state.pseudo = "Silencieux-Explorateur-0042";
     setDebugMenuEnabled(false);
     setup?.();
@@ -305,6 +306,8 @@ function settingsGroup(): Group {
         cycleDifficulty: () => "normal" as const,
         jumpscareLevel: () => state.jumpscare,
         cycleJumpscare: () => state.jumpscare,
+        vhsFilterLevel: () => state.vhs,
+        cycleVhsFilter: () => state.vhs,
         currentPseudo: () => state.pseudo,
         setPseudo: async (pseudo: string) => pseudo,
         back() {},
@@ -314,10 +317,14 @@ function settingsGroup(): Group {
       { name: "son", setup: list(() => (panel["mode"] = "audio")) },
       { name: "sans-pseudo", setup: list(() => (state.pseudo = null)) },
       { name: "pseudo-40-caracteres", setup: list(() => (state.pseudo = MAX_PSEUDO)) },
-      { name: "vignette-non", setup: list(() => (state.vignette = "off")) },
-      { name: "vignette-forte", setup: list(() => (state.vignette = "strong")) },
-      { name: "sursauts-attenues", setup: list(() => (state.jumpscare = "reduced")) },
-      { name: "sursauts-aucun", setup: list(() => (state.jumpscare = "off")) },
+      { name: "confort", setup: list(() => (panel["mode"] = "comfort")) },
+      { name: "vhs-attenue", setup: list(() => ((panel["mode"] = "comfort"), (state.vhs = "reduced"))) },
+      { name: "vhs-aucun", setup: list(() => ((panel["mode"] = "comfort"), (state.vhs = "off"))) },
+      { name: "statut-vhs", setup: list(() => ((panel["mode"] = "comfort"), (panel["statusMessage"] = t("settings.vhsFilterStatus", { level: "ATTÉNUÉ" })), (panel["statusUntil"] = 1))) },
+      { name: "vignette-non", setup: list(() => ((panel["mode"] = "comfort"), (state.vignette = "off"))) },
+      { name: "vignette-forte", setup: list(() => ((panel["mode"] = "comfort"), (state.vignette = "strong"))) },
+      { name: "sursauts-attenues", setup: list(() => ((panel["mode"] = "comfort"), (state.jumpscare = "reduced"))) },
+      { name: "sursauts-aucun", setup: list(() => ((panel["mode"] = "comfort"), (state.jumpscare = "off"))) },
       { name: "debug-active", setup: list(() => setDebugMenuEnabled(true)) },
       { name: "statut-langue", setup: status("inv.langStatus") },
       { name: "statut-vignette", setup: status("settings.vignetteStatus", { level: "FORTE" }) },

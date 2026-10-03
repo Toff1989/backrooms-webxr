@@ -5,7 +5,7 @@ import { getLanguage, onLanguageChange, setLanguage, t } from "../i18n";
 import { generatePseudoSuggestion, PSEUDO_ADJECTIVE_COUNT, PSEUDO_NOUN_COUNT } from "../shared/pseudoGenerator";
 import { drawButton, drawPanelBackground, inRect, UiPanel, wrapText, type PressButton, type Rect } from "../ui/uiPanel";
 import type { Difficulty } from "./difficulty";
-import type { JumpscareLevel } from "./comfortSettings";
+import type { JumpscareLevel, VhsFilterLevel } from "./comfortSettings";
 import type { VignetteLevel } from "./comfortVignette";
 import type { Hand } from "./hand";
 import type { Sfx } from "./sfx";
@@ -15,24 +15,32 @@ const HEIGHT = 0.5;
 const PX_PER_M = 1600;
 const DISTANCE = 0.7;
 
-type ListButtonId = "lang" | "vignette" | "jumpscare" | "difficulty" | "audio" | "height" | "pseudo" | "debug" | "reset" | "back";
+type ListButtonId = "lang" | "comfort" | "difficulty" | "audio" | "pseudo" | "debug" | "reset" | "back";
+type ComfortButtonId = "vignette" | "jumpscare" | "vhsFilter" | "height" | "comfortBack";
 type PseudoButtonId = "adjective" | "noun" | "confirm" | "cancel";
 type ResetButtonId = "confirm" | "all" | "cancel";
 type CodeButtonId = "cancel" | `key:${string}`;
 type AudioButtonId = "audioBack" | `${VolumeChannel}:${"down" | "up" | "bar"}`;
-type ButtonId = ListButtonId | PseudoButtonId | ResetButtonId | CodeButtonId | AudioButtonId;
+type ButtonId = ListButtonId | ComfortButtonId | PseudoButtonId | ResetButtonId | CodeButtonId | AudioButtonId;
 
 const LIST_BUTTONS: Record<ListButtonId, Rect> = {
   lang: { x: 100, y: 112, w: 600, h: 50 },
-  vignette: { x: 100, y: 169, w: 600, h: 50 },
-  jumpscare: { x: 100, y: 226, w: 600, h: 50 },
-  difficulty: { x: 100, y: 283, w: 600, h: 50 },
-  audio: { x: 100, y: 340, w: 600, h: 50 },
-  height: { x: 100, y: 397, w: 600, h: 50 },
-  pseudo: { x: 100, y: 454, w: 600, h: 50 },
-  debug: { x: 100, y: 511, w: 600, h: 50 },
-  reset: { x: 100, y: 568, w: 600, h: 50 },
+  comfort: { x: 100, y: 169, w: 600, h: 50 },
+  difficulty: { x: 100, y: 226, w: 600, h: 50 },
+  audio: { x: 100, y: 283, w: 600, h: 50 },
+  pseudo: { x: 100, y: 340, w: 600, h: 50 },
+  debug: { x: 100, y: 397, w: 600, h: 50 },
+  reset: { x: 100, y: 454, w: 600, h: 50 },
   back: { x: 100, y: 646, w: 600, h: 54 },
+};
+
+/** Sous-menu « Confort de jeu » : tout ce qui adoucit l'expérience (vignette, sursauts, filtre VHS, hauteur). */
+const COMFORT_BUTTONS: Record<ComfortButtonId, Rect> = {
+  vignette: { x: 100, y: 130, w: 600, h: 70 },
+  jumpscare: { x: 100, y: 222, w: 600, h: 70 },
+  vhsFilter: { x: 100, y: 314, w: 600, h: 70 },
+  height: { x: 100, y: 406, w: 600, h: 70 },
+  comfortBack: { x: 100, y: 622, w: 600, h: 70 },
 };
 
 /** Réglage du son : une ligne par canal (− barre +), cliquer la barre fixe directement le niveau. */
@@ -79,6 +87,9 @@ export interface SettingsMenuActions {
   jumpscareLevel(): JumpscareLevel;
   /** Passe à l'intensité de sursaut suivante (normale, atténuée, désactivée) et la renvoie. */
   cycleJumpscare(): JumpscareLevel;
+  vhsFilterLevel(): VhsFilterLevel;
+  /** Passe à l'intensité de filtre VHS suivante (normal, atténué, désactivé) et la renvoie. */
+  cycleVhsFilter(): VhsFilterLevel;
   /** Pseudo actuel (null si jamais choisi — pas encore soumis de score). */
   currentPseudo(): string | null;
   /** Choisit/change le pseudo persistant (voir playerIdentity.ts). */
@@ -104,7 +115,7 @@ export class SettingsMenu extends UiPanel {
   private statusMessage = "";
   private statusUntil = 0;
   private time = 0;
-  private mode: "list" | "pseudo" | "resetConfirm" | "debugCode" | "audio" = "list";
+  private mode: "list" | "comfort" | "pseudo" | "resetConfirm" | "debugCode" | "audio" = "list";
   private codeDigits = "";
   private verifying = false;
   private adjectiveIndex = 0;
@@ -166,6 +177,7 @@ export class SettingsMenu extends UiPanel {
     else if (this.mode === "resetConfirm") this.pressResetButton(id as ResetButtonId);
     else if (this.mode === "debugCode") this.pressCodeButton(id as CodeButtonId);
     else if (this.mode === "audio") this.pressAudioButton(id as AudioButtonId, px);
+    else if (this.mode === "comfort") this.pressComfortButton(id as ComfortButtonId);
     else this.pressListButton(id as ListButtonId);
     this.invalidate();
     return true;
@@ -177,21 +189,14 @@ export class SettingsMenu extends UiPanel {
         setLanguage(getLanguage() === "fr" ? "en" : "fr");
         this.showStatus(t("inv.langStatus"));
         break;
-      case "vignette":
-        this.showStatus(t("settings.vignetteStatus", { level: t(`settings.vignette.${this.actions.cycleVignette()}`) }));
-        break;
-      case "jumpscare":
-        this.showStatus(t("settings.jumpscareStatus", { level: t(`settings.jumpscare.${this.actions.cycleJumpscare()}`) }));
+      case "comfort":
+        this.mode = "comfort";
         break;
       case "difficulty":
         this.showStatus(t("settings.difficultyStatus", { level: t(`settings.difficulty.${this.actions.cycleDifficulty()}`) }));
         break;
       case "audio":
         this.mode = "audio";
-        break;
-      case "height":
-        this.actions.recalibrateHeight();
-        this.showStatus(t("inv.heightStatus"));
         break;
       case "pseudo":
         this.adjectiveIndex = Math.floor(Math.random() * PSEUDO_ADJECTIVE_COUNT);
@@ -215,6 +220,27 @@ export class SettingsMenu extends UiPanel {
       case "back":
         this.close();
         this.actions.back();
+        break;
+    }
+  }
+
+  private pressComfortButton(id: ComfortButtonId): void {
+    switch (id) {
+      case "vignette":
+        this.showStatus(t("settings.vignetteStatus", { level: t(`settings.vignette.${this.actions.cycleVignette()}`) }));
+        break;
+      case "jumpscare":
+        this.showStatus(t("settings.jumpscareStatus", { level: t(`settings.jumpscare.${this.actions.cycleJumpscare()}`) }));
+        break;
+      case "vhsFilter":
+        this.showStatus(t("settings.vhsFilterStatus", { level: t(`settings.vhsFilter.${this.actions.cycleVhsFilter()}`) }));
+        break;
+      case "height":
+        this.actions.recalibrateHeight();
+        this.showStatus(t("inv.heightStatus"));
+        break;
+      case "comfortBack":
+        this.mode = "list";
         break;
     }
   }
@@ -327,7 +353,8 @@ export class SettingsMenu extends UiPanel {
       for (const [id, rect] of CODE_KEY_RECTS) if (inRect(rect, px, py)) return id as CodeButtonId;
       return null;
     }
-    const buttons: Record<string, Rect> = this.mode === "pseudo" ? PSEUDO_BUTTONS : this.mode === "resetConfirm" ? RESET_BUTTONS : LIST_BUTTONS;
+    const buttons: Record<string, Rect> =
+      this.mode === "comfort" ? COMFORT_BUTTONS : this.mode === "pseudo" ? PSEUDO_BUTTONS : this.mode === "resetConfirm" ? RESET_BUTTONS : LIST_BUTTONS;
     for (const [id, rect] of Object.entries(buttons)) if (inRect(rect, px, py)) return id as ButtonId;
     return null;
   }
@@ -342,7 +369,7 @@ export class SettingsMenu extends UiPanel {
     ctx.fillStyle = "#ff6b5a";
     ctx.font = "bold 38px monospace";
     ctx.fillText(
-      t(this.mode === "audio" ? "settings.audioTitle" : this.mode === "pseudo" ? "settings.pseudoTitle" : this.mode === "resetConfirm" ? "settings.resetTitle" : this.mode === "debugCode" ? "settings.debugCodeTitle" : "settings.title"),
+      t(this.mode === "audio" ? "settings.audioTitle" : this.mode === "comfort" ? "settings.comfortTitle" : this.mode === "pseudo" ? "settings.pseudoTitle" : this.mode === "resetConfirm" ? "settings.resetTitle" : this.mode === "debugCode" ? "settings.debugCodeTitle" : "settings.title"),
       width / 2,
       90,
     );
@@ -399,6 +426,20 @@ export class SettingsMenu extends UiPanel {
       return;
     }
 
+    if (this.mode === "comfort") {
+      drawButton(ctx, COMFORT_BUTTONS.vignette, t("settings.vignette", { level: t(`settings.vignette.${this.actions.vignetteLevel()}`) }), { hovered: hovered.has("vignette") });
+      drawButton(ctx, COMFORT_BUTTONS.jumpscare, t("settings.jumpscare", { level: t(`settings.jumpscare.${this.actions.jumpscareLevel()}`) }), { hovered: hovered.has("jumpscare") });
+      drawButton(ctx, COMFORT_BUTTONS.vhsFilter, t("settings.vhsFilter", { level: t(`settings.vhsFilter.${this.actions.vhsFilterLevel()}`) }), { hovered: hovered.has("vhsFilter") });
+      drawButton(ctx, COMFORT_BUTTONS.height, t("settings.recalibrate"), { hovered: hovered.has("height") });
+      drawButton(ctx, COMFORT_BUTTONS.comfortBack, t("settings.back"), { hovered: hovered.has("comfortBack") });
+      if (this.statusUntil) {
+        ctx.font = "20px monospace";
+        ctx.fillStyle = "#9fe39f";
+        wrapText(ctx, this.statusMessage, width / 2, 560, width - 100, 24, 2);
+      }
+      return;
+    }
+
     if (this.mode === "pseudo") {
       ctx.font = "bold 36px monospace";
       ctx.fillStyle = "#ffe89a";
@@ -423,11 +464,9 @@ export class SettingsMenu extends UiPanel {
     }
 
     drawButton(ctx, LIST_BUTTONS.lang, t("inv.lang"), { hovered: hovered.has("lang") });
-    drawButton(ctx, LIST_BUTTONS.vignette, t("settings.vignette", { level: t(`settings.vignette.${this.actions.vignetteLevel()}`) }), { hovered: hovered.has("vignette") });
-    drawButton(ctx, LIST_BUTTONS.jumpscare, t("settings.jumpscare", { level: t(`settings.jumpscare.${this.actions.jumpscareLevel()}`) }), { hovered: hovered.has("jumpscare") });
+    drawButton(ctx, LIST_BUTTONS.comfort, t("settings.comfort"), { hovered: hovered.has("comfort") });
     drawButton(ctx, LIST_BUTTONS.difficulty, t("settings.difficulty", { level: t(`settings.difficulty.${this.actions.difficulty()}`) }), { hovered: hovered.has("difficulty") });
     drawButton(ctx, LIST_BUTTONS.audio, t("settings.audio"), { hovered: hovered.has("audio") });
-    drawButton(ctx, LIST_BUTTONS.height, t("inv.height"), { hovered: hovered.has("height") });
     const pseudo = this.actions.currentPseudo();
     drawButton(ctx, LIST_BUTTONS.pseudo, pseudo ? t("settings.pseudo", { pseudo }) : t("settings.pseudoNone"), { hovered: hovered.has("pseudo") });
     drawButton(ctx, LIST_BUTTONS.debug, isDebugMenuEnabled() ? t("settings.debugOn") : t("settings.debugOff"), {

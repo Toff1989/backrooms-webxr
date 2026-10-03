@@ -13,7 +13,20 @@ import { AudioMixer } from "./audio/audioMixer";
 import { MusicPlayer } from "./audio/musicPlayer";
 import { DIFFICULTIES, getDifficulty, setDifficulty, tuning } from "./player/difficulty";
 import { loadSettings, onSettingsChange, syncSettings } from "./player/settingsStore";
-import { JUMPSCARE_LEVELS, loadJumpscareLevel, loadVignetteLevel, nextLevel, saveJumpscareLevel, saveVignetteLevel, type JumpscareLevel } from "./player/comfortSettings";
+import {
+  JUMPSCARE_LEVELS,
+  loadJumpscareLevel,
+  loadVhsFilterLevel,
+  loadVignetteLevel,
+  nextLevel,
+  saveJumpscareLevel,
+  saveVhsFilterLevel,
+  saveVignetteLevel,
+  VHS_FILTER_LEVELS,
+  VHS_FILTER_STRENGTH,
+  type JumpscareLevel,
+  type VhsFilterLevel,
+} from "./player/comfortSettings";
 import { EndRunScreen } from "./player/endRunScreen";
 import { EndSequence } from "./player/endSequence";
 import { Flashlight } from "./player/flashlight";
@@ -70,7 +83,7 @@ import { spawnCollectibleModel } from "./world/collectibleLoader";
 import { spawnProp } from "./world/propLoader";
 import { initMaterials } from "./world/materials";
 import { endRun, reportLevel, startRun, type RunSessionInfo } from "./world/runSession";
-import { setFlashlightBounce, updateVhsTime } from "./world/vhsMaterial";
+import { setFlashlightBounce, setVhsFilterStrength, updateVhsTime } from "./world/vhsMaterial";
 import { Warmup } from "./world/warmup";
 
 installDebugLog();
@@ -213,6 +226,13 @@ levelManager.primeInitialArea();
 /** Vignette de confort (4 niveaux) et intensité des sursauts : réglables dans les options (écran) et dans le menu du casque, mémorisés. */
 const vignetteToggle = document.querySelector<HTMLInputElement>("#vignette-toggle");
 let jumpscareLevel: JumpscareLevel = loadJumpscareLevel();
+let vhsFilterLevel: VhsFilterLevel = loadVhsFilterLevel();
+function applyVhsFilterLevel(level: VhsFilterLevel): void {
+  vhsFilterLevel = level;
+  vhsOverlay.setFilterStrength(VHS_FILTER_STRENGTH[level]);
+  setVhsFilterStrength(VHS_FILTER_STRENGTH[level]);
+}
+applyVhsFilterLevel(vhsFilterLevel);
 function setVignetteLevel(level: VignetteLevel): void {
   comfortVignette.level = level;
   if (vignetteToggle) vignetteToggle.checked = level !== "off";
@@ -381,6 +401,12 @@ const settingsMenu = new SettingsMenu(camera, player.body, sfx, {
     jumpscareLevel = nextLevel(JUMPSCARE_LEVELS, jumpscareLevel);
     saveJumpscareLevel(jumpscareLevel);
     return jumpscareLevel;
+  },
+  vhsFilterLevel: () => vhsFilterLevel,
+  cycleVhsFilter: () => {
+    applyVhsFilterLevel(nextLevel(VHS_FILTER_LEVELS, vhsFilterLevel));
+    saveVhsFilterLevel(vhsFilterLevel);
+    return vhsFilterLevel;
   },
   currentPseudo: () => loreJournal.currentPseudo,
   setPseudo: (pseudo) =>
@@ -1191,6 +1217,7 @@ setVignetteLevel(loadVignetteLevel());
 // Réglages changés depuis un autre appareil (synchro serveur) : appliqués sans les réécrire.
 onSettingsChange(() => {
   jumpscareLevel = loadJumpscareLevel();
+  applyVhsFilterLevel(loadVhsFilterLevel());
   comfortVignette.level = loadVignetteLevel();
   if (vignetteToggle) vignetteToggle.checked = comfortVignette.level !== "off";
 });

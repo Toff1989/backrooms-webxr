@@ -18,6 +18,7 @@ const FRAGMENT_SHADER = /* glsl */ `
   uniform float uSnow;
   uniform float uBlue;
   uniform float uVignette;
+  uniform float uFilter;
   uniform vec3 uFadeColor;
   uniform float uFade;
   uniform sampler2DArray uNoiseMap;
@@ -37,13 +38,13 @@ const FRAGMENT_SHADER = /* glsl */ `
 
   void main() {
     float scanline = sin((vUv.y + uTime * 0.03) * 700.0);
-    scanline = pow(max(scanline, 0.0), 4.0) * 0.10;
+    scanline = pow(max(scanline, 0.0), 4.0) * 0.10 * uFilter;
 
     // Bruit VHS réel (vidéo de grain TV capturée), pas un hash procédural : dérive dans
     // le temps pour ne jamais se figer sur le même motif, s'intensifie avec la corruption.
     vec2 noiseUv = fract(vUv * 1.3 + vec2(uTime * 0.015, uTime * 0.011));
     float noise = vhsNoise(noiseUv);
-    float grain = (noise - 0.5) * (0.35 + uCorruption * 0.45);
+    float grain = (noise - 0.5) * (0.35 + uCorruption * 0.45) * uFilter;
 
     float alpha = clamp(scanline + abs(grain), 0.0, 0.65);
     vec3 color = vec3(0.0);
@@ -74,7 +75,7 @@ const FRAGMENT_SHADER = /* glsl */ `
       vec2 osdUv = (vUv - 0.36) / 0.28;
       float osd = 0.0;
       if (osdUv.x > 0.0 && osdUv.x < 1.0 && osdUv.y > 0.0 && osdUv.y < 1.0) osd = texture2D(uOsd, osdUv).a;
-      float wobble = step(0.97, hash(vec2(floor(vUv.y * 60.0), floor(uTime * 20.0)))) * 0.15;
+      float wobble = step(0.97, hash(vec2(floor(vUv.y * 60.0), floor(uTime * 20.0)))) * 0.15 * uFilter;
       vec3 blue = vec3(0.02, 0.09, 0.62) + wobble;
       color = mix(color, mix(blue, vec3(0.95), osd), uBlue);
       alpha = max(alpha, uBlue);
@@ -109,6 +110,7 @@ export class VhsOverlay {
   private readonly material: THREE.ShaderMaterial;
   private readonly osdCanvas: HTMLCanvasElement;
   private readonly osdTexture: THREE.CanvasTexture;
+  private filter = 1;
   private tracking = 0;
   private snowSeconds = 0;
   /** "off" : écran normal. "hold" : écran bleu tenu indéfiniment (voir `showLoading`/`loadingGate.ts`).
@@ -134,6 +136,7 @@ export class VhsOverlay {
         uSnow: { value: 0 },
         uBlue: { value: 0 },
         uVignette: { value: 0 },
+        uFilter: { value: 1 },
         uFadeColor: { value: new THREE.Color(0, 0, 0) },
         uFade: { value: 0 },
         uNoiseMap: { value: noiseTexture },
@@ -166,14 +169,25 @@ export class VhsOverlay {
     this.material.uniforms["uFade"]!.value = THREE.MathUtils.clamp(amount, 0, 1);
   }
 
+  /**
+   * Force du filtre VHS (option de confort) : 1 plein, 0 aucun effet. À 0, plus de scanlines, de
+   * grain, de bandes de tracking ni de neige (clignotements) ; l'écran bleu de chargement reste.
+   */
+  setFilterStrength(strength: number): void {
+    this.filter = THREE.MathUtils.clamp(strength, 0, 1);
+    this.material.uniforms["uFilter"]!.value = this.filter;
+  }
+
   /** Perte de tracking VHS (0..1), se dissipe d'elle-même. */
   triggerTrackingLoss(strength: number): void {
-    this.tracking = Math.max(this.tracking, Math.min(1, strength));
+    if (this.filter <= 0) return;
+    this.tracking = Math.max(this.tracking, Math.min(1, strength * this.filter));
   }
 
   /** Perte de signal complète (neige plein champ), brève. */
   signalLoss(seconds: number): void {
-    this.snowSeconds = Math.max(this.snowSeconds, seconds);
+    if (this.filter <= 0) return;
+    this.snowSeconds = Math.max(this.snowSeconds, seconds * this.filter);
   }
 
   private drawOsd(lines: string[]): void {
@@ -260,7 +274,9 @@ export class VhsOverlay {
       if (this.blueSeconds <= 0) this.blueMode = "off";
     }
     this.material.uniforms["uBlue"]!.value = blue;
-    this.material.uniforms["uSnow"]!.value = this.snowSeconds > 0 || snowFromBlue ? 1 : 0;
+    // Neige plein écran = clignotement brutal : atténuée proportionnellement, absente à 0 (la coupure
+    // de fin d'écran bleu devient alors un simple retour à l'image).
+    this.material.uniforms["uSnow"]!.value = this.snowSeconds > 0 || snowFromBlue ? this.filter : 0;
     this.material.uniforms["uTime"]!.value = elapsedSeconds;
     this.material.uniforms["uNoiseFrame"]!.value = vhsNoiseFrame(elapsedSeconds);
     this.material.uniforms["uCorruption"]!.value = corruption;
